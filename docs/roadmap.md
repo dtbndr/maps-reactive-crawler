@@ -37,4 +37,6 @@ Status: **provisional; implementation not started**. Use [SDLC priorities](sdlc-
 
 ## Current setup handoff
 
+See the [legacy reactive-crawl research handoff](research/legacy-reactive-crawl.md) for source-checked legacy behavior, its disconnected batch/reactive paths, and first-release design cautions.
+
 This is a scaffold only: no crawler, CLI, SQLite integration, geocoder or Bright Data integration exists yet. Start with Workstream 1. Workstreams and exit criteria are planning artifacts, not evidence of completion or permission for paid calls.
