@@ -32,4 +32,4 @@ The README advertises a free allowance and pay-as-you-go rates, but also says sc
 
 Before implementation, verify the direct API and MCP versions of location inputs and output shapes, coordinate/zoom semantics, record caps and pagination, country formats, lifecycle statuses, snapshot retention, failure and partial-error representation, retries/rate limits and duplicate-paid-request crash windows. Also verify terms, attribution and redistribution rights. Decide cell-center versus place filtering and how missing coordinates, incomplete results and empty versus failed runs affect expansion. No source here establishes exhaustive geographic coverage or a geocoding solution.
 
-**Next milestone:** incorporate these findings into the wider Milestone 1 contract and boundary decisions in [the roadmap](../roadmap.md), then build the fixture-backed offline reactive slice in [the happy path](../happy-path.md).
+**Next milestone:** incorporate these findings into the wider [Milestone 1](../milestones/01-contracts-and-boundaries.md) contract and boundary decisions, then build the fixture-backed offline reactive slice in [the happy path](../happy-path.md).
