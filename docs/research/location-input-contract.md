@@ -119,3 +119,62 @@ Required next evidence actions before contract synthesis or provider selection:
 **Documentation-only GREEN means the comparison and remaining gaps are explicit; it does not mean any provider passed.** No paid/live requests, account creation, publication, integrations, secrets, or real data were used. No provider is selected. Do not proceed to implementation or make a provider-specific contract claim until the blockers above are resolved.
 
 **Decision boundary:** Keep location resolution explicit, require operator confirmation for ambiguous results, and do not default to the US. Any provider selection, workload assumption, or credential model not supported by evidence requires owner approval.
+
+## Slice C: recommendation and location-input handoff
+
+### RED acceptance check before synthesis
+
+The Slice B evidence does not establish a qualifying provider, and the repository previously lacked an actionable contract for either input path. Before synthesis, the following acceptance evidence was missing and therefore failed:
+
+- **Recommendation gate:** a declared expected workload (including independent installations, concurrent calls, retries, and aggregate/shared-egress scope), authoritative permission for that workload, free eligibility, and enforceable limits across all relevant scopes. Geoapify's published free-plan numbers do not resolve the production-use qualifier conflict or rate-limit scope; Nominatim's public-service ceiling does not prove aggregate fit; Photon demo's qualitative “reasonable” limit cannot set a compliant rate.
+- **Direct-coordinate behavior:** accepted coordinate ranges and order, rejection behavior for malformed/non-finite values, explicit display and confirmation, whether geocoding is bypassed, and what country context is required without silently inferring one.
+- **Text-input behavior:** how candidates are shown and confirmed; what happens for ambiguity, no results, provider errors, and mismatch between requested country and candidate country.
+- **Both paths:** provider-specific country representation/validation and any required attribution, plus rights to persist/export the resulting location data. Provider documentation in the Slice B ledger does not settle the latter rights or a CLI/export attribution presentation.
+
+This is a documentation acceptance check, not a claim that production behavior has been tested. No source found in the carry-forward evidence can support the missing provider-specific guarantees; the contract below intentionally separates safe operator behavior from unresolved provider requirements.
+
+### Recommendation and explicit blocker
+
+**No geocoding provider is recommended or eligible on the evidence available.** Do not use Nominatim public, Photon demo/hosted, or Geoapify for this first-release flow based on this research alone. This is an evidence blocker, not a finding that any candidate is categorically prohibited. In particular, a displayed free allowance is not evidence of free eligibility and rate compliance for the project's unknown aggregate workload.
+
+Concrete actions to clear the blocker:
+
+1. The project owner must establish the expected workload and retry/concurrency model, and decide whether each independently operating user supplies their own credentials. Do not design around a shared key or assume an aggregate cap that has not been approved.
+2. For a specific candidate and deployment, obtain current authoritative written confirmation of permission for this intended use, free eligibility at that declared workload, and all applicable per-key/account/IP/application/shared-egress and concurrency limits. For Geoapify, reconcile the Terms production qualifier with the Pricing FAQ and confirm limits' scopes. For a hosted Photon endpoint, identify its operator and terms; for Nominatim public, confirm suitability under its policy rather than treating 1 request/second as an aggregate allowance.
+3. Establish authoritative attribution placement and retention/checkpoint/export rights for queries, coordinates, labels, country and provenance, including relevant source-data rights. Do not infer storage permission from API availability, software license, or a caching requirement.
+4. Recheck current policy, pricing and terms immediately before any later provider decision. Any live probe is a separate proposal requiring explicit approval; it must identify the endpoint/account, request count and rate, possible charge, exact synthetic query, data handling, and stop limits. No probe is authorized by this report.
+
+Alternatives remain: make confirmed coordinates the supported seed path while provider eligibility is unresolved, or defer human-readable resolution until the blocker is cleared. Self-hosting is not presumed free or automatically rights-compliant and is not a recommendation.
+
+### Location-input contract for subsequent design
+
+This is a provider-neutral operator-safety handoff, not an implemented, provider-specific, or runtime-tested contract. It defines only what can be justified without assuming response fields or country behavior from an unselected provider.
+
+**Common rules**
+
+- Require the operator to choose a seed path: confirmed coordinates or text to resolve. Do not silently switch paths, pick a text result, or default country to the United States.
+- Before a crawl starts, show the effective seed location and country context and require an explicit confirmation. A later change invalidates that confirmation and requires reconfirmation.
+- Country is explicit operator input wherever the selected provider requires it. Validate and normalize it only according to that provider's documented country-code or country-name contract; that convention remains unresolved until provider selection. Do not infer a missing country from locale, IP address, coordinates, language, or provider defaults. If country is optional for a future provider, whether to make it mandatory remains an owner decision; this research does not assume optionality.
+- Preserve the distinction between an operator-supplied country context and a provider-reported candidate country. Do not silently rewrite one to match the other.
+
+**Confirmed-coordinate path**
+
+- Accept one latitude/longitude pair in that order. Latitude must be a finite number from -90 through 90 inclusive; longitude must be a finite number from -180 through 180 inclusive. Reject missing components, extra components, malformed numeric text, NaN, infinities, and out-of-range values with an actionable validation error; do not coerce malformed values into coordinates. These are geographic coordinate-domain bounds, not provider-specific guarantees.
+- Display the normalized pair in the documented order and its explicitly supplied country context; ask the operator to confirm before crawl start. Do not reverse-geocode or forward-geocode this path: the coordinates are the seed and geocoding is bypassed.
+- If provider/project requirements need a country for later search, collect and validate that country explicitly even though coordinates were supplied. Coordinates alone do not prove which country the operator intends. This path has no resolved-candidate country to compare, and this contract does not call a reverse-geocoder to manufacture one. If the operator knows the stated country conflicts with the intended point, require correction or explicit resolution before confirmation; if a later authoritative boundary check detects a mismatch, stop and present it for operator resolution rather than silently changing the country. Automated point-in-country validation is unresolved and must not be claimed without an approved source and behavior.
+
+**Human-readable text path**
+
+- Require non-empty operator text and explicit country context; never add an implicit US value. Send country as a provider-supported country filter when documented. If the selected provider supports only a bias, disclose that it is a preference rather than a restriction; do not represent it as a guaranteed country constraint. If neither behavior is documented, the provider is not usable for this contract until its behavior is established.
+- Present provider-returned candidates for operator choice, showing only fields documented by the selected provider and useful to distinguish results (at minimum the returned location label and country when available). Do not invent confidence scores, response shapes, or a uniqueness threshold. Even a single candidate is shown for confirmation; never auto-select.
+- On zero candidates, report no result and let the operator revise input/country or cancel. On multiple candidates, require an explicit choice or revised query; do not rank-and-pick silently. On provider/network/rate-limit errors, show a non-secret actionable failure and permit retry only within verified limits; do not treat failure as no result or start a crawl.
+- Compare the operator's requested country context with the candidate's provider-reported country when both are available. If they differ, stop for an explicit choice to revise country/query or cancel; do not silently accept a cross-country result or rewrite the requested country. If candidate country is absent or cannot be compared under documented provider semantics, disclose that limitation and require explicit confirmation; if the country requirement cannot be met, block the resolution rather than claiming validation.
+- After candidate selection, show the selected label, provider-reported country when available, and requested country context, then obtain explicit confirmation before crawl start. Preserve requested and resolved country as distinct values where both exist. Required attribution display and retained fields remain unresolved pending the provider/rights gate above.
+
+### Handoff, remaining decisions, and GREEN recheck
+
+The downstream CLI/input integration must implement validation, display, confirmation, cancellation and distinct error outcomes; the offline vertical slice must exercise these with synthetic cases before any live integration. Bounded-crawl work should receive exactly one operator-confirmed seed and an explicit country context where required; it must not resolve a seed implicitly or convert geocoding errors into empty crawl results. Persistence/export of provider-derived fields remains blocked pending retention and rights evidence. The contract itself does not establish boundary semantics for the crawl, provider response schema, legal rights, endpoint availability, or runtime behavior.
+
+Remaining owner decisions are the workload model, independent-operator credential model, whether country is mandatory if a future provider does not require it, and approval of any proposed live probe. Evidence actions are listed above; no additional provider was added because existing candidates already demonstrate the material unresolved delivery models and no new evidence source is available in this research-only task.
+
+**Documentation-only GREEN recheck:** The blocker is explicit; no candidate is recommended without proof of free intended use and compliant rates. Both input paths now state ranges/order, invalid-input outcomes where relevant, confirmation, country handling, text candidate/no-result/error/ambiguity outcomes, and mismatch handling without a US default or silent selection. Provider-specific country semantics, attribution presentation, workload eligibility, and storage/export rights remain named blockers rather than unsupported promises. This GREEN is completion of the evidence-based research handoff only; there is no integration test or provider qualification. No live API, paid call, account, publication, integration, secret, or real data was used.
