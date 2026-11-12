@@ -56,7 +56,7 @@ After all slices, run from the repository root:
 
 **`docs/research/bright-data-mcp.md`**
 - [ ] Before research, identify gaps in the current handoff for country, keyword, coordinates, zoom, required formats and outputs; this is the documentation-only equivalent of a failing acceptance check.
-- [ ] Check current primary catalog, scraper and direct API documentation and MCP tool reference; cite exact locations and dates. Compare inputs, output fields and operation mapping; distinguish discovery URLs from place records and detail availability, coordinates and identifiers.
+- [ ] Check current primary catalog, scraper and direct API documentation and MCP tool reference; cite exact locations and dates. Compare inputs, output fields and operation mapping; distinguish discovery URLs from place records and detail availability, coordinates and identifiers. Verify whether the legacy `type=discover_new` and `discover_by=location` trigger parameters remain documented requirements or are legacy artifacts.
 - [ ] State whether detail is documented as necessary, unnecessary, conditional or unknown for the happy path; identify completeness, coverage and expansion implications, without treating absence of documented fields as proof of absence.
 - [ ] Classify facts, inferences and blockers; rerun the acceptance review to verify every gap is resolved or explicitly blocked with evidence and a proposed next step.
 
@@ -76,7 +76,7 @@ Source inventory, discovery contract and unresolved result-shape questions for l
 #### Tasks
 
 **`docs/research/bright-data-mcp.md`**
-- [ ] List missing acceptance evidence for asynchronous trigger, snapshot identifiers, states, polling, retrieval, retention, cancellation, failures and partial results before research.
+- [ ] List missing acceptance evidence for asynchronous trigger, snapshot identifiers, states, polling, retrieval, retention, cancellation, failures and partial results before research. Verify whether the legacy five-minute initial wait and 30-minute polling cap are current provider requirements or implementation choices.
 - [ ] Research limits, pagination, truncation, rate limits, retries, billing units and current published pricing for discovery and detail; include qualifiers and account-specific unknowns.
 - [ ] Trace the submit/acknowledgment crash window and other duplicate-paid-request risks, identifying what documentation does or does not say about idempotency, lookup and billing. Do not select a retry/recovery design.
 - [ ] Distinguish empty, failed, partial and capped results when supported by evidence; mark unknowns that block safe expansion or cost estimates and propose approval-gated probes if useful. Recheck the initial gap list.
