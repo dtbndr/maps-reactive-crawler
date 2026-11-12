@@ -1,7 +1,7 @@
 # Bright Data Contracts Workstream Brief
 
 **Date**: 2026-11-12
-**Status**: Planned
+**Status**: Approved
 
 ## Why
 The first-release crawler depends on provider behavior that is not yet established. This first Milestone 1 workstream will produce a current, source-backed contract handoff for later design and integration work.
