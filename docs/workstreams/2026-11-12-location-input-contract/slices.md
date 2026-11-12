@@ -17,7 +17,7 @@ Produce a current, evidence-backed geocoder evaluation and location-input contra
 
 ## Key files
 - `docs/research/location-input-contract.md`: new durable criteria, comparison and contract handoff.
-- `docs/happy-path.md`, `docs/milestones/01-contracts-and-boundaries.md` and `docs/research/bright-data-mcp.md`: read-only context and provider-required country evidence, not assumed geocoder guarantees.
+- `docs/happy-path.md`, `docs/milestones/01-contracts-and-boundaries.md`, `docs/research/bright-data-mcp.md` and `docs/research/legacy-reactive-crawl.md`: read-only context, provider-required country evidence and legacy Nominatim reference, not assumed geocoder guarantees.
 - `docs/workstreams/2026-11-12-location-input-contract/`: planning artifacts and execution log.
 
 ## Architecture invariant
@@ -77,7 +77,7 @@ Candidate list, workload assumptions and evidence checklist for comparison.
 
 **`docs/research/location-input-contract.md`**
 - [ ] Before research, mark each candidate/criterion lacking evidence as a failing evidence check.
-- [ ] Consult current provider API, usage policy, terms and pricing sources. Compare intended-use permission, free-tier limits and overages, billing/auth requirements, per-user versus aggregate/IP/application throttling, ambiguity and country capabilities, attribution, storage and data rights. Capture exact qualifiers, dates and conflicting sources.
+- [ ] Consult current provider API, usage policy, terms and pricing sources. Compare intended-use permission, free-tier limits and overages, billing/auth requirements, per-user versus aggregate/IP/application throttling, ambiguity and country capabilities, attribution, storage and data rights. Assess persistence of confirmed coordinates, resolved labels, provenance and country in local checkpoints and exported run metadata. Capture exact qualifiers, dates and conflicting sources.
 - [ ] Classify each candidate as supported, disqualified or unresolved against each criterion; distinguish documentation silence from prohibition. State how any rate controls could comply under the explicit workload assumptions without designing an integration.
 - [ ] Recheck every initial gap; attach evidence or an explicit blocker and next evidence action. Do not infer qualification from missing prices or limits.
 
@@ -99,7 +99,7 @@ Evidence-backed candidate comparison and blockers for contract synthesis.
 **`docs/research/location-input-contract.md`**
 - [ ] Before synthesis, list missing evidence for recommendation and direct-coordinate and text-input behavior as the failing acceptance check.
 - [ ] Recommend only a candidate whose intended-use, free-cost and rate-limit eligibility is supported; specify conditions, evidence and alternatives. If none qualifies or required assumptions remain unsupported, state the blocker and next action rather than relaxing constraints.
-- [ ] Document coordinate input ranges, malformed and non-finite rejection, order, display and explicit operator confirmation; direct coordinates bypass geocoding. For text inputs, specify candidate presentation and confirmation, ambiguity, no result and errors; derive country and attribution requirements from evidence or mark them unresolved. Never silently pick a result or default country to US.
+- [ ] Document coordinate input ranges, malformed and non-finite rejection, order, display and explicit operator confirmation; direct coordinates bypass geocoding. For text inputs, specify candidate presentation and confirmation, ambiguity, no result and errors. Specify how provider-required country is supplied and validated for both paths, including text-query country filter or bias versus resolved candidate country and mismatch handling; derive requirements and attribution from evidence or mark them unresolved. Never silently pick a result or default country to US.
 - [ ] Identify impact on downstream integration and bounded-crawl work, remaining decisions and evidence actions. Propose any useful live probe only for separate approval, with scope, potential cost, limits and data safeguards. Recheck every acceptance gap.
 
 #### Watch out
