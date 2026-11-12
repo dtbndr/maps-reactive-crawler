@@ -1,7 +1,7 @@
 # Location Input Contract Workstream Brief
 
 **Date**: 2026-11-12
-**Status**: Approved
+**Status**: Done
 
 ## Why
 The first-release happy path needs a reliable starting coordinate, but the location provider and input contract are not established. This workstream evaluates current evidence before a provider or contract is chosen.
