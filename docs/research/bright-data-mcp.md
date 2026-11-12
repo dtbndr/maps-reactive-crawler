@@ -1,6 +1,6 @@
 # Bright Data MCP: first-release research
 
-**Status:** research handoff, not an integration decision or evidence that Workstream 1 is complete. This reviews Bright Data's public MCP repository at commit [`258f368ecf06556be7a63b2e3c259f94d9349f89`](https://github.com/brightdata/brightdata-mcp/tree/258f368ecf06556be7a63b2e3c259f94d9349f89) and its live scraper catalog, which can change independently. No Bright Data account, MCP session, scraper run, or paid call was used. Catalog descriptions are not a tested runtime contract.
+**Status:** research handoff, not an integration decision or evidence that Milestone 1 is complete. This reviews Bright Data's public MCP repository at commit [`258f368ecf06556be7a63b2e3c259f94d9349f89`](https://github.com/brightdata/brightdata-mcp/tree/258f368ecf06556be7a63b2e3c259f94d9349f89) and its live scraper catalog, which can change independently. No Bright Data account, MCP session, scraper run, or paid call was used. Catalog descriptions are not a tested runtime contract.
 
 ## What is available
 
@@ -32,4 +32,4 @@ The README advertises a free allowance and pay-as-you-go rates, but also says sc
 
 Before implementation, verify the direct API and MCP versions of location inputs and output shapes, coordinate/zoom semantics, record caps and pagination, country formats, lifecycle statuses, snapshot retention, failure and partial-error representation, retries/rate limits and duplicate-paid-request crash windows. Also verify terms, attribution and redistribution rights. Decide cell-center versus place filtering and how missing coordinates, incomplete results and empty versus failed runs affect expansion. No source here establishes exhaustive geographic coverage or a geocoding solution.
 
-**Next milestone:** incorporate these findings into the wider Workstream 1 contract and boundary decisions in [the roadmap](../roadmap.md), then build the fixture-backed offline reactive slice in [the happy path](../happy-path.md).
+**Next milestone:** incorporate these findings into the wider Milestone 1 contract and boundary decisions in [the roadmap](../roadmap.md), then build the fixture-backed offline reactive slice in [the happy path](../happy-path.md).

@@ -43,7 +43,7 @@ Results without `place_id` are skipped in the reactive path. The first reference
 
 ## Decisions for this project's first release
 
-These are **target decisions and handoff points**, not implemented behavior; align implementation with [the happy path](../happy-path.md) and roadmap Workstream 1:
+These are **target decisions and handoff points**, not implemented behavior; align implementation with [the happy path](../happy-path.md) and roadmap Milestone 1:
 
 - Begin with exactly one explicitly selected seed: either latitude/longitude or a human-readable address/location. For text input, resolve it, display the chosen result, and require disambiguation rather than silently accepting an ambiguous match.
 - Require an explicit radius or bounding box, plus independent work limits (such as cells/provider calls and elapsed time). Decide and test whether the geographic limit applies to cell centers, returned place coordinates, or both. Do not claim strict result containment without reliable place coordinates and filtering.
@@ -53,4 +53,4 @@ These are **target decisions and handoff points**, not implemented behavior; ali
 
 ## First-release handoff
 
-Start with Workstream 1 in `docs/roadmap.md`: verify current provider and geocoder contracts, document unresolved boundary and retry decisions, and review data/service terms. Then implement the single-seed, bounded reactive path with synthetic tests and local checkpoints as specified by `docs/happy-path.md`. Keep this legacy research as a cautionary reference: an initial batch route and a separately defined reactive loop are not interchangeable, and geographic fan-out alone does not guarantee exhaustive or bounded coverage.
+Start with Milestone 1 in `docs/roadmap.md`: verify current provider and geocoder contracts, document unresolved boundary and retry decisions, and review data/service terms. Then implement the single-seed, bounded reactive path with synthetic tests and local checkpoints as specified by `docs/happy-path.md`. Keep this legacy research as a cautionary reference: an initial batch route and a separately defined reactive loop are not interchangeable, and geographic fan-out alone does not guarantee exhaustive or bounded coverage.
