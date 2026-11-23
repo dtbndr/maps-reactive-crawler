@@ -50,9 +50,9 @@ Each behavioral slice: establish meaningful failing tests before implementation;
 **Goal**: Establish deterministic, conservative geometry independent of traversal.
 
 #### Tasks
-- [ ] Implement validation, grid identity and projection, radius/bbox preflight and membership, candidate classification per handoff, including conservative floating uncertainty.
+- [ ] Implement validation, grid identity and projection, radius/bbox preflight and membership, and candidate classification per handoff.
 - [ ] Test inclusive edges, high latitude, invalid and nonfinite inputs, seed outside bbox, pole/seam contact, and small areas.
-- [ ] Test inclusive bbox edges, reliable inside/outside radius classification, retention of outside and unverified candidates, high latitude behavior, invalid/pole/seam preflight, small areas, and traversal edges. Use practical finite-number comparisons; no synthetic error intervals.
+- [ ] Test inclusive bbox edges, reliable inside/outside radius classification, retention of outside and unverified candidates, high latitude behavior, invalid/pole/seam preflight, small areas, and traversal edges. Assert that computed haversine distance equal to the configured radius is included and a computed distance just above it is excluded, without an epsilon. Use practical finite-number comparisons; no synthetic error intervals.
 
 #### Watch out
 Use actual submitted coordinates for bbox comparison and computed haversine distance for radius comparison. No longitude wrap, arbitrary epsilon/buffer, or rounding after check; place classification remains distinct from cell eligibility.
