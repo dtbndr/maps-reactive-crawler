@@ -33,7 +33,11 @@ The reactive loop expands geographically to north/south/east/west neighbor cente
 
 Results without `place_id` are skipped in the reactive path. The first reference's company repository uses a Google place ID conflict guard and also checks website duplication; only new companies receive search-result associations. This is database-backed deduplication behavior in that implementation, not a portable provider guarantee. The archived reference similarly requires place IDs in its reactive persistence path. In the inspected reactive expansion code, no explicit radius/bounding-box clipping is evident; do not describe its expansion as geographically bounded. A city bounding box is used for the initial grid, but is not evidence that subsequent neighbors stay within it.
 
-### Queue, identity, and recovery details from source review
+### Reactive grid and recovery details from source review
+
+In the first reference, `project` and `unproject` use Web Mercator world pixels at the chosen zoom; `getNeighboringCells` offsets the current center by nominal 1920-by-1080 viewport dimensions and returns cardinal grid offsets (`backend/src/services/gridCrawler.js:19–57`). These are ordinary floating-point calculations, not certified geographic containment or evidence of the provider's actual search footprint. A nonempty raw result array triggers expansion even when the results do not yield new companies (`:217–286`).
+
+The crawler marks a cell processing before submitting a request, records the returned snapshot separately, and marks the cell completed before inserting neighbors (`backend/src/services/gridCrawler.js:152–177, 260–286`). Consequently, a crash can leave submission uncertainty or completed work without its fan-out; these sequences do not demonstrate restart safety.
 
 The first reference's pending-cell repository selects oldest-created pending cells with a limit (`backend/src/db/repos/grid.js:20–31`); status updates are not conditional on the previous status (`:34–48`). The crawler selects one cell and marks it processing before triggering the provider (`backend/src/services/gridCrawler.js:143–177`). This is sequential orchestration, not an atomic claim, so concurrent workers are not shown to have exclusive ownership. Its unique `(search_query_id, grid_x, grid_y)` index is the database guard against duplicate grid coordinates (`backend/src/db/migrations/1752400000_add_search_grid_cells.sql:4–23`).
 
