@@ -71,3 +71,6 @@ export function neighbors(_geometry: Geometry, column: number, row: number): [nu
   if (!Number.isInteger(column) || !Number.isInteger(row)) throw new Error('Cell identity must use integer indices');
   return [[column,row+1],[column,row-1],[column+1,row],[column-1,row]];
 }
+
+export { createTraversal, admitNextCell, applyDiscoveryResult } from './traversal.js';
+export type { TraversalState, DiscoveryResult, CellOutcome, CandidateObservation } from './traversal.js';
