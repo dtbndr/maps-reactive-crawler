@@ -24,7 +24,7 @@ Make the same flow durable with transactional local SQLite checkpoints, retry an
 
 ### Workstream 3 — Offline operator path and acceptance (about 3–4 slices)
 
-Connect thin CLI and library surfaces, including status inspection, resume and provenance-bearing export. Test the credential-free seed → results → neighbors → bounded stop → restart/export path, including duplicate observations, cancellation, partial failure, gaps and explicit stop and coverage reporting. A drained queue does not imply exhaustive coverage.
+Connect thin CLI and library surfaces, including status inspection, resume and provenance-bearing export. Before fixture collection, communicate the supplied seed coordinate and estimated limits. Test the credential-free seed → results → neighbors → bounded stop → restart/export path, including duplicate observations, cancellation, partial failure, gaps and explicit stop and coverage reporting. Specify and test whether boundaries constrain cell centers, returned places or both; do not claim strict place boundaries without reliable coordinates and filtering. Explain that expansion can miss disconnected areas and provider results may be incomplete; a drained queue does not imply exhaustive coverage.
 
 **Depends on:** Workstreams 1 and 2. **Outcome:** the milestone's connected offline exit criteria are reproducible using synthetic fixtures. **Risk:** a successful demo could hide gaps or overstate coverage. Limit scope to the coordinate-based offline path; provider and location integrations remain later work.
 
