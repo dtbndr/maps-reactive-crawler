@@ -55,7 +55,7 @@ Each behavioral slice: establish meaningful failing tests before implementation;
 - [ ] Independently assert cell-center eligibility and reliable candidate classification for a known inclusive bbox edge (eligible / inside), a demonstrably outside point (not eligible / outside), and a radius comparison whose computed error interval straddles the boundary (not admitted / unverified). Retain outside and unverified candidates. The indeterminate fixture must exercise the actual numerical uncertainty policy, not merely a missing-coordinate candidate; also reject indeterminate pole/seam preflight. Do not add an outward epsilon.
 
 #### Watch out
-No outward epsilon or longitude wrap; place classification is not cell eligibility.
+No outward epsilon or longitude wrap; place classification is not cell eligibility. Derive and justify conservative error bounds for the actual numerical operations, including transcendental functions; if their uncertainty cannot be bounded, fail closed. Exercise a genuine computed boundary-straddling interval rather than a synthetic override or fixed geometric tolerance.
 
 #### Verification
 - Focused geometry tests; `mise install`, `mise exec -- npm ci`, `mise exec -- npm run check`.
