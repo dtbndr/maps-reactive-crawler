@@ -9,8 +9,10 @@
 
 ## Provisional workstream sizing
 
-1. **Bright Data contract and offloading:** Verify Maps discovery and detail behavior, schemas, limits, failures, costs and terms; recommend MCP versus direct API responsibilities. Reuse the existing MCP research. **Outcome:** an evidence-backed provider contract and documented unknowns.
-2. **Location-input contract:** Evaluate geocoders, including ambiguity, country handling, attribution and cost. **Outcome:** a recommended location-resolution contract and provider choice or documented blockers. This can draw on provider findings as they become available.
-3. **Bounded-crawl and recovery decisions:** Combine the provider and location findings to decide geographic filtering, grid assumptions, work limits, expansion, failures, retries and duplicate-paid-request recovery. **Outcome:** a decision-complete handoff for the offline milestone, with remaining blockers identified. This follows the first two investigations.
+1. **Complete — Bright Data contract and offloading:** Verify Maps discovery and detail behavior, schemas, limits, failures, costs and terms; recommend MCP versus direct API responsibilities. Reuse the existing MCP research. **Outcome:** an evidence-backed provider contract and documented unknowns.
+2. **Complete — Location-input contract:** Evaluate geocoders, including ambiguity, country handling, attribution and cost. **Outcome:** a recommended location-resolution contract and provider choice or documented blockers. This can draw on provider findings as they become available.
+3. **Not started — Bounded-crawl and recovery decisions:** Combine the provider and location findings to decide geographic filtering, grid assumptions, work limits, expansion, failures, retries and duplicate-paid-request recovery. **Outcome:** a decision-complete handoff for the offline milestone, with remaining blockers identified. This follows the first two investigations.
+
+The location-input workstream completed its research handoff; no provider integration is implemented or tested, and provider selection remains open. See [location-input research](../research/location-input-contract.md) for the owner's independent-operator decision and remaining policy considerations.
 
 Review terms and licensing within the relevant investigations. This sizing is provisional; it does not approve workstream briefs or authorize paid calls, account changes or publication.
