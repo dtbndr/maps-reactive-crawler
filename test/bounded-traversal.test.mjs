@@ -41,7 +41,7 @@ test('uncertain attempts require explicit resend authorization or may be skipped
   state = markUncertain(dispatchSubmission(reserveSubmission(state, '0,0'), '0,0'), '0,0');
   state = skipAttempt(state, '0,0');
   assert.equal(state.gaps.length, 1);
-  assert.throws(() => reserveSubmission(state, '0,0'), /outstanding|skipped/i);
+  assert.throws(() => reserveSubmission(state, '0,0'), /outstanding|skipped|not running/i);
   let resend = admitNextCell(createTraversal(geometry, limits));
   resend = markUncertain(dispatchSubmission(reserveSubmission(resend, '0,0'), '0,0'), '0,0');
   resend = authorizeResend(resend, '0,0');
@@ -231,6 +231,82 @@ test('global failure pauses new work and cancellation takes outcome precedence',
   assert.equal(reportTraversal(state).outcome, 'partial_gaps');
   state = cancelTraversal(state);
   assert.equal(reportTraversal(state).outcome, 'partial_cancelled');
+});
+
+test('dispatch is denied after time stop, pause, and cancellation', () => {
+  for (const stop of [s => debitActiveTime(s, 10), pauseTraversal, cancelTraversal]) {
+    let state = admitNextCell(createTraversal(geometry, { cells: 2, submissions: 2, activeTime: 10 }));
+    state = reserveSubmission(state, '0,0');
+    state = stop(state);
+    assert.throws(() => dispatchSubmission(state, '0,0'), /stopped|paused|cancelled/i);
+  }
+});
+
+test('result after stop is recorded without neighbor admission or predecessor mutation', () => {
+  let state = admitNextCell(createTraversal(geometry, { cells: 10, submissions: 3, activeTime: 10 }));
+  state = dispatchSubmission(reserveSubmission(state, '0,0'), '0,0');
+  state = markUncertain(state, '0,0');
+  const before = state;
+  state = observeKnownId(state, '0,0', 'job-recovered', 10);
+  const observed = state;
+  const result = applyDiscoveryResult(state, '0,0', { status: 'success', candidates: [{ id: 'x' }] });
+  assert.equal(result.cells['0,0'].outcome, 'nonempty');
+  assert.equal(result.queue.length, 0);
+  assert.equal(result.admitted.length, 1);
+  assert.equal(before.blocked.length, 0);
+  assert.equal(observed.blocked.length, 0);
+});
+
+test('known ID observation cannot be followed by an ordinary duplicate reservation', () => {
+  let state = admitNextCell(createTraversal(geometry, { cells: 2, submissions: 5, activeTime: 50 }));
+  state = dispatchSubmission(reserveSubmission(state, '0,0'), '0,0');
+  state = observeKnownId(state, '0,0', 'job-1', 1);
+  assert.throws(() => reserveSubmission(state, '0,0'), /outstanding|observed/i);
+});
+
+test('verified known-ID result resolves its uncertain gap while preserving history', () => {
+  let state = admitNextCell(createTraversal(geometry, { cells: 2, submissions: 3, activeTime: 20 }));
+  state = dispatchSubmission(reserveSubmission(state, '0,0'), '0,0');
+  state = markUncertain(state, '0,0');
+  state = observeKnownId(state, '0,0', 'recovered-id', 1);
+  state = applyDiscoveryResult(state, '0,0', { status: 'empty' });
+  assert.equal(state.gaps.length, 1);
+  assert.equal(state.gaps[0].status, 'resolved');
+  assert.equal(reportTraversal(state).gaps.length, 0);
+  assert.equal(reportTraversal(state).outcome, 'partial_empty_success');
+});
+
+test('authorized resend result resolves only its matching uncertain gap', () => {
+  let state = admitNextCell(createTraversal(geometry, { cells: 2, submissions: 3, activeTime: 20 }));
+  state = markUncertain(dispatchSubmission(reserveSubmission(state, '0,0'), '0,0'), '0,0');
+  state = authorizeResend(state, '0,0');
+  state = dispatchSubmission(state, '0,0');
+  state = applyDiscoveryResult(state, '0,0', { status: 'empty' });
+  assert.equal(state.gaps.length, 1);
+  assert.equal(state.gaps[0].status, 'resolved');
+  assert.equal(reportTraversal(state).gaps.length, 0);
+  assert.equal(state.submissions, 2);
+});
+
+test('reports the stop reason that prevents queued work', () => {
+  let timeLimited = admitNextCell(createTraversal(geometry, { cells: 2, submissions: 5, activeTime: 1 }));
+  timeLimited = dispatchSubmission(reserveSubmission(timeLimited, '0,0'), '0,0');
+  timeLimited = applyDiscoveryResult(timeLimited, '0,0', { status: 'success', candidates: [{ id: 'seed-result' }] });
+  timeLimited = debitActiveTime(timeLimited, 1);
+  assert.equal(reportTraversal(timeLimited).stopReason, 'active_time');
+
+  let submissionLimited = admitNextCell(createTraversal(geometry, { cells: 5, submissions: 1, activeTime: 20 }));
+  submissionLimited = dispatchSubmission(reserveSubmission(submissionLimited, '0,0'), '0,0');
+  submissionLimited = applyDiscoveryResult(submissionLimited, '0,0', { status: 'success', candidates: [{ id: 'seed-result' }] });
+  assert.equal(reportTraversal(submissionLimited).stopReason, 'submissions');
+});
+
+test('queued initial work and running work cannot be reported complete', () => {
+  const queued = createTraversal(geometry, { cells: 2, submissions: 3, activeTime: 20 });
+  assert.notEqual(reportTraversal(queued).outcome, 'complete');
+  let running = admitNextCell(queued);
+  running = dispatchSubmission(reserveSubmission(running, '0,0'), '0,0');
+  assert.notEqual(reportTraversal(running).outcome, 'complete');
 });
 
 test('discovery result cannot be applied before a submission is dispatched', () => {
