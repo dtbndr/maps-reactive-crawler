@@ -8,7 +8,10 @@ Initial implementation verification exposed a fixture contract mistake: `assert.
 
 For follow-up fix round 1, added unused script entries beyond each cap and acceptance assertions before changing the driver. Focused pre-fix RED: cell-cap trace failed `assert.equal(first.submissions, 2)` (actual `1`) because driver was stopped incorrectly under the initial core-report check; duplicate test failed `assert.equal(Object.values(duplicate.cells).filter(cell => cell.outcome === 'nonempty').length, 2)` (actual cell outcome `queued` for the expected neighbor) since the fixture did not assert the actual expansion trace. Updated driver to consult `reportTraversal` and stop at submission/time decisions, while allowing already admitted queue entries to complete under cell cap. Updated duplicate trace to repeat an ID from a completed seed and assert two nonempty cells; cell-cap trace asserts queued/blocked neighbor evidence and unused response. The time trace asserts final submitted count and time stop after known observation. These are actual observed REDs; full check is GREEN below.
 
+## Candidate classification follow-up
+The new fixture assertion was first run against the report-only driver and failed with `TypeError: Cannot read properties of undefined (reading 'map')` at the exact `result.candidates.map(...)` assertion. The thin driver now exposes the core-produced candidate observations alongside its report, and the fixture checks inside/outside/unverified classifications. This preserves the same serial transitions and makes no classification decisions itself.
+
 ## Validation
-- `npm run build >/dev/null && node --test test/fixture-driver.test.mjs` — passed (3 tests).
+- `npm run build >/dev/null && node --test test/fixture-driver.test.mjs` — passed (4 tests).
 - `npm run check` — passed (typecheck, full test suite, build).
 - No provider calls; synthetic fixtures only.

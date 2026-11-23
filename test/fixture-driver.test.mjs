@@ -20,7 +20,7 @@ function runFixture({ limits, script }) {
     if (entry.result) state = applyDiscoveryResult(state, key, entry.result);
     else break;
   }
-  return reportTraversal(state);
+  return { ...reportTraversal(state), candidates: state.candidates };
 }
 
 test('serial fixture expands raw nonempty results and deterministically stops at cell cap', () => {
@@ -39,6 +39,15 @@ test('serial fixture expands raw nonempty results and deterministically stops at
   assert.ok(first.blocked.length > 0);
   assert.ok(first.cells['0,1'] || first.cells['0,-1'] || first.cells['1,0'] || first.cells['-1,0']);
   assert.deepEqual(first.queue, [], 'connected traversal only; this does not prove exhaustive coverage');
+});
+
+test('fixture retains inside, outside, and unverified candidate classifications', () => {
+  const result = runFixture({ limits: { cells: 1, submissions: 1, activeTime: 20 }, script: [{ elapsed: 1, result: { status: 'success', candidates: [
+    { id: 'inside', coordinate: { latitude: 0, longitude: 0 } },
+    { id: 'outside', coordinate: { latitude: 2, longitude: 2 } },
+    { id: 'unverified', coordinate: null },
+  ] } }] });
+  assert.deepEqual(result.candidates.map(candidate => candidate.classification), ['inside', 'outside', 'unverified']);
 });
 
 test('empty and failure remain distinct and neither expands', () => {
