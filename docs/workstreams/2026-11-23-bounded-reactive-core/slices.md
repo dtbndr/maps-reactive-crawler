@@ -55,7 +55,7 @@ Each behavioral slice: establish meaningful failing tests before implementation;
 - [ ] Test inclusive bbox edges, reliable inside/outside radius classification, retention of outside and unverified candidates, high latitude behavior, invalid/pole/seam preflight, small areas, and traversal edges. Assert that computed haversine distance equal to the configured radius is included and a computed distance just above it is excluded, without an epsilon. Use practical finite-number comparisons; no synthetic error intervals.
 
 #### Watch out
-Use actual submitted coordinates for bbox comparison and computed haversine distance for radius comparison. No longitude wrap, arbitrary epsilon/buffer, or rounding after check; place classification remains distinct from cell eligibility.
+Use actual submitted coordinates for bbox comparison and computed haversine distance for radius comparison. For radius preflight, with angles in radians and δ = radius / R, reject pole contact when δ ≥ π/2 − |φ₀|; otherwise compute Δλ = asin(sin(δ) / cos(φ₀)) and reject seam contact when Δλ ≥ π − |λ₀|. Reject nonfinite computations and test a nonzero-latitude seam case independently of grid spacing. Use ordinary Number arithmetic, not certified enclosures. No longitude wrap, arbitrary epsilon/buffer, or rounding after check; place classification remains distinct from cell eligibility.
 
 #### Verification
 - Focused geometry tests; `mise install`, `mise exec -- npm ci`, `mise exec -- npm run check`.
