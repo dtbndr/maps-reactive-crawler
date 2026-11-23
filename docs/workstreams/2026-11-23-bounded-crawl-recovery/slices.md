@@ -59,7 +59,9 @@ Record exact results; all applicable required checks must pass before handoff.
 #### Tasks
 - [ ] Read the milestone, happy path, roadmap, priority guidance and existing research handoffs; cite relevant evidence in `docs/research/bounded-crawl-recovery.md`.
 - [ ] Define input validation preserving the confirmed single seed, keyword and required country context, boundary inclusion, cell identity and eligibility, duplicate handling, connected cardinal expansion, result classification and coverage limitations. Cite `docs/happy-path.md` and `docs/research/location-input-contract.md`; do not select a geocoder.
+- [ ] Explicitly settle inclusive or exclusive boundary edges and distinguish cell-center queue eligibility from place classification and retention of outside and unverified candidates.
 - [ ] Define each cap's unit, enforcement point, cumulative accounting, active-time boundaries and cap-increase behavior. Count every potentially billable submission, including detail requests, paid resubmissions, failed, empty and uncertain submissions. Explain that attempt caps do not bound billed records or spend; leave monetary bounds unresolved pending pricing evidence.
+- [ ] Define monotonic per-session active-time accumulation and durable checkpoint accounting, including crash uncertainty; specify whether cap enforcement interrupts polling or backoff for already-submitted work or only prevents new submissions and retries.
 - [ ] Provide synthetic traces covering boundary cases, empty and nonempty discovery, duplicates, unverified coordinates, rejected geometries and each independent cap. Specify distinct partial outcome and reporting states for empty success, failed or unrecognized response, limits, cancellation and queue exhaustion with unresolved gaps.
 - [ ] Run project checks and record results; no implementation or live calls.
 
@@ -81,6 +83,7 @@ The handoff's geometry, traversal, accounting and coverage vocabulary anchors re
 - [ ] Trace synthetic exhausted isolated failure with continued work, global pause, uncertain paid send, identifier recovery, operator-approved resend and operator-selected skip with gap. Include caps across pauses and increases and a detail request.
 - [ ] Cover distinct crash windows from `docs/research/bright-data-mcp.md` (Duplicate-paid-request crash windows and idempotency): durable intent before submission; lost acknowledgment before ID persistence; failed polling or fetching of a known ID; interrupted discovery-to-detail fan-out. For each trace show durable checkpoint state, cumulative attempt accounting and permitted next action.
 - [ ] Specify and trace cancellation and time-cap stop when a submission may already have been accepted, and reporting for partial outcomes and queue exhaustion with unresolved gaps. A local stop proves neither provider cancellation nor non-billing; retain uncertainty and conservative accounting across restart.
+- [ ] Distinguish cell-discovery gaps from candidate-level detail gaps and specify deduplication and gap reconciliation when another cell discovers the same candidate or place.
 - [ ] Document evidence-backed provider facts with citations and list unresolved submission, retry, lookup, billing and idempotency questions as integration blockers; never manufacture a contract.
 - [ ] Review all brief decisions against the handoff and run the full project-required checks; report failures accurately.
 
