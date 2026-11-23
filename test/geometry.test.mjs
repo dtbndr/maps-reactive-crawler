@@ -15,6 +15,25 @@ test('rejects invalid, pole-contacting and seam-contacting geometry', () => {
   assert.throws(() => validateGeometry({ seed: { latitude: 10, longitude: 179 }, spacing: 1, area: { type: 'radius', radius: 120000 } }));
 });
 
+test('radius preflight rejects computed pole-contact threshold and accepts just-inside value', () => {
+  const seed = { latitude: 80, longitude: 0 };
+  const thresholdAngle = Math.PI / 2 - Math.abs(seed.latitude * Math.PI / 180);
+  const thresholdRadius = thresholdAngle * 6371008.8;
+  const nextUp = (value) => {
+    const buffer = new ArrayBuffer(8), view = new DataView(buffer);
+    view.setFloat64(0, value);
+    view.setBigUint64(0, view.getBigUint64(0) + 1n);
+    return view.getFloat64(0);
+  };
+  const contactingRadius = nextUp(thresholdRadius);
+  assert.ok(contactingRadius / 6371008.8 >= thresholdAngle);
+  assert.throws(() => validateGeometry({ seed, spacing: 1, area: { type: 'radius', radius: contactingRadius } }));
+
+  const justInsideRadius = thresholdRadius;
+  assert.ok(justInsideRadius / 6371008.8 < thresholdAngle);
+  assert.doesNotThrow(() => validateGeometry({ seed, spacing: 1, area: { type: 'radius', radius: justInsideRadius } }));
+});
+
 test('rejects bbox contact at either longitude seam', () => {
   for (const bounds of [
     { south: -1, north: 1, west: -180, east: 0 },
