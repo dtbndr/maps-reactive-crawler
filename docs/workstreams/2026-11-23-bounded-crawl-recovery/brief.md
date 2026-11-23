@@ -1,7 +1,7 @@
 # Bounded Crawl Recovery Workstream Brief
 
 **Date**: 2026-11-23
-**Status**: Planned
+**Status**: Approved
 
 ## Why
 Milestone 1 needs an evidence-backed contract for bounded discovery and safe recovery before an offline implementation can be planned.
