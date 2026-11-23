@@ -1,5 +1,13 @@
 # Location-input geocoder evaluation
 
+## Follow-up: individual-operator model and Nominatim policy
+
+The owner intends the open-source tool for individual operators, who are responsible for their own provider usage; the project does not guarantee service availability. No centrally operated coordination service is planned. Place-name lookup must not silently default the country: disable lookup with an explanatory message when country is missing. Present candidates for explicit confirmation rather than silently selecting the first result. These are design decisions, not implemented behavior.
+
+The owner agreed to serialize ordinary interactive requests and space them at least 1.1 seconds apart, including retries, with caching and no autocomplete. This local safeguard is not an application-wide limit. The [OSMF Nominatim usage policy](https://operations.osmfoundation.org/policies/nominatim/) states that limits apply per website/application and the sum of traffic by all users must not exceed them. It permits directly user-triggered searches provided the number of users is moderate; independent installations cannot enforce the aggregate ceiling with local limiters alone. Warnings and operator responsibility do not establish compliance or resolve how OSMF classifies this distributed application. No public endpoint is selected pending clarification or another suitable deployment. Recheck the policy before implementation.
+
+The public-service policy also requires identification and attribution, prohibits autocomplete, requires service switching without a software update, and imposes additional restrictions on bulk and periodic scripts. Attribution presentation and rights for persisted or exported results remain to be assessed for the actual fields and workflow. The earlier aggregate-scope discussion below is historical: the policy's explicit per-application wording above supersedes any suggestion that it specifies no application-wide scope.
+
 Status: evidence inventory for Slice A; **no provider selected**. The CLI and geocoder are not implemented. This documents evaluation criteria and candidate evidence for the first-release operator-run workflow, not a provider contract or authorization to make requests.
 
 ## Initial documentation-only red check (before research)
