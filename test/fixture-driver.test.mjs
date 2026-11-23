@@ -9,6 +9,8 @@ function runFixture({ limits, script }) {
   let state = createTraversal(geometry, limits);
   let index = 0;
   while (index < script.length && state.queue.length) {
+    const report = reportTraversal(state);
+    if (report.stopReason === 'submissions' || report.stopReason === 'active_time' || (report.stopReason === 'cells' && report.queue.length === 0)) break;
     const entry = script[index++];
     const key = state.queue[0];
     state = admitNextCell(state);
@@ -25,6 +27,7 @@ test('serial fixture expands raw nonempty results and deterministically stops at
   const input = { limits: { cells: 2, submissions: 4, activeTime: 20 }, script: [
     { elapsed: 1, result: { status: 'success', candidates: [{ id: 'raw-a' }] } },
     { elapsed: 1, result: { status: 'success', candidates: [{ id: 'raw-b' }] } },
+    { elapsed: 1, result: { status: 'success', candidates: [{ id: 'unused' }] } },
   ] };
   const first = runFixture(input);
   assert.deepEqual(runFixture(input), first);
@@ -32,6 +35,10 @@ test('serial fixture expands raw nonempty results and deterministically stops at
   assert.equal(Object.keys(first.cells).length, 2);
   assert.equal(first.stopReason, 'cells');
   assert.equal(first.submissions, 2);
+  assert.deepEqual(first.queue, []);
+  assert.ok(first.blocked.length > 0);
+  assert.ok(first.cells['0,1'] || first.cells['0,-1'] || first.cells['1,0'] || first.cells['-1,0']);
+  assert.deepEqual(first.queue, [], 'connected traversal only; this does not prove exhaustive coverage');
 });
 
 test('empty and failure remain distinct and neither expands', () => {
@@ -45,10 +52,14 @@ test('empty and failure remain distinct and neither expands', () => {
 });
 
 test('duplicate-only results still expand; submission and active-time caps remain independent', () => {
-  const duplicate = runFixture({ limits: { cells: 2, submissions: 8, activeTime: 20 }, script: [
+  const duplicate = runFixture({ limits: { cells: 3, submissions: 8, activeTime: 20 }, script: [
+    { elapsed: 1, result: { status: 'success', candidates: [{ id: 'same' }] } },
     { elapsed: 1, result: { status: 'success', candidates: [{ id: 'same' }, { id: 'same' }] } },
+    { elapsed: 1, result: { status: 'empty' } },
   ] });
   assert.equal(duplicate.cells['0,0'].outcome, 'nonempty');
+  assert.ok(Object.values(duplicate.cells).some(cell => cell.outcome === 'nonempty'));
+  assert.equal(Object.values(duplicate.cells).filter(cell => cell.outcome === 'nonempty').length, 2);
   const submission = runFixture({ limits: { cells: 8, submissions: 1, activeTime: 20 }, script: [{ elapsed: 1, result: { status: 'success', candidates: [{ id: 'x' }] } }] });
   assert.equal(submission.stopReason, 'submissions');
   const time = runFixture({ limits: { cells: 8, submissions: 8, activeTime: 1 }, script: [
