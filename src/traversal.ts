@@ -78,7 +78,8 @@ export function reportTraversal(state: TraversalState): TraversalReport {
   const running = Object.values(state.cells).some(c => c.outcome === 'running');
   const unresolvedGaps = state.gaps.filter(g => g.status !== 'resolved');
   const reserved = state.attempts.some(a => a.status === 'reserved');
-  const hasAttempt = state.attempts.some(a => ['reserved', 'dispatched', 'uncertain', 'observing', 'observed'].includes(a.status));
+  const runningKeys = new Set(Object.entries(state.cells).filter(([, cell]) => cell.outcome === 'running').map(([key]) => key));
+  const hasAttempt = state.attempts.some(a => runningKeys.has(a.cellKey) && ['reserved', 'dispatched', 'uncertain', 'observing', 'observed'].includes(a.status));
   if (state.cancelled) { outcome = 'partial_cancelled'; stopReason = 'cancelled'; }
   else if (state.paused && (state.queue.length || running)) { outcome = 'partial_limit'; stopReason = 'paused'; }
   else if ((state.queue.length || reserved || (running && !hasAttempt)) && state.activeTime >= state.limits.activeTime) { outcome = 'partial_limit'; stopReason = 'active_time'; }

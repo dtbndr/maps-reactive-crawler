@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { validateGeometry, createTraversal, admitNextCell, applyDiscoveryResult, reserveSubmission, dispatchSubmission, markUncertain, debitActiveTime, observeKnownId, cancelTraversal, reportTraversal, skipAttempt, authorizeResend, pauseTraversal, resumeTraversal, updateTraversalLimits } from '../dist/index.js';
 const geometry = validateGeometry({ seed: { latitude: 0, longitude: 0 }, spacing: 100, area: { type: 'bbox', south: -1, north: 1, west: -1, east: 1 } });
+const narrowGeometry = validateGeometry({ seed: { latitude: 0, longitude: 0 }, spacing: 100, area: { type: 'bbox', south: -0.0001, north: 0.0001, west: -0.0001, east: 0.001 } });
 const limits = { cells: 2, submissions: 2, activeTime: 10 };
 
 test('bounded traversal requires explicit finite independent limits', () => {
@@ -333,6 +334,33 @@ test('reserved last slot and known-ID observation are not reported as prevented 
   const unreservedTimeBlocked = reportTraversal(timeState);
   assert.equal(unreservedTimeBlocked.stopReason, 'active_time');
   assert.equal(unreservedTimeBlocked.outcome, 'partial_limit');
+});
+
+test('historical completed-cell attempts do not mask next cell blocked by submission cap', () => {
+  let state = admitNextCell(createTraversal(narrowGeometry, { cells: 2, submissions: 1, activeTime: 10 }));
+  state = dispatchSubmission(reserveSubmission(state, '0,0'), '0,0');
+  state = applyDiscoveryResult(state, '0,0', { status: 'success', candidates: [{ id: 'east' }] });
+  state = admitNextCell(state);
+  assert.deepEqual(state.queue, []);
+  assert.deepEqual(state.blocked, []);
+  assert.equal(state.cells['1,0'].outcome, 'running');
+  assert.throws(() => reserveSubmission(state, '1,0'), /submission/i);
+  assert.equal(reportTraversal(state).stopReason, 'submissions');
+  assert.equal(reportTraversal(state).outcome, 'partial_limit');
+});
+
+test('historical completed-cell attempts do not mask next cell blocked by active-time cap', () => {
+  let state = admitNextCell(createTraversal(narrowGeometry, { cells: 2, submissions: 2, activeTime: 10 }));
+  state = dispatchSubmission(reserveSubmission(state, '0,0'), '0,0');
+  state = applyDiscoveryResult(state, '0,0', { status: 'success', candidates: [{ id: 'east' }] });
+  state = admitNextCell(state);
+  assert.deepEqual(state.queue, []);
+  assert.deepEqual(state.blocked, []);
+  assert.equal(state.cells['1,0'].outcome, 'running');
+  state = debitActiveTime(state, 10);
+  assert.throws(() => reserveSubmission(state, '1,0'), /stopped/i);
+  assert.equal(reportTraversal(state).stopReason, 'active_time');
+  assert.equal(reportTraversal(state).outcome, 'partial_limit');
 });
 
 test('lowered submission cap prevents dispatch without refunding reservation', () => {
