@@ -78,10 +78,11 @@ export function reportTraversal(state: TraversalState): TraversalReport {
   const running = Object.values(state.cells).some(c => c.outcome === 'running');
   const unresolvedGaps = state.gaps.filter(g => g.status !== 'resolved');
   const reserved = state.attempts.some(a => a.status === 'reserved');
+  const hasAttempt = state.attempts.some(a => ['reserved', 'dispatched', 'uncertain', 'observing', 'observed'].includes(a.status));
   if (state.cancelled) { outcome = 'partial_cancelled'; stopReason = 'cancelled'; }
   else if (state.paused && (state.queue.length || running)) { outcome = 'partial_limit'; stopReason = 'paused'; }
-  else if ((state.queue.length || reserved) && state.activeTime >= state.limits.activeTime) { outcome = 'partial_limit'; stopReason = 'active_time'; }
-  else if ((state.queue.length && state.submissions >= state.limits.submissions) || (reserved && state.submissions > state.limits.submissions)) { outcome = 'partial_limit'; stopReason = 'submissions'; }
+  else if ((state.queue.length || reserved || (running && !hasAttempt)) && state.activeTime >= state.limits.activeTime) { outcome = 'partial_limit'; stopReason = 'active_time'; }
+  else if (((state.queue.length || (running && !hasAttempt)) && state.submissions >= state.limits.submissions) || (reserved && state.submissions > state.limits.submissions)) { outcome = 'partial_limit'; stopReason = 'submissions'; }
   else if (state.blocked.length) { outcome = 'partial_limit'; stopReason = 'cells'; }
   else if (state.queue.length || running) { outcome = 'in_progress'; stopReason = 'in_progress'; }
   else if (unresolvedGaps.length) { outcome = 'partial_gaps'; stopReason = 'gaps'; }
