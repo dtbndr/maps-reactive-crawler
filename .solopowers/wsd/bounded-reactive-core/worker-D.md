@@ -8,12 +8,14 @@ Initial implementation verification exposed a fixture contract mistake: `assert.
 
 Round 1's report overstated coverage: at that point extra fixture entries existed only for the cell cap, the duplicate assertion did not establish frontier growth, and coverage/terminal outcomes were underasserted. Do not treat those earlier statements as evidence.
 
-For fix round 2, added assertions and ran the focused test against existing implementation: duplicate test failed at `duplicate.cells['0,2'].outcome` (undefined) because the frontier had only admitted five cells; raising the independent cell limit to six made the newly discovered cell observable as queued. Additional assertions now check unused response counts and no extra admissions for submission/time caps, exact north-neighbor terminal outcomes, repeat-ID expansion beyond the seed frontier, and an eligible distant cell remaining unvisited. No historical RED is claimed for these assertions beyond the explicitly observed duplicate assertion failure; they were added after the driver fix, and that driver fix is preserved.
+Round 2 review correctly noted that the duplicate RED was due to an undersized fixture cell budget (five admitted cells), not a core regression. Increasing it to six exposed the newly discovered queued cell; no regression is claimed.
+
+For fix round 3, preserved the existing driver and added an uncapped empty-seed exhaustion trace. It asserts terminal `partial_empty_success` / `empty`, no queued work, usage well below cells/submissions/time limits, and that a geometrically eligible distant cell remains unvisited because the empty result yields no connected frontier. This is preservation evidence, not a claimed pre-change RED: the driver was already fixed and this test was added afterward.
 
 ## Candidate classification follow-up
 The new fixture assertion was first run against the report-only driver and failed with `TypeError: Cannot read properties of undefined (reading 'map')` at the exact `result.candidates.map(...)` assertion. The thin driver now exposes the core-produced candidate observations alongside its report, and the fixture checks inside/outside/unverified classifications. This preserves the same serial transitions and makes no classification decisions itself.
 
 ## Validation
-- `npm run build >/dev/null && node --test test/fixture-driver.test.mjs` — passed (4 tests).
+- `npm run build >/dev/null && node --test test/fixture-driver.test.mjs` — passed (5 tests).
 - `npm run check` — passed (typecheck, full test suite, build).
 - No provider calls; synthetic fixtures only.

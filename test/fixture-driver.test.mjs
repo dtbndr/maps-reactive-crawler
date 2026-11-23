@@ -53,6 +53,20 @@ test('fixture retains inside, outside, and unverified candidate classifications'
   assert.deepEqual(result.candidates.map(candidate => candidate.classification), ['inside', 'outside', 'unverified']);
 });
 
+test('empty frontier exhausts without budget stop while eligible disconnected cell remains unvisited', () => {
+  const result = runFixture({ limits: { cells: 100, submissions: 100, activeTime: 100 }, script: [
+    { elapsed: 1, result: { status: 'empty' } },
+  ] });
+  assert.equal(result.stopReason, 'empty');
+  assert.equal(result.outcome, 'partial_empty_success');
+  assert.deepEqual(result.queue, []);
+  assert.equal(result.consumedResponses, 1);
+  assert.equal(result.submissions, 1);
+  assert.ok(result.admitted.length < 100);
+  assert.equal(isCellEligible(geometry, 100, 100), true);
+  assert.equal(result.cells['100,100'], undefined, 'eligible location beyond empty frontier is unvisited without a budget stop');
+});
+
 test('empty and failure remain distinct and neither expands', () => {
   const base = { cells: 8, submissions: 8, activeTime: 20 };
   const empty = runFixture({ limits: base, script: [{ elapsed: 1, result: { status: 'empty' } }] });
