@@ -23,6 +23,7 @@ export function reserveSubmission(state: TraversalState, key: string): Traversal
 }
 export function dispatchSubmission(state: TraversalState, key: string): TraversalState {
   if (state.cancelled || state.paused || state.activeTime >= state.limits.activeTime) throw new Error('Dispatch stopped');
+  if (state.submissions > state.limits.submissions) throw new Error('Submission limit prevents dispatch');
   const i = state.attempts.map(a => a.cellKey).lastIndexOf(key);
   if (i < 0 || state.attempts[i].status !== 'reserved') throw new Error('Attempt is not reserved');
   const attempts = [...state.attempts]; attempts[i] = { ...attempts[i], status: 'dispatched' }; return { ...state, attempts };
@@ -78,8 +79,8 @@ export function reportTraversal(state: TraversalState): TraversalReport {
   const unresolvedGaps = state.gaps.filter(g => g.status !== 'resolved');
   if (state.cancelled) { outcome = 'partial_cancelled'; stopReason = 'cancelled'; }
   else if (state.paused && (state.queue.length || running)) { outcome = 'partial_limit'; stopReason = 'paused'; }
-  else if ((state.queue.length || running) && state.activeTime >= state.limits.activeTime) { outcome = 'partial_limit'; stopReason = 'active_time'; }
-  else if ((state.queue.length || running) && state.submissions >= state.limits.submissions) { outcome = 'partial_limit'; stopReason = 'submissions'; }
+  else if (state.queue.length && state.activeTime >= state.limits.activeTime) { outcome = 'partial_limit'; stopReason = 'active_time'; }
+  else if (state.queue.length && state.submissions >= state.limits.submissions) { outcome = 'partial_limit'; stopReason = 'submissions'; }
   else if (state.blocked.length) { outcome = 'partial_limit'; stopReason = 'cells'; }
   else if (state.queue.length || running) { outcome = 'partial_limit'; stopReason = 'in_progress'; }
   else if (unresolvedGaps.length) { outcome = 'partial_gaps'; stopReason = 'gaps'; }
@@ -97,7 +98,7 @@ export function markUncertain(state: TraversalState, key: string): TraversalStat
   const i = state.attempts.map(a => a.cellKey).lastIndexOf(key);
   if (i < 0 || state.attempts[i].status !== 'dispatched') throw new Error('Attempt is not dispatched');
   const attempts = [...state.attempts]; attempts[i] = { ...attempts[i], status: 'uncertain' };
-  return { ...state, attempts, gaps: [...state.gaps, { cellKey: key, cause: 'uncertain' }] };
+  return { ...state, attempts, gaps: [...state.gaps, { cellKey: key, cause: 'uncertain', status: 'unresolved' }] };
 }
 export function applyDiscoveryResult(state: TraversalState, key: string, result: DiscoveryResult): TraversalState {
   if (!state.admitted.includes(key) || state.cells[key]?.outcome !== 'running') throw new Error('Cell is not awaiting a result');
@@ -127,7 +128,7 @@ export function applyDiscoveryResult(state: TraversalState, key: string, result:
   else { cells[key] = { outcome: 'unrecognized' }; gaps.push({ cellKey: key, cause: 'unrecognized' }); }
   const attempts = [...state.attempts];
   const latest = attempts.map(a => a.cellKey).lastIndexOf(key);
-  if (attempts[latest]?.status === 'observed' || attempts[latest]?.status === 'dispatched') {
+  if ((attempts[latest]?.status === 'observed' || attempts[latest]?.status === 'dispatched') && (result.status === 'success' || result.status === 'empty')) {
     for (let index = 0; index < gaps.length; index++) {
       if (gaps[index].cellKey === key && gaps[index].cause === 'uncertain' && gaps[index].status !== 'skipped') gaps[index] = { ...gaps[index], status: 'resolved' };
     }

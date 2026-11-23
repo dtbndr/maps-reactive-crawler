@@ -301,6 +301,39 @@ test('reports the stop reason that prevents queued work', () => {
   assert.equal(reportTraversal(submissionLimited).stopReason, 'submissions');
 });
 
+test('reserved last slot and known-ID observation are not reported as prevented limits', () => {
+  let reserved = admitNextCell(createTraversal(geometry, { cells: 2, submissions: 1, activeTime: 10 }));
+  reserved = reserveSubmission(reserved, '0,0');
+  assert.equal(reportTraversal(reserved).stopReason, 'in_progress');
+
+  let known = admitNextCell(createTraversal(geometry, { cells: 2, submissions: 2, activeTime: 10 }));
+  known = dispatchSubmission(reserveSubmission(known, '0,0'), '0,0');
+  known = observeKnownId(known, '0,0', 'known', 10);
+  assert.equal(reportTraversal(known).stopReason, 'in_progress');
+  assert.equal(reportTraversal(createTraversal(geometry, { cells: 2, submissions: 2, activeTime: 10 })).stopReason, 'in_progress');
+});
+
+test('lowered submission cap prevents dispatch without refunding reservation', () => {
+  let state = admitNextCell(createTraversal(geometry, { cells: 1, submissions: 2, activeTime: 10 }));
+  state = reserveSubmission(state, '0,0');
+  state = updateTraversalLimits(state, { cells: 1, submissions: 0, activeTime: 10 });
+  assert.throws(() => dispatchSubmission(state, '0,0'), /submission limit/i);
+  assert.equal(state.submissions, 1);
+  let equality = admitNextCell(createTraversal(geometry, { cells: 1, submissions: 1, activeTime: 10 }));
+  equality = dispatchSubmission(reserveSubmission(equality, '0,0'), '0,0');
+  assert.equal(equality.attempts[0].status, 'dispatched');
+});
+
+test('failed resend does not resolve original uncertainty history', () => {
+  let state = admitNextCell(createTraversal(geometry, { cells: 1, submissions: 3, activeTime: 10 }));
+  state = markUncertain(dispatchSubmission(reserveSubmission(state, '0,0'), '0,0'), '0,0');
+  state = authorizeResend(state, '0,0');
+  state = dispatchSubmission(state, '0,0');
+  state = applyDiscoveryResult(state, '0,0', { status: 'failed', scope: 'isolated' });
+  assert.equal(state.gaps.find(g => g.cause === 'uncertain').status, 'unresolved');
+  assert.ok(reportTraversal(state).gaps.some(g => g.cause === 'uncertain'));
+});
+
 test('queued initial work and running work cannot be reported complete', () => {
   const queued = createTraversal(geometry, { cells: 2, submissions: 3, activeTime: 20 });
   assert.notEqual(reportTraversal(queued).outcome, 'complete');
