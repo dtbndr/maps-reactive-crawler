@@ -1,7 +1,7 @@
 # Bounded Reactive Core Workstream Brief
 
 **Date**: 2026-11-23
-**Status**: Planned
+**Status**: Done
 
 ## Why
 Establish a reproducible offline traversal core before adding durable recovery or provider integrations.
