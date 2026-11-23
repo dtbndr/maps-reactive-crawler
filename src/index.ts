@@ -72,5 +72,5 @@ export function neighbors(_geometry: Geometry, column: number, row: number): [nu
   return [[column,row+1],[column,row-1],[column+1,row],[column-1,row]];
 }
 
-export { createTraversal, admitNextCell, applyDiscoveryResult } from './traversal.js';
-export type { TraversalState, DiscoveryResult, CellOutcome, CandidateObservation } from './traversal.js';
+export { createTraversal, admitNextCell, applyDiscoveryResult, reserveSubmission, dispatchSubmission, debitActiveTime, markUncertain, observeKnownId, cancelTraversal, reportTraversal, skipAttempt, authorizeResend, pauseTraversal, resumeTraversal, updateTraversalLimits } from './traversal.js';
+export type { TraversalState, DiscoveryResult, CellOutcome, CandidateObservation, TraversalReport } from './traversal.js';

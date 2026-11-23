@@ -1,50 +1,52 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { validateGeometry, createTraversal, admitNextCell, applyDiscoveryResult } from '../dist/index.js';
+import { validateGeometry, createTraversal, admitNextCell, applyDiscoveryResult, reserveSubmission, dispatchSubmission } from '../dist/index.js';
+
+const submit = (state, key) => dispatchSubmission(reserveSubmission(state, key), key);
 
 const geometry = validateGeometry({ seed: { latitude: 0, longitude: 0 }, spacing: 100, area: { type: 'bbox', south: -1, north: 1, west: -1, east: 1 } });
 
 test('raw nonempty results retain candidates and admit deterministic unique FIFO neighbors', () => {
-  let state = createTraversal(geometry);
+  let state = createTraversal(geometry, { cells: 100, submissions: 100, activeTime: 100 });
   assert.deepEqual(state.queue, ['0,0']);
   state = admitNextCell(state);
-  state = applyDiscoveryResult(state, '0,0', { status: 'success', candidates: [{ id: 'outside', coordinate: { latitude: 2, longitude: 2 } }] });
+  state = applyDiscoveryResult(submit(state, '0,0'), '0,0', { status: 'success', candidates: [{ id: 'outside', coordinate: { latitude: 2, longitude: 2 } }] });
   assert.deepEqual(state.queue, ['0,1', '0,-1', '1,0', '-1,0']);
   assert.deepEqual(state.candidates.map(c => c.classification), ['outside']);
   state = admitNextCell(state); // north
-  state = applyDiscoveryResult(state, '0,1', { status: 'success', candidates: [{ id: 'outside', coordinate: { latitude: 2, longitude: 2 } }] });
+  state = applyDiscoveryResult(submit(state, '0,1'), '0,1', { status: 'success', candidates: [{ id: 'outside', coordinate: { latitude: 2, longitude: 2 } }] });
   assert.equal(state.queue.filter(k => k === '0,0').length, 0);
   assert.deepEqual(state.queue, ['0,-1', '1,0', '-1,0', '0,2', '1,1', '-1,1']);
 });
 
 test('isolated failure leaves independent queued work available while global failure pauses admissions', () => {
   const withNeighbors = () => {
-    let state = admitNextCell(createTraversal(geometry));
-    state = applyDiscoveryResult(state, '0,0', { status: 'success', candidates: [{ id: 'x' }] });
+    let state = admitNextCell(createTraversal(geometry, { cells: 100, submissions: 100, activeTime: 100 }));
+    state = applyDiscoveryResult(submit(state, '0,0'), '0,0', { status: 'success', candidates: [{ id: 'x' }] });
     return state;
   };
   let isolated = withNeighbors();
   isolated = admitNextCell(isolated);
-  isolated = applyDiscoveryResult(isolated, '0,1', { status: 'failed', scope: 'isolated' });
+  isolated = applyDiscoveryResult(submit(isolated, '0,1'), '0,1', { status: 'failed', scope: 'isolated' });
   assert.equal(isolated.paused, false);
   assert.equal(admitNextCell(isolated).cells['0,-1'].outcome, 'running');
 
   let global = withNeighbors();
   global = admitNextCell(global);
-  global = applyDiscoveryResult(global, '0,1', { status: 'failed', scope: 'global' });
+  global = applyDiscoveryResult(submit(global, '0,1'), '0,1', { status: 'failed', scope: 'global' });
   assert.equal(global.paused, true);
   assert.throws(() => admitNextCell(global), /paused/);
 });
 
 test('admission is serial and rejects a second running cell', () => {
-  let state = admitNextCell(createTraversal(geometry));
-  state = applyDiscoveryResult(state, '0,0', { status: 'success', candidates: [{ id: 'x' }] });
+  let state = admitNextCell(createTraversal(geometry, { cells: 100, submissions: 100, activeTime: 100 }));
+  state = applyDiscoveryResult(submit(state, '0,0'), '0,0', { status: 'success', candidates: [{ id: 'x' }] });
   state = admitNextCell(state);
   assert.throws(() => admitNextCell(state), /running/);
 });
 
 test('empty, failed and unrecognized outcomes do not expand and failures remain gaps', () => {
-  const apply = result => applyDiscoveryResult(admitNextCell(createTraversal(geometry)), '0,0', result);
+  const apply = result => applyDiscoveryResult(submit(admitNextCell(createTraversal(geometry, { cells: 100, submissions: 100, activeTime: 100 })), '0,0'), '0,0', result);
   const empty = apply({ status: 'empty' });
   const failed = apply({ status: 'failed', cause: 'isolated', scope: 'isolated' });
   const unrecognized = apply({ status: 'unrecognized' });
