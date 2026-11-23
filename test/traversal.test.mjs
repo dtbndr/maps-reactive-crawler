@@ -17,10 +17,36 @@ test('raw nonempty results retain candidates and admit deterministic unique FIFO
   assert.deepEqual(state.queue, ['0,-1', '1,0', '-1,0', '0,2', '1,1', '-1,1']);
 });
 
+test('isolated failure leaves independent queued work available while global failure pauses admissions', () => {
+  const withNeighbors = () => {
+    let state = admitNextCell(createTraversal(geometry));
+    state = applyDiscoveryResult(state, '0,0', { status: 'success', candidates: [{ id: 'x' }] });
+    return state;
+  };
+  let isolated = withNeighbors();
+  isolated = admitNextCell(isolated);
+  isolated = applyDiscoveryResult(isolated, '0,1', { status: 'failed', scope: 'isolated' });
+  assert.equal(isolated.paused, false);
+  assert.equal(admitNextCell(isolated).cells['0,-1'].outcome, 'running');
+
+  let global = withNeighbors();
+  global = admitNextCell(global);
+  global = applyDiscoveryResult(global, '0,1', { status: 'failed', scope: 'global' });
+  assert.equal(global.paused, true);
+  assert.throws(() => admitNextCell(global), /paused/);
+});
+
+test('admission is serial and rejects a second running cell', () => {
+  let state = admitNextCell(createTraversal(geometry));
+  state = applyDiscoveryResult(state, '0,0', { status: 'success', candidates: [{ id: 'x' }] });
+  state = admitNextCell(state);
+  assert.throws(() => admitNextCell(state), /running/);
+});
+
 test('empty, failed and unrecognized outcomes do not expand and failures remain gaps', () => {
   const apply = result => applyDiscoveryResult(admitNextCell(createTraversal(geometry)), '0,0', result);
   const empty = apply({ status: 'empty' });
-  const failed = apply({ status: 'failed', cause: 'isolated' });
+  const failed = apply({ status: 'failed', cause: 'isolated', scope: 'isolated' });
   const unrecognized = apply({ status: 'unrecognized' });
   assert.equal(empty.cells['0,0'].outcome, 'empty');
   assert.equal(failed.cells['0,0'].outcome, 'failed');
