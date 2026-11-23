@@ -24,7 +24,7 @@ test('known-ID observation is allowed after time cap and records observation tim
   state = observeKnownId(state, '0,0', 'job-1', 12);
   assert.equal(state.activeTime, 12);
   assert.equal(state.submissions, 1);
-  assert.equal(reportTraversal(state).outcome, 'partial_limit');
+  assert.equal(reportTraversal(state).outcome, 'in_progress');
 });
 
 test('cancellation preserves uncertain work and reports partial cancellation', () => {
@@ -145,7 +145,7 @@ test('active-time cap reached before dispatch denies reservation', () => {
   assert.throws(() => reserveSubmission(state, '0,0'), /Submission stopped/);
   assert.equal(state.submissions, 0);
   assert.equal(state.attempts.length, 0);
-  assert.equal(reportTraversal(state).outcome, 'partial_limit');
+  assert.equal(reportTraversal(state).outcome, 'in_progress');
 });
 
 for (const [label, gapResult, expectedOutcome, expectedCause] of [
@@ -294,6 +294,7 @@ test('reports the stop reason that prevents queued work', () => {
   timeLimited = applyDiscoveryResult(timeLimited, '0,0', { status: 'success', candidates: [{ id: 'seed-result' }] });
   timeLimited = debitActiveTime(timeLimited, 1);
   assert.equal(reportTraversal(timeLimited).stopReason, 'active_time');
+  assert.equal(reportTraversal(timeLimited).outcome, 'partial_limit');
 
   let submissionLimited = admitNextCell(createTraversal(geometry, { cells: 5, submissions: 1, activeTime: 20 }));
   submissionLimited = dispatchSubmission(reserveSubmission(submissionLimited, '0,0'), '0,0');
@@ -305,12 +306,22 @@ test('reserved last slot and known-ID observation are not reported as prevented 
   let reserved = admitNextCell(createTraversal(geometry, { cells: 2, submissions: 1, activeTime: 10 }));
   reserved = reserveSubmission(reserved, '0,0');
   assert.equal(reportTraversal(reserved).stopReason, 'in_progress');
+  assert.equal(reportTraversal(reserved).outcome, 'in_progress');
+
+  let timeBlocked = admitNextCell(createTraversal(geometry, { cells: 2, submissions: 2, activeTime: 1 }));
+  timeBlocked = reserveSubmission(timeBlocked, '0,0');
+  timeBlocked = debitActiveTime(timeBlocked, 1);
+  assert.equal(reportTraversal(timeBlocked).stopReason, 'active_time');
+  assert.equal(reportTraversal(timeBlocked).outcome, 'partial_limit');
 
   let known = admitNextCell(createTraversal(geometry, { cells: 2, submissions: 2, activeTime: 10 }));
   known = dispatchSubmission(reserveSubmission(known, '0,0'), '0,0');
   known = observeKnownId(known, '0,0', 'known', 10);
   assert.equal(reportTraversal(known).stopReason, 'in_progress');
-  assert.equal(reportTraversal(createTraversal(geometry, { cells: 2, submissions: 2, activeTime: 10 })).stopReason, 'in_progress');
+  assert.equal(reportTraversal(known).outcome, 'in_progress');
+  const fresh = reportTraversal(createTraversal(geometry, { cells: 2, submissions: 2, activeTime: 10 }));
+  assert.equal(fresh.stopReason, 'in_progress');
+  assert.notEqual(fresh.outcome, 'partial_limit');
 });
 
 test('lowered submission cap prevents dispatch without refunding reservation', () => {
@@ -318,6 +329,8 @@ test('lowered submission cap prevents dispatch without refunding reservation', (
   state = reserveSubmission(state, '0,0');
   state = updateTraversalLimits(state, { cells: 1, submissions: 0, activeTime: 10 });
   assert.throws(() => dispatchSubmission(state, '0,0'), /submission limit/i);
+  assert.equal(reportTraversal(state).stopReason, 'submissions');
+  assert.equal(reportTraversal(state).outcome, 'partial_limit');
   assert.equal(state.submissions, 1);
   let equality = admitNextCell(createTraversal(geometry, { cells: 1, submissions: 1, activeTime: 10 }));
   equality = dispatchSubmission(reserveSubmission(equality, '0,0'), '0,0');

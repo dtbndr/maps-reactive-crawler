@@ -4,7 +4,7 @@ export type CellOutcome = 'queued' | 'running' | 'nonempty' | 'empty' | 'failed'
 export type CandidateObservation = { id: string; coordinate?: { latitude: number; longitude: number } | null; classification: CandidateClass; sourceCell: string };
 export type TraversalLimits = { cells: number; submissions: number; activeTime: number };
 export type Attempt = { cellKey: string; status: 'reserved' | 'dispatched' | 'uncertain' | 'observing' | 'observed' | 'skipped'; knownId?: string };
-export type TraversalReport = { stopReason: 'cancelled' | 'paused' | 'active_time' | 'submissions' | 'cells' | 'gaps' | 'failed' | 'unrecognized' | 'empty' | 'in_progress' | 'complete'; outcome: 'complete' | 'partial_empty_success' | 'partial_failed' | 'partial_unrecognized' | 'partial_limit' | 'partial_cancelled' | 'partial_gaps'; queue: string[]; blocked: string[]; gaps: TraversalState['gaps']; submissions: number; activeTime: number; cells: TraversalState['cells'] };
+export type TraversalReport = { stopReason: 'cancelled' | 'paused' | 'active_time' | 'submissions' | 'cells' | 'gaps' | 'failed' | 'unrecognized' | 'empty' | 'in_progress' | 'complete'; outcome: 'complete' | 'in_progress' | 'partial_empty_success' | 'partial_failed' | 'partial_unrecognized' | 'partial_limit' | 'partial_cancelled' | 'partial_gaps'; queue: string[]; blocked: string[]; gaps: TraversalState['gaps']; submissions: number; activeTime: number; cells: TraversalState['cells'] };
 export type TraversalState = { geometry: Geometry; limits: TraversalLimits; queue: string[]; admitted: string[]; cells: Record<string, { outcome: CellOutcome }>; candidates: CandidateObservation[]; gaps: { cellKey: string; cause: 'failed' | 'unrecognized' | 'uncertain'; scope?: 'isolated' | 'global'; status?: 'unresolved' | 'resolved' | 'skipped' }[]; paused: boolean; submissions: number; activeTime: number; blocked: string[]; attempts: Attempt[]; cancelled: boolean };
 export type DiscoveryResult = { status: 'success'; candidates: { id: string; coordinate?: { latitude: number; longitude: number } | null }[] } | { status: 'empty' } | { status: 'failed'; cause?: string; scope: 'isolated' | 'global' } | { status: 'unrecognized' };
 
@@ -77,12 +77,13 @@ export function reportTraversal(state: TraversalState): TraversalReport {
   let stopReason: TraversalReport['stopReason'];
   const running = Object.values(state.cells).some(c => c.outcome === 'running');
   const unresolvedGaps = state.gaps.filter(g => g.status !== 'resolved');
+  const reserved = state.attempts.some(a => a.status === 'reserved');
   if (state.cancelled) { outcome = 'partial_cancelled'; stopReason = 'cancelled'; }
   else if (state.paused && (state.queue.length || running)) { outcome = 'partial_limit'; stopReason = 'paused'; }
-  else if (state.queue.length && state.activeTime >= state.limits.activeTime) { outcome = 'partial_limit'; stopReason = 'active_time'; }
-  else if (state.queue.length && state.submissions >= state.limits.submissions) { outcome = 'partial_limit'; stopReason = 'submissions'; }
+  else if ((state.queue.length || reserved) && state.activeTime >= state.limits.activeTime) { outcome = 'partial_limit'; stopReason = 'active_time'; }
+  else if ((state.queue.length && state.submissions >= state.limits.submissions) || (reserved && state.submissions > state.limits.submissions)) { outcome = 'partial_limit'; stopReason = 'submissions'; }
   else if (state.blocked.length) { outcome = 'partial_limit'; stopReason = 'cells'; }
-  else if (state.queue.length || running) { outcome = 'partial_limit'; stopReason = 'in_progress'; }
+  else if (state.queue.length || running) { outcome = 'in_progress'; stopReason = 'in_progress'; }
   else if (unresolvedGaps.length) { outcome = 'partial_gaps'; stopReason = 'gaps'; }
   else if (Object.values(state.cells).some(c => c.outcome === 'failed')) { outcome = 'partial_failed'; stopReason = 'failed'; }
   else if (Object.values(state.cells).some(c => c.outcome === 'unrecognized')) { outcome = 'partial_unrecognized'; stopReason = 'unrecognized'; }
