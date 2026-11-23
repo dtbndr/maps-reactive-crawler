@@ -14,7 +14,7 @@ export function validateGeometry(input: GeometryInput): Geometry {
   if (!Number.isFinite(spacing) || spacing <= 0) throw new Error('Invalid spacing');
   if (area.type === 'bbox') {
     const { south, north, west, east } = area;
-    if (![south,north,west,east].every(Number.isFinite) || south < -90 || north > 90 || west < -180 || east > 180 || south >= north || west >= east || south <= -90 || north >= 90) throw new Error('Invalid or unsupported bbox');
+    if (![south,north,west,east].every(Number.isFinite) || south < -90 || north > 90 || west <= -180 || east >= 180 || south >= north || west >= east || south <= -90 || north >= 90) throw new Error('Invalid or unsupported bbox');
     if (seed.latitude < south || seed.latitude > north || seed.longitude < west || seed.longitude > east) throw new Error('Seed outside bbox');
   } else if (area.type === 'radius') {
     if (!Number.isFinite(area.radius) || area.radius <= 0) throw new Error('Invalid radius');
@@ -43,7 +43,13 @@ export function cellKey(column: number, row: number): string {
 }
 
 export function isCellEligible(geometry: Geometry, column: number, row: number): boolean {
-  const point = cellCenter(geometry, column, row), area = geometry.area;
+  let point: Coordinate;
+  try {
+    point = cellCenter(geometry, column, row);
+  } catch {
+    return false;
+  }
+  const area = geometry.area;
   if (area.type === 'bbox') return point.latitude >= area.south && point.latitude <= area.north && point.longitude >= area.west && point.longitude <= area.east;
   return haversineDistance(geometry.seed, point) <= area.radius;
 }
