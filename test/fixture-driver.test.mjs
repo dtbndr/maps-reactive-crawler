@@ -10,7 +10,7 @@ function runFixture({ limits, script }) {
   let index = 0;
   while (index < script.length && state.queue.length) {
     const report = reportTraversal(state);
-    if (report.stopReason === 'submissions' || report.stopReason === 'active_time' || (report.stopReason === 'cells' && report.queue.length === 0)) break;
+    if (report.stopReason === 'submissions' || report.stopReason === 'active_time' || report.stopReason === 'paused' || (report.stopReason === 'cells' && report.queue.length === 0)) break;
     const entry = script[index++];
     const key = state.queue[0];
     state = admitNextCell(state);
@@ -42,6 +42,26 @@ test('serial fixture expands raw nonempty results and deterministically stops at
   assert.equal(first.cells['0,1'].outcome, 'nonempty', 'the exact north neighbor completed');
   assert.equal(isCellEligible(geometry, 100, 100), true);
   assert.equal(first.cells['100,100'], undefined, 'an eligible disconnected cell remains unvisited');
+});
+
+test('active-time exhaustion after a nonempty response is not attributed to the cell cap', () => {
+  const result = runFixture({ limits: { cells: 8, submissions: 8, activeTime: 1 }, script: [
+    { elapsed: 1, result: { status: 'success', candidates: [{ id: 'seed' }] } },
+  ] });
+  assert.equal(result.stopReason, 'active_time');
+  assert.ok(result.blocked.length > 0);
+  assert.equal(result.consumedResponses, 1);
+});
+
+test('global pause with queued siblings returns without consuming an unused response', () => {
+  const result = runFixture({ limits: { cells: 8, submissions: 8, activeTime: 20 }, script: [
+    { elapsed: 1, result: { status: 'success', candidates: [{ id: 'seed' }] } },
+    { elapsed: 1, result: { status: 'failed', scope: 'global' } },
+    { elapsed: 1, result: { status: 'empty' } },
+  ] });
+  assert.equal(result.stopReason, 'paused');
+  assert.equal(result.consumedResponses, 2);
+  assert.ok(result.queue.length > 0);
 });
 
 test('fixture retains inside, outside, and unverified candidate classifications', () => {

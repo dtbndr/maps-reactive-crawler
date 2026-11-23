@@ -82,7 +82,7 @@ export function reportTraversal(state: TraversalState): TraversalReport {
   const hasAttempt = state.attempts.some(a => runningKeys.has(a.cellKey) && ['reserved', 'dispatched', 'uncertain', 'observing', 'observed'].includes(a.status));
   if (state.cancelled) { outcome = 'partial_cancelled'; stopReason = 'cancelled'; }
   else if (state.paused && (state.queue.length || running)) { outcome = 'partial_limit'; stopReason = 'paused'; }
-  else if ((state.queue.length || reserved || (running && !hasAttempt)) && state.activeTime >= state.limits.activeTime) { outcome = 'partial_limit'; stopReason = 'active_time'; }
+  else if ((state.queue.length || state.blocked.length || reserved || (running && !hasAttempt)) && state.activeTime >= state.limits.activeTime) { outcome = 'partial_limit'; stopReason = 'active_time'; }
   else if (((state.queue.length || (running && !hasAttempt)) && state.submissions >= state.limits.submissions) || (reserved && state.submissions > state.limits.submissions)) { outcome = 'partial_limit'; stopReason = 'submissions'; }
   else if (state.blocked.length) { outcome = 'partial_limit'; stopReason = 'cells'; }
   else if (state.queue.length || running) { outcome = 'in_progress'; stopReason = 'in_progress'; }
