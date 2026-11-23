@@ -10,6 +10,7 @@ Establish a reproducible offline traversal core before adding durable recovery o
 - A confirmed coordinate and explicit geography seed deterministic cardinal traversal driven by synthetic results; raw nonempty results expand, empty and failed results do not.
 - Independent cell, submission and active-time limits produce explicit partial outcomes; admitted work is not stranded by the cell cap.
 - Cell eligibility and retained inside, outside and unverified candidate classifications are distinct; connected traversal is not exhaustive coverage.
+- Geographic boundaries use practical floating-point checks, not certified territory enforcement; provider footprint and connected traversal can extend beyond or miss parts of the requested area.
 - Recovery-ready transitions are exercised in memory only; SQLite, CLI, real provider, geocoder and live calls are excluded.
 
 ## Key decisions

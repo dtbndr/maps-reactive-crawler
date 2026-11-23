@@ -22,7 +22,7 @@ Build and test the bounded reactive traversal in isolation, ready for a later du
 The core is a pure deterministic state machine: all time and fixture responses are explicit inputs; no clock, I/O, randomness, persistence or provider invocation inside transitions. Driver is serial and thin, supplies elapsed active time and scripted responses and applies transitions in order. State and commands must be serializable data so Workstream 2 can persist each boundary; no durability is claimed here.
 
 ## Assumptions and design decisions
-- Apply the handoff input and numerical policy, including conservative indeterminate boundary handling, sphere and seed-anchored grid, inclusive edges and rejection of pole/seam contact. Reject approximating outward: it risks exceeding geography. Assumes floating error bounds can be established; fail closed otherwise.
+- Apply the handoff input policy: ordinary JavaScript Number arithmetic, spherical haversine radius membership, seed-anchored metre grid, inclusive bbox comparisons on actual coordinates, and preflight rejection of invalid/pole/seam geometry. No arbitrary epsilon/buffer or coordinate rounding after check.
 - One confirmed coordinate, nonempty keyword, optional explicit country, exactly one radius or bbox and finite positive spacing and caps. No country inference or resolution. Seed must lie inside bbox. Follow handoff units and validation; reject invalid inputs before state creation.
 - FIFO queue and fixed N, S, E, W neighbor order give deterministic cell-cap decisions. Integer row/column identity deduplicates cells. Only successful raw nonempty discovery expands, including duplicate-only or outside-only results; empty, failed, unrecognized and uncertain never expand. Retain candidate observations and provenance with inside/outside/unverified classification; canonical identity reconciliation belongs to Workstream 2.
 - Cell cap counts unique admitted identities including seed; blocked eligible admissions are recorded, not silently forgotten. Already admitted cells can run. Submission cap reserves before each potentially billable send, including failed, empty and uncertain sends; equality permits the last slot. Active time includes waits and backoff, not deliberate pauses, and is supplied monotonically by the driver. Exhaustion blocks admissions and new submissions but not observation of already submitted work; account overrun. No spend guarantee follows from submission count.
@@ -51,11 +51,11 @@ Each behavioral slice: establish meaningful failing tests before implementation;
 
 #### Tasks
 - [ ] Implement validation, grid identity and projection, radius/bbox preflight and membership, candidate classification per handoff, including conservative floating uncertainty.
-- [ ] Test inclusive edges, high latitude, invalid and nonfinite inputs, seed outside bbox, pole/seam contact, tiny areas and uncertain boundary comparisons.
-- [ ] Independently assert cell-center eligibility and reliable candidate classification for a known inclusive bbox edge (eligible / inside), a demonstrably outside point (not eligible / outside), and a radius comparison whose computed error interval straddles the boundary (not admitted / unverified). Retain outside and unverified candidates. The indeterminate fixture must exercise the actual numerical uncertainty policy, not merely a missing-coordinate candidate; also reject indeterminate pole/seam preflight. Do not add an outward epsilon.
+- [ ] Test inclusive edges, high latitude, invalid and nonfinite inputs, seed outside bbox, pole/seam contact, and small areas.
+- [ ] Test inclusive bbox edges, reliable inside/outside radius classification, retention of outside and unverified candidates, high latitude behavior, invalid/pole/seam preflight, small areas, and traversal edges. Use practical finite-number comparisons; no synthetic error intervals.
 
 #### Watch out
-No outward epsilon or longitude wrap; place classification is not cell eligibility. Derive and justify conservative error bounds for the actual numerical operations, including transcendental functions; if their uncertainty cannot be bounded, fail closed. Exercise a genuine computed boundary-straddling interval rather than a synthetic override or fixed geometric tolerance.
+Use actual submitted coordinates for bbox comparison and computed haversine distance for radius comparison. No longitude wrap, arbitrary epsilon/buffer, or rounding after check; place classification remains distinct from cell eligibility.
 
 #### Verification
 - Focused geometry tests; `mise install`, `mise exec -- npm ci`, `mise exec -- npm run check`.
