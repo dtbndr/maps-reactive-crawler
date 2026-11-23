@@ -34,6 +34,14 @@ test('radius preflight rejects computed pole-contact threshold and accepts just-
   assert.doesNotThrow(() => validateGeometry({ seed, spacing: 1, area: { type: 'radius', radius: justInsideRadius } }));
 });
 
+test('radius preflight rejects exact computed pole-contact equality', () => {
+  const seed = { latitude: 60, longitude: 0 };
+  const thresholdAngle = Math.PI / 2 - Math.abs(seed.latitude * Math.PI / 180);
+  const radius = thresholdAngle * 6371008.8;
+  assert.equal(radius / 6371008.8, thresholdAngle);
+  assert.throws(() => validateGeometry({ seed, spacing: 1, area: { type: 'radius', radius } }));
+});
+
 test('rejects bbox contact at either longitude seam', () => {
   for (const bounds of [
     { south: -1, north: 1, west: -180, east: 0 },
