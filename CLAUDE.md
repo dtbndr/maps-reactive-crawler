@@ -1,6 +1,6 @@
 # Agent guidance
 
-This repository is an early scaffold for a public, MIT-licensed, operator-run Google Maps reactive spatial crawler. The implementation is not yet present.
+This repository is an early-stage public, MIT-licensed, operator-run Google Maps reactive spatial crawler. The offline bounded reactive traversal core is implemented and tested with synthetic fixtures; the end-to-end crawler and CLI are not yet implemented.
 
 ## Start here
 

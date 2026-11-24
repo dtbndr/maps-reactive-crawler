@@ -1,6 +1,6 @@
 # First-release roadmap
 
-Status: **provisional; implementation not started**. Use [SDLC priorities](sdlc-priorities.md) to keep work tied to the [happy path](happy-path.md). Milestone labels indicate order, not priority grade or authorization. A milestone may span multiple Solopowers workstreams; a workstream is a separately scoped execution unit.
+Status: **provisional; offline core implemented, vertical slice in progress**. Use [SDLC priorities](sdlc-priorities.md) to keep work tied to the [happy path](happy-path.md). Milestone labels indicate order, not priority grade or authorization. A milestone may span multiple Solopowers workstreams; a workstream is a separately scoped execution unit.
 
 ## Milestones
 
@@ -13,4 +13,4 @@ Status: **provisional; implementation not started**. Use [SDLC priorities](sdlc-
 
 See the [legacy reactive-crawl research handoff](research/legacy-reactive-crawl.md) for source-checked legacy behavior, its disconnected batch/reactive paths, and first-release design cautions. The [Bright Data MCP research](research/bright-data-mcp.md) surveys agentic tools, Maps scraper discovery, and outstanding contract questions.
 
-This is a scaffold only: no crawler, CLI, SQLite integration, geocoder or Bright Data integration exists yet. Start with [Milestone 1](milestones/01-contracts-and-boundaries.md). Milestones and exit criteria are planning artifacts, not evidence of completion or permission for paid calls.
+Milestone 1 research workstreams and the bounded reactive core in Milestone 2 are complete. The core is in-memory and fixture-tested; the end-to-end crawler, CLI, SQLite integration, geocoder and Bright Data integration are not yet implemented. Milestone 2's durable recovery and offline operator path remain ahead, subject to their own scope and approval. Milestone plans are not permission for paid calls.

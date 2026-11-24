@@ -1,6 +1,6 @@
 # Maps Reactive Crawler
 
-An early scaffold for an operator-run, open-source Google Maps spatial crawler. **The crawler and CLI are not implemented yet.** The intended first release starts from one location and expands to neighboring cells based on results, within explicit geographic and work limits.
+An early-stage operator-run, open-source Google Maps spatial crawler. The offline bounded reactive traversal core is implemented and tested with synthetic fixtures; **the end-to-end crawler and CLI are not implemented yet.** The intended first release starts from one location and expands to neighboring cells based on results, within explicit geographic and work limits.
 
 ## First-release direction
 
@@ -22,7 +22,7 @@ mise exec -- npm ci
 mise exec -- npm run check
 ```
 
-`mise.toml` pins Node 26.13.1, the latest LTS release verified at setup. Run commands under `mise exec --` or enable the mise shell integration. Tests are offline and require no Bright Data credentials. The current test validates scaffolding only.
+`mise.toml` pins Node 26.13.1, the latest LTS release verified at setup. Run commands under `mise exec --` or enable the mise shell integration. Tests are offline and require no Bright Data credentials. They cover geometry, traversal, work limits and synthetic fixture flows; they do not validate a live provider or durable recovery.
 
 The example environment file contains a placeholder, not a working integration. Never commit credentials, provider data or checkpoint files. Live provider calls may incur charges and require explicit operator approval.
 
