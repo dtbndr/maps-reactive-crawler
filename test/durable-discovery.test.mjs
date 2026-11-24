@@ -471,6 +471,29 @@ test('durable traversal transitions persist queue, observations, attempts and co
 });
 function stateSnapshot(initial) { return reserveSubmission(admitNextCell(initial), '0,0'); }
 
+test('invalid persisted geometry and recovery marker fail before callbacks without changing payload', () => {
+  for (const patch of [{ geometry: {} }, { recoveryPending: null }]) {
+    const { dir, path } = temp();
+    try {
+      const durable = DurableState.open(path);
+      const state = createTraversal(geometry, { cells: 5, submissions: 3, activeTime: 10 });
+      durable.writeTraversal(state);
+      const payload = JSON.stringify({ ...state, ...patch });
+      const corruptDb = new DatabaseSync(path);
+      corruptDb.prepare('UPDATE traversal SET payload=?').run(payload);
+      corruptDb.close();
+      durable.close();
+      const reopened = DurableState.open(path);
+      let sends = 0, observes = 0;
+      assert.throws(() => executeDurableDiscovery(reopened, () => { sends++; return { id: 'bad' }; }, () => { observes++; return { elapsed: 0, result: { status: 'empty' } }; }), /Corrupt traversal checkpoint/, JSON.stringify(patch));
+      assert.equal(sends, 0);
+      assert.equal(observes, 0);
+      assert.equal(new DatabaseSync(path).prepare('SELECT payload FROM traversal').get().payload, payload);
+      reopened.close();
+    } finally { rmSync(dir, { recursive: true, force: true }); }
+  }
+});
+
 test('corrupt queue referencing missing cell fails before send', () => {
   const { dir, path } = temp();
   try {

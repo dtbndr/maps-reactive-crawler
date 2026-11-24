@@ -2,6 +2,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { closeSync, linkSync, mkdtempSync, openSync, rmSync, statSync } from 'node:fs';
 import { join, basename, dirname } from 'node:path';
 import type { TraversalState } from './traversal.js';
+import { validateGeometry } from './index.js';
 
 type Snapshot = { version: 1; work: { id: string; status: string }[]; observations: unknown[]; gaps: unknown[] };
 let afterOwnerReadForTest: (() => void) | undefined;
@@ -21,7 +22,8 @@ function validate(value: unknown): asserts value is Snapshot {
 }
 function validateTraversal(value: unknown): asserts value is TraversalState {
   const s = value as any;
-  if (!s || typeof s !== 'object' || !s.geometry || !s.limits || ![s.limits.cells, s.limits.submissions, s.limits.activeTime].every(Number.isFinite) || s.limits.cells < 1 || s.limits.submissions < 0 || s.limits.activeTime < 0 || !Array.isArray(s.queue) || !s.queue.every((x: unknown) => typeof x === 'string') || !Array.isArray(s.admitted) || !s.cells || typeof s.cells !== 'object' || !Array.isArray(s.candidates) || !Array.isArray(s.gaps) || !Array.isArray(s.blocked) || !Array.isArray(s.attempts) || ![s.submissions, s.activeTime].every(Number.isFinite) || s.submissions < 0 || s.activeTime < 0 || typeof s.paused !== 'boolean' || typeof s.cancelled !== 'boolean') throw new Error('Corrupt traversal checkpoint');
+  if (!s || typeof s !== 'object' || typeof s.recoveryPending !== 'undefined' && typeof s.recoveryPending !== 'boolean' || !s.geometry || !s.limits || ![s.limits.cells, s.limits.submissions, s.limits.activeTime].every(Number.isFinite) || s.limits.cells < 1 || s.limits.submissions < 0 || s.limits.activeTime < 0 || !Array.isArray(s.queue) || !s.queue.every((x: unknown) => typeof x === 'string') || !Array.isArray(s.admitted) || !s.cells || typeof s.cells !== 'object' || !Array.isArray(s.candidates) || !Array.isArray(s.gaps) || !Array.isArray(s.blocked) || !Array.isArray(s.attempts) || ![s.submissions, s.activeTime].every(Number.isFinite) || s.submissions < 0 || s.activeTime < 0 || typeof s.paused !== 'boolean' || typeof s.cancelled !== 'boolean') throw new Error('Corrupt traversal checkpoint');
+  try { validateGeometry(s.geometry); } catch { throw new Error('Corrupt traversal checkpoint'); }
   if (!Number.isSafeInteger(s.submissions) || s.submissions !== s.attempts.length || !s.attempts.every((a: any) => a && typeof a.id === 'string' && a.id.length > 0 && typeof a.cellKey === 'string' && a.workId === `work:${a.cellKey}` && s.cells[a.cellKey] && ['reserved', 'dispatched', 'uncertain', 'observing', 'observed', 'skipped'].includes(a.status)) || new Set(s.attempts.map((a: any) => a.id)).size !== s.attempts.length) throw new Error('Corrupt traversal checkpoint');
   if (!s.attempts.every((a: any) => a.knownId === undefined || (typeof a.knownId === 'string' && a.knownId.trim().length > 0)) || !s.attempts.every((a: any) => !['observing', 'observed'].includes(a.status) || (typeof a.knownId === 'string' && a.knownId.trim().length > 0))) throw new Error('Corrupt traversal checkpoint');
   if (s.cleanPauseEvidence !== undefined && (!s.cleanPauseEvidence || typeof s.cleanPauseEvidence !== 'object' || typeof s.cleanPauseEvidence.evidence !== 'string' || !s.cleanPauseEvidence.evidence.trim() || s.paused !== true || s.recoveryPending === true)) throw new Error('Corrupt traversal checkpoint');
