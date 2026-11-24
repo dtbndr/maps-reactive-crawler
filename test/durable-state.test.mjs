@@ -84,12 +84,20 @@ test('rejects unsupported schema and corrupt persisted payload', () => {
     assert.throws(()=>DurableState.open(path));
   } finally { rmSync(dir,{recursive:true,force:true}); }
 });
+test('fails closed for empty database with stale initialization marker', () => {
+  const {dir,path}=temp();
+  try {
+    writeFileSync(path, '');
+    writeFileSync(`${path}.initializing`, '');
+    assert.throws(()=>DurableState.open(path),/corrupt|missing|required/i);
+  } finally { rmSync(dir,{recursive:true,force:true}); }
+});
 test('recovers first initialization interrupted before commit', () => {
   const {dir,path}=temp();
   try {
     const child=spawnSync(process.execPath,['--input-type=module','-e',`import {DurableState,setAfterOwnerReadForTest} from ${JSON.stringify(new URL('../dist/durable-state.js', import.meta.url).href)}; setAfterOwnerReadForTest(()=>process.kill(process.pid,'SIGKILL')); DurableState.open(${JSON.stringify(path)});`],{encoding:'utf8'});
     assert.equal(child.signal,'SIGKILL');
-    const recovered=DurableState.open(path); assert.deepEqual(recovered.read(),{version:1,work:[],observations:[],gaps:[]}); recovered.close();
+    assert.throws(()=>DurableState.open(path),/corrupt|missing|required/i);
   } finally { rmSync(dir,{recursive:true,force:true}); }
 });
 test('reacquires ownership after abrupt owner process death', () => {
