@@ -30,4 +30,13 @@ test('valid clean pause before abrupt death does not demand debit',()=>{
  } finally {rmSync(dir,{recursive:true,force:true})}
 });
 
+test('legacy checkpoint without recoveryPending opens normally, and stale-owner recovery marks it pending',()=>{
+ const dir=mkdtempSync(join(tmpdir(),'legacy-recovery-marker-'));const path=join(dir,'state.db');
+ try {
+  const child=`import {DurableState} from './dist/durable-state.js';import {DatabaseSync} from 'node:sqlite';import {createTraversal} from './dist/traversal.js';const d=DurableState.open(${JSON.stringify(path)});d.writeTraversal(createTraversal(${JSON.stringify(geo)},{cells:1,submissions:1,activeTime:10}));const db=new DatabaseSync(${JSON.stringify(path)});const s=JSON.parse(db.prepare('SELECT payload FROM traversal WHERE id=1').get().payload);delete s.recoveryPending;db.prepare('UPDATE traversal SET payload=?').run(JSON.stringify(s));db.close();process.exit(0)`;
+  assert.equal(spawnSync(process.execPath,['--input-type=module','-e',child],{encoding:'utf8'}).status,0);
+  const recovered=DurableState.open(path);assert.equal(recovered.readTraversal().recoveryPending,true);recovered.close();
+ } finally {rmSync(dir,{recursive:true,force:true})}
+});
+
 test('overflowing recovery debit preserves pending snapshot',()=>{const dir=mkdtempSync(join(tmpdir(),'debit-overflow-'));const d=DurableState.open(join(dir,'state.db'));try{d.writeTraversal({...createTraversal(geo,{cells:1,submissions:1,activeTime:10}),activeTime:Number.MAX_VALUE,recoveryPending:true});const before=d.readTraversal();assert.throws(()=>resolveDurableRecoveryDebit(d,Number.MAX_VALUE,'synthetic bound'));assert.deepEqual(d.readTraversal(),before)}finally{d.close();rmSync(dir,{recursive:true,force:true})}});

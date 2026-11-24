@@ -79,6 +79,27 @@ test('malformed SQLite traversal payloads fail before execution and remain uncha
   }
 });
 
+test('invalid canonical cell identities are rejected without changing their SQLite payload', () => {
+  for (const key of ['bogus', '999999,0']) {
+    const { dir, path } = temp();
+    try {
+      const durable = DurableState.open(path);
+      durable.writeTraversal(createTraversal(geometry, { cells: 1, submissions: 3, activeTime: 10 }));
+      durable.close();
+      const db = new DatabaseSync(path);
+      const payload = JSON.parse(db.prepare('SELECT payload FROM traversal WHERE id=1').get().payload);
+      payload.queue = [key]; payload.admitted = [key]; payload.cells = { [key]: { outcome: 'queued' } };
+      const malformed = JSON.stringify(payload);
+      db.prepare('UPDATE traversal SET payload=? WHERE id=1').run(malformed);
+      db.close();
+      assert.throws(() => { const reopened = DurableState.open(path); try { reopened.readTraversal(); } finally { reopened.close(); } }, /Corrupt traversal checkpoint/);
+      const verify = new DatabaseSync(path);
+      assert.equal(verify.prepare('SELECT payload FROM traversal WHERE id=1').get().payload, malformed);
+      verify.close();
+    } finally { rmSync(dir, { recursive: true, force: true }); }
+  }
+});
+
 test('fresh process recovers traversal state after reservation before dispatch', () => {
   const { dir, path } = temp();
   try {

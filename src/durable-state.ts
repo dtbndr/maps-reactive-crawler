@@ -2,7 +2,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { closeSync, linkSync, mkdtempSync, openSync, rmSync, statSync } from 'node:fs';
 import { join, basename, dirname } from 'node:path';
 import type { TraversalState } from './traversal.js';
-import { validateGeometry } from './index.js';
+import { cellKey, isCellEligible, validateGeometry } from './index.js';
 
 type Snapshot = { version: 1; work: { id: string; status: string }[]; observations: unknown[]; gaps: unknown[] };
 let afterOwnerReadForTest: (() => void) | undefined;
@@ -27,7 +27,13 @@ function validateTraversal(value: unknown): asserts value is TraversalState {
   if (!Number.isSafeInteger(s.submissions) || s.submissions !== s.attempts.length || !s.attempts.every((a: any) => a && typeof a.id === 'string' && a.id.length > 0 && typeof a.cellKey === 'string' && a.workId === `work:${a.cellKey}` && s.cells[a.cellKey] && ['reserved', 'dispatched', 'uncertain', 'observing', 'observed', 'skipped'].includes(a.status)) || new Set(s.attempts.map((a: any) => a.id)).size !== s.attempts.length) throw new Error('Corrupt traversal checkpoint');
   if (!s.attempts.every((a: any) => a.knownId === undefined || (typeof a.knownId === 'string' && a.knownId.trim().length > 0)) || !s.attempts.every((a: any) => !['observing', 'observed'].includes(a.status) || (typeof a.knownId === 'string' && a.knownId.trim().length > 0))) throw new Error('Corrupt traversal checkpoint');
   if (s.cleanPauseEvidence !== undefined && (!s.cleanPauseEvidence || typeof s.cleanPauseEvidence !== 'object' || typeof s.cleanPauseEvidence.evidence !== 'string' || !s.cleanPauseEvidence.evidence.trim() || s.paused !== true || s.recoveryPending === true)) throw new Error('Corrupt traversal checkpoint');
-  if (new Set(s.queue).size !== s.queue.length || s.admitted.length > s.limits.cells || new Set(s.admitted).size !== s.admitted.length || !s.admitted.every((key: unknown) => typeof key === 'string' && !!s.cells[key]) || !Object.keys(s.cells).every((key: string) => s.admitted.includes(key)) || !s.queue.every((key: string) => s.cells[key]?.outcome === 'queued' && s.admitted.includes(key)) || !Object.entries(s.cells).every(([key, cell]: [string, any]) => cell && typeof cell === 'object' && ['queued', 'running', 'parked', 'nonempty', 'empty', 'failed', 'unrecognized'].includes(cell.outcome) && (cell.outcome !== 'queued' || s.queue.includes(key)))) throw new Error('Corrupt traversal checkpoint');
+  const validCellKey = (key: string): boolean => {
+    const match = /^(-?(?:0|[1-9][0-9]*)),(-?(?:0|[1-9][0-9]*))$/.exec(key);
+    if (!match) return false;
+    const column = Number(match[1]), row = Number(match[2]);
+    return Number.isSafeInteger(column) && Number.isSafeInteger(row) && cellKey(column, row) === key && isCellEligible(s.geometry, column, row);
+  };
+  if (new Set(s.queue).size !== s.queue.length || s.admitted.length > s.limits.cells || new Set(s.admitted).size !== s.admitted.length || !s.admitted.every((key: unknown) => typeof key === 'string' && validCellKey(key) && !!s.cells[key]) || !Object.keys(s.cells).every((key: string) => validCellKey(key) && s.admitted.includes(key)) || !s.queue.every((key: string) => s.cells[key]?.outcome === 'queued' && s.admitted.includes(key)) || !Object.entries(s.cells).every(([key, cell]: [string, any]) => cell && typeof cell === 'object' && ['queued', 'running', 'parked', 'nonempty', 'empty', 'failed', 'unrecognized'].includes(cell.outcome) && (cell.outcome !== 'queued' || s.queue.includes(key))) || !s.attempts.every((a: any) => validCellKey(a.cellKey))) throw new Error('Corrupt traversal checkpoint');
 }
 
 /** Durable checkpoint foundation; this does not implement restartable discovery. */
