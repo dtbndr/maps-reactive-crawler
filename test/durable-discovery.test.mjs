@@ -158,16 +158,31 @@ test('isolated parked cell does not block the next queued cell, while global unc
       let parked = reserveSubmission(admitNextCell(initial), key);
       parked = { ...parked, attempts: parked.attempts.map(attempt => ({ ...attempt, status: 'dispatched' })) };
       parked = markUncertain(parked, key, scope);
+      if (scope === 'isolated') parked = { ...parked, attempts: parked.attempts.map(attempt => ({ ...attempt, knownId: 'parked-A-id' })) };
       const nextKey = '1,0';
       parked = { ...parked, queue: [nextKey], admitted: [...parked.admitted, nextKey], cells: { ...parked.cells, [nextKey]: { outcome: 'queued' } } };
       durable.writeTraversal(parked);
       if (scope === 'global') {
         assert.throws(() => executeDurableDiscovery(durable, () => ({ id: 'unused' }), () => ({ elapsed: 0, result: { status: 'empty' } })), /Traversal is paused/);
       } else {
-        const result = executeDurableDiscovery(durable, () => ({ id: 'next-id' }), () => ({ elapsed: 0, result: { status: 'empty' } }));
+        let sends = 0;
+        const result = executeDurableDiscovery(durable, () => { sends++; return { id: 'next-id' }; }, () => ({ elapsed: 0, result: { status: 'empty' } }));
         assert.equal(result.cells[key].outcome, 'parked');
         assert.equal(result.cells[nextKey].outcome, 'empty');
         assert.equal(result.attempts[0].status, 'uncertain');
+        assert.equal(result.submissions, 2);
+        assert.equal(sends, 1);
+        const recovered = executeDurableDiscovery(durable, () => { sends++; return { id: 'duplicate-send' }; }, id => {
+          assert.equal(id, 'parked-A-id');
+          return { elapsed: 1, result: { status: 'success', candidates: [{ id: 'A-raw', coordinate: null }, { id: 'A-raw', coordinate: null }] } };
+        });
+        assert.equal(sends, 1);
+        assert.equal(recovered.submissions, 2);
+        assert.equal(recovered.cells[key].outcome, 'nonempty');
+        assert.equal(recovered.cells[nextKey].outcome, 'empty');
+        assert.deepEqual(recovered.candidates.map(item => item.id), ['A-raw', 'A-raw']);
+        assert.equal(recovered.gaps[0].status, 'resolved');
+        assert.equal(recovered.activeTime, 1);
       }
       durable.close();
     } finally { rmSync(dir, { recursive: true, force: true }); }

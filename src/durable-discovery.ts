@@ -13,6 +13,14 @@ export function executeDurableDiscovery(state: DurableState, send: SyntheticSend
   let current = state.readTraversal();
   let running = Object.entries(current.cells).find(([, cell]) => cell.outcome === 'running')?.[0];
   if (!running) {
+    const recoverable = current.queue.length === 0 ? current.attempts.findLast(item => item.status === 'uncertain' && item.knownId) : undefined;
+    if (recoverable && !current.paused) {
+      running = recoverable.cellKey;
+      state.transitionTraversal(value => ({ ...value, cells: { ...value.cells, [running!]: { outcome: 'running' } } }));
+      current = state.readTraversal();
+    }
+  }
+  if (!running) {
     state.transitionTraversal(value => admitNextCell(value));
     boundaryHook?.('dequeued');
     current = state.readTraversal();
@@ -21,7 +29,7 @@ export function executeDurableDiscovery(state: DurableState, send: SyntheticSend
     current = state.readTraversal();
     running = Object.entries(current.cells).find(([, cell]) => cell.outcome === 'running')![0];
   }
-  let attempt = current.attempts.findLast(item => item.cellKey === running && ['reserved', 'dispatched', 'observed'].includes(item.status));
+  let attempt = current.attempts.findLast(item => item.cellKey === running && ['reserved', 'dispatched', 'observed', 'uncertain'].includes(item.status));
   if (!attempt) throw new Error('Running cell has no recoverable attempt');
   if (attempt.status === 'reserved') {
     state.transitionTraversal(value => dispatchSubmission(value, running!));

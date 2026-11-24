@@ -109,7 +109,8 @@ export function markUncertain(state: TraversalState, key: string, scope: 'isolat
 }
 export function applyDiscoveryResult(state: TraversalState, key: string, result: DiscoveryResult): TraversalState {
   if (!state.admitted.includes(key) || state.cells[key]?.outcome !== 'running') throw new Error('Cell is not awaiting a result');
-  if (state.attempts.at(-1)?.cellKey !== key || !['dispatched', 'observed'].includes(state.attempts.at(-1)?.status ?? '')) throw new Error('Result requires dispatched attempt');
+  const latestAttempt = state.attempts.findLast(attempt => attempt.cellKey === key);
+  if (!latestAttempt || !['dispatched', 'observed'].includes(latestAttempt.status)) throw new Error('Result requires dispatched attempt');
   const cells = { ...state.cells };
   const candidates = [...state.candidates];
   const gaps = [...state.gaps];
