@@ -105,12 +105,14 @@ export class DurableState {
     return value;
   }
   writeTraversal(state: TraversalState): void {
+    validateTraversal(state);
     this.db.prepare('INSERT INTO traversal(id,payload) VALUES(1,?) ON CONFLICT(id) DO UPDATE SET payload=excluded.payload').run(JSON.stringify(state));
   }
   transitionTraversal(change: (state: TraversalState) => TraversalState): void {
     this.db.exec('BEGIN IMMEDIATE');
     try {
       const next = change(this.readTraversal());
+      validateTraversal(next);
       this.db.prepare('UPDATE traversal SET payload=? WHERE id=1').run(JSON.stringify(next));
       afterTraversalWriteForTest?.();
       this.db.exec('COMMIT');

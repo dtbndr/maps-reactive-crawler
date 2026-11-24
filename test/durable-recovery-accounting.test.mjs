@@ -1,5 +1,5 @@
 import test from 'node:test'; import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync } from 'node:fs'; import { tmpdir } from 'node:os'; import { join } from 'node:path'; import { spawnSync } from 'node:child_process';
+import { mkdtempSync, rmSync } from 'node:fs'; import { DatabaseSync } from 'node:sqlite'; import { tmpdir } from 'node:os'; import { join } from 'node:path'; import { spawnSync } from 'node:child_process';
 import { validateGeometry, createTraversal } from '../dist/index.js'; import { DurableState } from '../dist/durable-state.js'; import { executeDurableDiscovery, resolveDurableRecoveryDebit, recordDurableCleanPause } from '../dist/durable-discovery.js';
 const geo=validateGeometry({seed:{latitude:0,longitude:0},spacing:10,area:{type:'bbox',south:-1,north:1,west:-1,east:1}});
 test('fresh process fails closed after crash; finite debit resolves; invalid and posthoc clean pause reject',()=>{
@@ -16,7 +16,7 @@ test('fresh process fails closed after crash; finite debit resolves; invalid and
 test('malformed clean-pause marker after abrupt death fails closed without sending',()=>{
  const dir=mkdtempSync(join(tmpdir(),'malformed-clean-pause-'));const path=join(dir,'state.db');
  try {
-  const child=`import {DurableState} from './dist/durable-state.js';import {createTraversal} from './dist/traversal.js';const d=DurableState.open(${JSON.stringify(path)});d.writeTraversal({...createTraversal(${JSON.stringify(geo)},{cells:1,submissions:1,activeTime:10}),cleanPauseEvidence:{}});process.exit(0)`;
+  const child=`import {DurableState} from './dist/durable-state.js';import {DatabaseSync} from 'node:sqlite';import {createTraversal} from './dist/traversal.js';const d=DurableState.open(${JSON.stringify(path)});d.writeTraversal(createTraversal(${JSON.stringify(geo)},{cells:1,submissions:1,activeTime:10}));const raw=new DatabaseSync(${JSON.stringify(path)});raw.prepare('UPDATE traversal SET payload=?').run(JSON.stringify({...d.readTraversal(),cleanPauseEvidence:{}}));raw.close();process.exit(0)`;
   assert.equal(spawnSync(process.execPath,['--input-type=module','-e',child],{encoding:'utf8'}).status,0);
   assert.throws(()=>DurableState.open(path),/Corrupt traversal checkpoint/);
  } finally {rmSync(dir,{recursive:true,force:true})}

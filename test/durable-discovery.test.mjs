@@ -7,6 +7,7 @@ import { mkdtempSync, rmSync, writeFileSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
+import { DatabaseSync } from 'node:sqlite';
 const geometry = validateGeometry({ seed: { latitude: 0, longitude: 0 }, spacing: 100, area: { type: 'bbox', south: -1, north: 1, west: -1, east: 1 } });
 const temp = () => { const dir = mkdtempSync(join(tmpdir(), 'durable-discovery-')); return { dir, path: join(dir, 'state.db') }; };
 
@@ -35,6 +36,20 @@ test('failed durable traversal transition rolls back all state changes', () => {
       const next = reserveSubmission(admitNextCell(state), '0,0');
       throw Object.assign(new Error('simulated partial application failure'), { next });
     }), /simulated partial application failure/);
+    assert.deepEqual(durable.readTraversal(), initial);
+    durable.close();
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('invalid durable traversal transition rolls back and invalid ordinary writes are rejected', () => {
+  const { dir, path } = temp();
+  try {
+    const durable = DurableState.open(path);
+    const initial = createTraversal(geometry, { cells: 5, submissions: 3, activeTime: 10 });
+    durable.writeTraversal(initial);
+    assert.throws(() => durable.transitionTraversal(state => ({ ...state, submissions: 1 })), /Corrupt traversal checkpoint/);
+    assert.deepEqual(durable.readTraversal(), initial);
+    assert.throws(() => durable.writeTraversal({ ...initial, submissions: 1 }), /Corrupt traversal checkpoint/);
     assert.deepEqual(durable.readTraversal(), initial);
     durable.close();
   } finally { rmSync(dir, { recursive: true, force: true }); }
@@ -248,7 +263,10 @@ test('fresh child crash while promoting parked A preserves running B and recover
     state = reserveSubmission(admitNextCell(state), '0,0');
     state = { ...state, attempts: state.attempts.map(a => ({ ...a, status: 'uncertain', knownId: 'A-id' })), cells: { ...state.cells, '0,0': { outcome: 'parked' } }, queue: ['1,0'], admitted: [...state.admitted, '1,0'], cells: { ...state.cells, '0,0': { outcome: 'parked' }, '1,0': { outcome: 'running' } }, submissions: 2 };
     state = { ...state, attempts: [...state.attempts, { ...state.attempts[0], id: 'work:1,0:attempt:1', workId: 'work:1,0', cellKey: '1,0', status: 'dispatched', knownId: 'B-id' }] };
-    setup.writeTraversal(state);
+    setup.writeTraversal(createTraversal(geometry, { cells: 5, submissions: 2, activeTime: 10 }));
+    const corruptDb = new DatabaseSync(path);
+    corruptDb.prepare('UPDATE traversal SET payload=?').run(JSON.stringify(state));
+    corruptDb.close();
     setup.close();
     const ledgerPath = join(dir, 'ledger.json');
     writeFileSync(ledgerPath, JSON.stringify({ 'work:0,0': 1, 'work:1,0': 1 }));
@@ -434,7 +452,10 @@ test('corrupt queue referencing missing cell fails before send', () => {
   try {
     const durable = DurableState.open(path);
     const state = createTraversal(geometry, { cells: 5, submissions: 3, activeTime: 10 });
-    durable.writeTraversal({ ...state, queue: ['missing'] });
+    durable.writeTraversal(state);
+    const corruptDb = new DatabaseSync(path);
+    corruptDb.prepare('UPDATE traversal SET payload=?').run(JSON.stringify({ ...state, queue: ['missing'] }));
+    corruptDb.close();
     let sends = 0;
     assert.throws(() => executeDurableDiscovery(durable, () => { sends++; return { id: 'bad' }; }, () => ({ elapsed: 0, result: { status: 'empty' } })), /Corrupt traversal checkpoint/);
     assert.equal(sends, 0);
