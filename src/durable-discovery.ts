@@ -125,7 +125,11 @@ function executeDurableDiscoveryImpl(state: DurableState, send: SyntheticSend, o
       state.transitionTraversal(value => markUncertain(value, running!, uncertaintyScope, id));
       throw error;
     }
-    const storedCeiling = attempt.observationRetryCeiling ?? (attempt.submissionRetryOrdinal !== undefined && attempt.submissionRetryCeiling === undefined && attempt.retryCeiling !== undefined ? 0 : attempt.retryOrdinal === undefined ? retryPolicy.observationCeiling : 0);
+    const legacyObservationCeiling = attempt.submissionRetryOrdinal === undefined && attempt.retryOrdinal !== undefined ? attempt.retryCeiling : undefined;
+    const storedCeiling = attempt.observationRetryCeiling ?? legacyObservationCeiling ?? (attempt.submissionRetryOrdinal !== undefined && attempt.submissionRetryCeiling === undefined && attempt.retryCeiling !== undefined ? 0 : attempt.retryOrdinal === undefined ? retryPolicy.observationCeiling : 0);
+    if (legacyObservationCeiling !== undefined && (attempt.retryOrdinal ?? 0) < legacyObservationCeiling) {
+      state.transitionTraversal(value => ({ ...value, attempts: value.attempts.map(item => { if (item.id !== attempt!.id) return item; const { retryCeiling: _, ...rest } = item; return { ...rest, observationRetryCeiling: legacyObservationCeiling }; }) }));
+    }
     if ((state.readTraversal().attempts.find(item => item.id === attempt!.id)!.retryOrdinal ?? 0) >= storedCeiling) {
       state.transitionTraversal(value => markUncertain({ ...value, attempts: value.attempts.map(item => item.id === attempt!.id && item.retryCeiling === undefined ? { ...item, observationRetryCeiling: storedCeiling } : item) }, running!, uncertaintyScope, id));
       throw error;
