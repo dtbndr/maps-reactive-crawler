@@ -15,17 +15,21 @@ export class DurableState {
     const db = new DatabaseSync(path);
     try {
       db.exec('PRAGMA journal_mode=WAL; CREATE TABLE IF NOT EXISTS checkpoint (id INTEGER PRIMARY KEY CHECK(id=1), version INTEGER NOT NULL, payload TEXT NOT NULL); CREATE TABLE IF NOT EXISTS owner (id INTEGER PRIMARY KEY CHECK(id=1), pid INTEGER NOT NULL);');
+      db.exec('BEGIN IMMEDIATE');
       const row = db.prepare('SELECT version, payload FROM checkpoint WHERE id=1').get();
       if (row) { if (row.version !== 1) throw new Error('Unsupported schema version'); validate(JSON.parse(String(row.payload))); }
       else if (existed) throw new Error('Corrupt state: missing checkpoint');
       const owner = db.prepare('SELECT pid FROM owner WHERE id=1').get();
       if (owner && isAlive(Number(owner.pid))) throw new Error('Database is already owned');
-      db.exec('BEGIN IMMEDIATE');
       db.prepare('INSERT OR REPLACE INTO owner(id,pid) VALUES(1,?)').run(process.pid);
       if (!row) db.prepare('INSERT INTO checkpoint(id,version,payload) VALUES(1,1,?)').run(JSON.stringify(initial()));
       db.exec('COMMIT');
       return new DurableState(db);
-    } catch (error) { try { db.close(); } catch {} throw error; }
+    } catch (error) {
+      try { db.exec('ROLLBACK'); } catch (rollbackError) { if (!(rollbackError instanceof Error)) throw rollbackError; }
+      try { db.close(); } catch (closeError) { if (!(closeError instanceof Error)) throw closeError; }
+      throw error;
+    }
   }
   read(): Snapshot { const row = this.db.prepare('SELECT payload FROM checkpoint WHERE id=1').get(); const value = JSON.parse(String(row?.payload)); validate(value); return value; }
   transition(change: (state: Snapshot) => Snapshot): void {
