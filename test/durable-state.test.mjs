@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
@@ -37,20 +37,33 @@ test('exclusive ownership rejects simultaneous contention and permits reacquisit
 test('simultaneous processes grant checkpoint ownership to at most one contender', async () => {
   const {dir,path}=temp();
   const release=join(dir,'release');
-  const script=`import { existsSync, writeFileSync } from 'node:fs'; import { DurableState } from ${JSON.stringify(new URL('../dist/durable-state.js', import.meta.url).href)}; const [path,ready,release]=process.argv.slice(1); writeFileSync(ready, 'ready'); while (!existsSync(release)) await new Promise(r=>setTimeout(r,1)); try { const state=DurableState.open(path); console.log('owned'); await new Promise(r=>setTimeout(r,150)); state.close(); } catch (e) { if (/owned|busy|locked/i.test(e.message)) console.log('rejected'); else throw e; }`;
-  const children=[0,1].map(index=>spawn(process.execPath,['--input-type=module','-e',script,path,join(dir,`ready-${index}`),release],{stdio:['ignore','pipe','pipe']}));
+  const script=`import { existsSync, writeFileSync } from 'node:fs'; import { DurableState } from ${JSON.stringify(new URL('../dist/durable-state.js', import.meta.url).href)}; const [path,result,release]=process.argv.slice(1); try { const state=DurableState.open(path); writeFileSync(result,'owned'); while (!existsSync(release)) await new Promise(r=>setTimeout(r,1)); state.close(); } catch (e) { if (/owned|busy|locked/i.test(e.message)) writeFileSync(result,'rejected'); else throw e; }`;
+  const children=[0,1].map(index=>spawn(process.execPath,['--input-type=module','-e',script,path,join(dir,`result-${index}`),release],{stdio:['ignore','pipe','pipe']}));
   try {
     const outcomesPromise=Promise.all(children.map(child=>new Promise((resolve,reject)=>{let out='',err=''; child.stdout.on('data',x=>out+=x); child.stderr.on('data',x=>err+=x); child.on('exit',code=>code===0?resolve(out.trim()):reject(new Error(err||`contender exited ${code}`)));})));
-    while (!existsSync(join(dir,'ready-0')) || !existsSync(join(dir,'ready-1'))) await new Promise(r=>setTimeout(r,1));
+    const deadline=Date.now()+5000;
+    while ((!existsSync(join(dir,'result-0')) || !existsSync(join(dir,'result-1'))) && Date.now()<deadline) await new Promise(r=>setTimeout(r,10));
+    assert.ok(existsSync(join(dir,'result-0')) && existsSync(join(dir,'result-1')),'contenders did not report in time');
     writeFileSync(release,'go');
-    const outcomes=await outcomesPromise;
+    await outcomesPromise;
+    const outcomes=[0,1].map(index=>readFileSync(join(dir,`result-${index}`),'utf8'));
     assert.equal(outcomes.filter(x=>x==='owned').length,1,JSON.stringify(outcomes));
+  } finally { for (const child of children) { if (child.exitCode===null) child.kill('SIGKILL'); } rmSync(dir,{recursive:true,force:true}); }
+});
+test('rejects structurally corrupt work and missing ownership metadata', () => {
+  const {dir,path}=temp();
+  try {
+    let state=DurableState.open(path); state.close();
+    let db=new DatabaseSync(path); db.prepare('UPDATE checkpoint SET payload=?').run(JSON.stringify({version:1,work:[null],observations:[],gaps:[]})); db.close();
+    assert.throws(()=>DurableState.open(path),/corrupt/i);
+    db=new DatabaseSync(path); db.exec('DROP TABLE owner'); db.close();
+    assert.throws(()=>DurableState.open(path),/missing required table/);
   } finally { rmSync(dir,{recursive:true,force:true}); }
 });
 test('rejects unsupported schema and corrupt persisted payload', () => {
   const {dir,path}=temp();
   try {
-    let db=new DatabaseSync(path); db.exec("CREATE TABLE checkpoint(id INTEGER PRIMARY KEY, version INTEGER, payload TEXT); INSERT INTO checkpoint VALUES(1,2,'{}')"); db.close();
+    let db=new DatabaseSync(path); db.exec("CREATE TABLE checkpoint(id INTEGER PRIMARY KEY, version INTEGER, payload TEXT); CREATE TABLE owner(id INTEGER PRIMARY KEY, pid INTEGER); INSERT INTO checkpoint VALUES(1,2,'{}')"); db.close();
     assert.throws(()=>DurableState.open(path),/schema version/);
     db=new DatabaseSync(path); db.exec("UPDATE checkpoint SET version=1,payload='not-json'"); db.close();
     assert.throws(()=>DurableState.open(path));

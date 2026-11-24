@@ -7,7 +7,7 @@ let afterOwnerReadForTest: (() => void) | undefined;
 /** Internal synchronization seam for deterministic ownership-race tests. */
 export function setAfterOwnerReadForTest(hook: (() => void) | undefined): void { afterOwnerReadForTest = hook; }
 function validate(value: unknown): asserts value is Snapshot {
-  if (!value || typeof value !== 'object' || (value as any).version !== 1 || !Array.isArray((value as any).work) || !Array.isArray((value as any).observations) || !Array.isArray((value as any).gaps)) throw new Error('Unsupported or corrupt state');
+  if (!value || typeof value !== 'object' || (value as any).version !== 1 || !Array.isArray((value as any).work) || !(value as any).work.every((entry: any) => entry && typeof entry === 'object' && typeof entry.id === 'string' && typeof entry.status === 'string') || !Array.isArray((value as any).observations) || !Array.isArray((value as any).gaps)) throw new Error('Unsupported or corrupt state');
 }
 
 /** Durable checkpoint foundation; this does not implement restartable discovery. */
@@ -17,11 +17,14 @@ export class DurableState {
     const existed = existsSync(path);
     const db = new DatabaseSync(path);
     try {
-      db.exec('PRAGMA journal_mode=WAL; CREATE TABLE IF NOT EXISTS checkpoint (id INTEGER PRIMARY KEY CHECK(id=1), version INTEGER NOT NULL, payload TEXT NOT NULL); CREATE TABLE IF NOT EXISTS owner (id INTEGER PRIMARY KEY CHECK(id=1), pid INTEGER NOT NULL);');
-      db.exec('BEGIN IMMEDIATE');
+      db.exec('PRAGMA journal_mode=WAL; BEGIN IMMEDIATE');
+      const tables = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name IN ('checkpoint','owner')").all().map((r: any) => r.name);
+      if (tables.length === 0) {
+        db.exec('CREATE TABLE checkpoint (id INTEGER PRIMARY KEY CHECK(id=1), version INTEGER NOT NULL, payload TEXT NOT NULL); CREATE TABLE owner (id INTEGER PRIMARY KEY CHECK(id=1), pid INTEGER NOT NULL);');
+      } else if (!tables.includes('checkpoint') || !tables.includes('owner')) throw new Error('Corrupt state: missing required table');
       const row = db.prepare('SELECT version, payload FROM checkpoint WHERE id=1').get();
       if (row) { if (row.version !== 1) throw new Error('Unsupported schema version'); validate(JSON.parse(String(row.payload))); }
-      else if (existed) throw new Error('Corrupt state: missing checkpoint');
+      else if (existed && tables.length !== 0) throw new Error('Corrupt state: missing checkpoint');
       const owner = db.prepare('SELECT pid FROM owner WHERE id=1').get();
       afterOwnerReadForTest?.();
       if (owner && isAlive(Number(owner.pid))) throw new Error('Database is already owned');
@@ -35,7 +38,7 @@ export class DurableState {
       throw error;
     }
   }
-  read(): Snapshot { const row = this.db.prepare('SELECT payload FROM checkpoint WHERE id=1').get(); const value = JSON.parse(String(row?.payload)); validate(value); return value; }
+  read(): Snapshot { const row = this.db.prepare('SELECT version, payload FROM checkpoint WHERE id=1').get(); if (!row || row.version !== 1) throw new Error('Unsupported schema version'); const value = JSON.parse(String(row.payload)); validate(value); return value; }
   transition(change: (state: Snapshot) => Snapshot): void {
     this.db.exec('BEGIN IMMEDIATE');
     try { const next = change(this.read()); validate(next); this.db.prepare('UPDATE checkpoint SET payload=? WHERE id=1').run(JSON.stringify(next)); this.db.exec('COMMIT'); }
