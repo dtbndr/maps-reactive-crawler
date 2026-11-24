@@ -45,8 +45,15 @@ None for synthetic offline behavior. Provider lookup, verification, retry, cance
 
 For every slice: run `mise exec -- npm run build` before focused tests, before RED and GREEN observations, and immediately before the full `mise exec -- npm run check`, since tests import dist and check tests before building. Establish meaningful RED for intentional changes before implementation; for refactors capture before/after evidence and add characterization where needed. Record exact results, distinguish verified baseline failures, and commit only after slice verification. Final verification has no baseline waiver.
 
+### Slice A0: Durable state foundation
+**Goal**: Establish the durable storage foundation without claiming restartable discovery.
+
+- [ ] Characterize the existing scheduler; establish versioned Node SQLite state, fail-closed validation, exclusive ownership and atomic state transitions. Test unsupported schema, corruption, lock contention and reacquisition after process death, and restart of the state API using temporary on-disk databases.
+- [ ] Preserve a path for stable work and attempt IDs, raw observations, provenance, pending work and gaps; do not claim the discovery gate is complete.
+- [ ] Build before focused tests and the full project check; record results and commit the foundation.
+
 ### Slice A: Durable discovery checkpoint
-**Goal**: Restartable discovery with stable replay identities and provenance.
+**Goal**: Complete the restartable discovery gate on the Slice A0 foundation with stable replay identities and provenance. All original Slice A acceptance criteria below remain required; the gate is complete only after both A0 and A pass.
 
 #### Tasks
 - [ ] Add local durable state initialization, versioned schema and atomic transition persistence for traversal, queue, observations, intent, ID and counters. Test exclusive lock contention, release after process death, unsupported versions and corrupt checkpoints failing closed before any send.
