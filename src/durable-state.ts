@@ -1,11 +1,14 @@
 import { DatabaseSync } from 'node:sqlite';
-import { existsSync } from 'node:fs';
+import { closeSync, openSync, statSync } from 'node:fs';
 
 type Snapshot = { version: 1; work: { id: string; status: string }[]; observations: unknown[]; gaps: unknown[] };
 const initial = (): Snapshot => ({ version: 1, work: [], observations: [], gaps: [] });
 let afterOwnerReadForTest: (() => void) | undefined;
+let afterCreateForTest: (() => void) | undefined;
 /** Internal synchronization seam for deterministic ownership-race tests. */
 export function setAfterOwnerReadForTest(hook: (() => void) | undefined): void { afterOwnerReadForTest = hook; }
+/** Internal synchronization seam for deterministic creation-race tests. */
+export function setAfterCreateForTest(hook: (() => void) | undefined): void { afterCreateForTest = hook; }
 function validate(value: unknown): asserts value is Snapshot {
   if (!value || typeof value !== 'object' || (value as any).version !== 1 || !Array.isArray((value as any).work) || !(value as any).work.every((entry: any) => entry && typeof entry === 'object' && typeof entry.id === 'string' && typeof entry.status === 'string') || !Array.isArray((value as any).observations) || !Array.isArray((value as any).gaps)) throw new Error('Unsupported or corrupt state');
 }
@@ -14,18 +17,34 @@ function validate(value: unknown): asserts value is Snapshot {
 export class DurableState {
   private constructor(private db: DatabaseSync) {}
   static open(path: string): DurableState {
-    const existed = existsSync(path);
+    let created = false;
+    try {
+      const fd = openSync(path, 'wx');
+      closeSync(fd);
+      created = true;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
+    }
+    const identity = created ? statSync(path) : undefined;
+    if (created) afterCreateForTest?.();
     const db = new DatabaseSync(path);
+    if (identity) {
+      const openedIdentity = statSync(path);
+      if (identity.dev !== openedIdentity.dev || identity.ino !== openedIdentity.ino) {
+        db.close();
+        throw new Error('Cannot establish database creation identity');
+      }
+    }
     try {
       db.exec('PRAGMA journal_mode=WAL; BEGIN IMMEDIATE');
       const tables = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name IN ('checkpoint','owner')").all().map((r: any) => r.name);
       const userTables = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'").all();
-      if (tables.length === 0 && !existed && userTables.length === 0) {
+      if (tables.length === 0 && created && userTables.length === 0) {
         db.exec('CREATE TABLE checkpoint (id INTEGER PRIMARY KEY CHECK(id=1), version INTEGER NOT NULL, payload TEXT NOT NULL); CREATE TABLE owner (id INTEGER PRIMARY KEY CHECK(id=1), pid INTEGER NOT NULL);');
       } else if (!tables.includes('checkpoint') || !tables.includes('owner')) throw new Error('Corrupt state: missing required table');
       const row = db.prepare('SELECT version, payload FROM checkpoint WHERE id=1').get();
       if (row) { if (row.version !== 1) throw new Error('Unsupported schema version'); validate(JSON.parse(String(row.payload))); }
-      else if (existed && tables.length !== 0) throw new Error('Corrupt state: missing checkpoint');
+      else if (!created && tables.length !== 0) throw new Error('Corrupt state: missing checkpoint');
       const owner = db.prepare('SELECT pid FROM owner WHERE id=1').get();
       afterOwnerReadForTest?.();
       if (owner) {

@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { spawn, spawnSync } from 'node:child_process';
-import { DurableState, setAfterOwnerReadForTest } from '../dist/durable-state.js';
+import { DurableState, setAfterCreateForTest, setAfterOwnerReadForTest } from '../dist/durable-state.js';
 
 const temp = () => { const dir = mkdtempSync(join(tmpdir(), 'crawler-state-')); return { dir, path: join(dir, 'state.db') }; };
 test('durable state persists atomic transitions and can be reopened', () => {
@@ -92,7 +92,14 @@ test('fails closed for empty database with stale initialization marker', () => {
     assert.throws(()=>DurableState.open(path),/corrupt|missing|required/i);
   } finally { rmSync(dir,{recursive:true,force:true}); }
 });
-test('recovers first initialization interrupted before commit', () => {
+test('rejects empty database substituted after exclusive creation', () => {
+  const {dir,path}=temp();
+  try {
+    setAfterCreateForTest(() => { setAfterCreateForTest(undefined); rmSync(path); writeFileSync(path, ''); });
+    assert.throws(() => DurableState.open(path), /corrupt|missing|required|identity/i);
+  } finally { setAfterCreateForTest(undefined); rmSync(dir,{recursive:true,force:true}); }
+});
+test('fails closed when first initialization is interrupted before commit', () => {
   const {dir,path}=temp();
   try {
     const child=spawnSync(process.execPath,['--input-type=module','-e',`import {DurableState,setAfterOwnerReadForTest} from ${JSON.stringify(new URL('../dist/durable-state.js', import.meta.url).href)}; setAfterOwnerReadForTest(()=>process.kill(process.pid,'SIGKILL')); DurableState.open(${JSON.stringify(path)});`],{encoding:'utf8'});
