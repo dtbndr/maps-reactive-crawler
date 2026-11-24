@@ -1,7 +1,7 @@
 import { classifyCandidate, cellKey, isCellEligible, neighbors, type CandidateClass, type Geometry } from './index.js';
 
 export type CellOutcome = 'queued' | 'running' | 'parked' | 'nonempty' | 'empty' | 'failed' | 'unrecognized';
-export type CandidateObservation = { id: string; coordinate?: { latitude: number; longitude: number } | null; classification: CandidateClass; sourceCell: string };
+export type CandidateObservation = { id: string; coordinate?: { latitude: number; longitude: number } | null; classification: CandidateClass; sourceCell: string; observationId: string; attemptId: string; occurrence: number };
 export type TraversalLimits = { cells: number; submissions: number; activeTime: number };
 export type Attempt = { id: string; workId: string; cellKey: string; status: 'reserved' | 'dispatched' | 'uncertain' | 'observing' | 'observed' | 'skipped'; knownId?: string };
 export type TraversalReport = { stopReason: 'cancelled' | 'paused' | 'active_time' | 'submissions' | 'cells' | 'gaps' | 'failed' | 'unrecognized' | 'empty' | 'in_progress' | 'complete'; outcome: 'complete' | 'in_progress' | 'partial_empty_success' | 'partial_failed' | 'partial_unrecognized' | 'partial_limit' | 'partial_cancelled' | 'partial_gaps'; queue: string[]; blocked: string[]; gaps: TraversalState['gaps']; submissions: number; activeTime: number; cells: TraversalState['cells'] };
@@ -59,7 +59,7 @@ export function authorizeResend(state: TraversalState, key: string): TraversalSt
 export function observeKnownId(state: TraversalState, key: string, id: string, elapsed: number): TraversalState {
   if (!id || !Number.isFinite(elapsed) || elapsed < 0) throw new Error('Invalid observation');
   const i = state.attempts.map(a => a.cellKey).lastIndexOf(key);
-  if (i < 0 || !['dispatched', 'uncertain'].includes(state.attempts[i].status)) throw new Error('No known submission to observe');
+  if (i < 0 || !['dispatched', 'uncertain', 'observing'].includes(state.attempts[i].status)) throw new Error('No known submission to observe');
   const attempts = [...state.attempts]; attempts[i] = { ...attempts[i], status: 'observed', knownId: id };
   return { ...state, attempts, cells: { ...state.cells, [key]: { outcome: 'running' } }, activeTime: state.activeTime + elapsed };
 }
@@ -101,10 +101,10 @@ export function debitActiveTime(state: TraversalState, elapsed: number): Travers
   if (!Number.isFinite(elapsed) || elapsed < 0) throw new Error('Invalid elapsed time');
   return { ...state, activeTime: state.activeTime + elapsed };
 }
-export function markUncertain(state: TraversalState, key: string, scope: 'isolated' | 'global' = 'isolated'): TraversalState {
+export function markUncertain(state: TraversalState, key: string, scope: 'isolated' | 'global' = 'isolated', knownId?: string): TraversalState {
   const i = state.attempts.map(a => a.cellKey).lastIndexOf(key);
-  if (i < 0 || state.attempts[i].status !== 'dispatched') throw new Error('Attempt is not dispatched');
-  const attempts = [...state.attempts]; attempts[i] = { ...attempts[i], status: 'uncertain' };
+  if (i < 0 || !['dispatched', 'observing'].includes(state.attempts[i].status)) throw new Error('Attempt is not dispatched');
+  const attempts = [...state.attempts]; attempts[i] = { ...attempts[i], status: 'uncertain', ...(knownId ? { knownId } : {}) };
   return { ...state, attempts, cells: { ...state.cells, [key]: { outcome: 'parked' } }, paused: state.paused || scope === 'global', gaps: [...state.gaps, { cellKey: key, cause: 'uncertain', scope, status: 'unresolved' }] };
 }
 export function applyDiscoveryResult(state: TraversalState, key: string, result: DiscoveryResult): TraversalState {
@@ -120,7 +120,7 @@ export function applyDiscoveryResult(state: TraversalState, key: string, result:
   let paused = state.paused;
   if (result.status === 'success' && result.candidates.length > 0) {
     cells[key] = { outcome: 'nonempty' };
-    for (const candidate of result.candidates) candidates.push({ ...candidate, classification: classifyCandidate(state.geometry, candidate.coordinate), sourceCell: key });
+    for (const [occurrence, candidate] of result.candidates.entries()) candidates.push({ ...candidate, classification: classifyCandidate(state.geometry, candidate.coordinate), sourceCell: key, observationId: `${latestAttempt.id}:observation:${occurrence + 1}`, attemptId: latestAttempt.id, occurrence: occurrence + 1 });
     const [column, row] = key.split(',').map(Number);
     for (const [c, r] of neighbors(state.geometry, column, row)) {
       const nextKey = cellKey(c, r);
