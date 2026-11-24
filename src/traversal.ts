@@ -3,17 +3,30 @@ import { classifyCandidate, cellKey, isCellEligible, neighbors, type CandidateCl
 export type CellOutcome = 'queued' | 'running' | 'parked' | 'nonempty' | 'empty' | 'failed' | 'unrecognized';
 export type CandidateObservation = { id: string; coordinate?: { latitude: number; longitude: number } | null; classification: CandidateClass; sourceCell: string; observationId: string; attemptId: string; occurrence: number };
 export type TraversalLimits = { cells: number; submissions: number; activeTime: number };
-export type Attempt = { id: string; workId: string; cellKey: string; status: 'reserved' | 'dispatched' | 'uncertain' | 'observing' | 'observed' | 'skipped'; knownId?: string; retryOrdinal?: number; retryCeiling?: number; resendOrdinal?: number; approval?: { rationale: string } };
+export type Attempt = { id: string; workId: string; cellKey: string; status: 'reserved' | 'dispatched' | 'uncertain' | 'observing' | 'observed' | 'skipped'; knownId?: string; retryOrdinal?: number; retryCeiling?: number; submissionRetryOrdinal?: number; resendOrdinal?: number; approval?: { rationale: string }; recoveryEvidence?: { source: string; evidence: string; timestamp: string }; safeRetryAuthorization?: { ordinal: number; ceiling: number } };
 export type TraversalReport = { stopReason: 'cancelled' | 'paused' | 'active_time' | 'submissions' | 'cells' | 'gaps' | 'failed' | 'unrecognized' | 'empty' | 'in_progress' | 'complete'; outcome: 'complete' | 'in_progress' | 'partial_empty_success' | 'partial_failed' | 'partial_unrecognized' | 'partial_limit' | 'partial_cancelled' | 'partial_gaps'; queue: string[]; blocked: string[]; gaps: TraversalState['gaps']; submissions: number; activeTime: number; cells: TraversalState['cells'] };
-export type TraversalState = { geometry: Geometry; limits: TraversalLimits; queue: string[]; admitted: string[]; cells: Record<string, { outcome: CellOutcome }>; candidates: CandidateObservation[]; gaps: { cellKey: string; cause: 'failed' | 'unrecognized' | 'uncertain'; scope?: 'isolated' | 'global'; status?: 'unresolved' | 'resolved' | 'skipped' }[]; paused: boolean; submissions: number; activeTime: number; blocked: string[]; attempts: Attempt[]; cancelled: boolean };
+export type TraversalState = { geometry: Geometry; limits: TraversalLimits; queue: string[]; admitted: string[]; cells: Record<string, { outcome: CellOutcome }>; candidates: CandidateObservation[]; gaps: { cellKey: string; cause: 'failed' | 'unrecognized' | 'uncertain'; scope?: 'isolated' | 'global'; status?: 'unresolved' | 'resolved' | 'skipped' }[]; paused: boolean; submissions: number; activeTime: number; blocked: string[]; attempts: Attempt[]; cancelled: boolean; recoveryPending?: boolean; cleanPauseEvidence?: { evidence: string }; recoveryDebitEvidence?: { elapsed: number; evidence: string } };
 export type DiscoveryResult = { status: 'success'; candidates: { id: string; coordinate?: { latitude: number; longitude: number } | null }[] } | { status: 'empty' } | { status: 'failed'; cause?: string; scope: 'isolated' | 'global' } | { status: 'unrecognized' };
 
 export function createTraversal(geometry: Geometry, limits: TraversalLimits): TraversalState {
   if (!limits || ![limits.cells, limits.submissions, limits.activeTime].every(Number.isFinite) || limits.cells < 1 || limits.submissions < 0 || limits.activeTime < 0) throw new Error('Invalid finite traversal limits');
   const key = cellKey(0, 0);
-  return { geometry, limits, queue: [key], admitted: [key], cells: { [key]: { outcome: 'queued' } }, candidates: [], gaps: [], paused: false, submissions: 0, activeTime: 0, blocked: [], attempts: [], cancelled: false };
+  return { geometry, limits, queue: [key], admitted: [key], cells: { [key]: { outcome: 'queued' } }, candidates: [], gaps: [], paused: false, submissions: 0, activeTime: 0, blocked: [], attempts: [], cancelled: false, recoveryPending: false };
 }
 
+export function authorizeSafeRetryReservation(state: TraversalState, key: string, retryOrdinal: number, ceiling: number): TraversalState {
+  const previous = state.attempts.findLast(a => a.cellKey === key);
+  if (!previous || previous.status !== 'uncertain' || !Number.isInteger(retryOrdinal) || retryOrdinal < 1 || retryOrdinal > ceiling || state.submissions >= state.limits.submissions || state.activeTime >= state.limits.activeTime || state.paused || state.cancelled) throw new Error('Safe retry cannot be reserved');
+  if (previous.safeRetryAuthorization?.ordinal !== retryOrdinal || previous.safeRetryAuthorization.ceiling !== ceiling) throw new Error('Safe retry authorization missing');
+  const ordinal = state.attempts.filter(a => a.cellKey === key).length + 1;
+  return { ...state, submissions: state.submissions + 1, attempts: [...state.attempts, { id: `${previous.workId}:attempt:${ordinal}`, workId: previous.workId, cellKey: key, status: 'reserved', submissionRetryOrdinal: retryOrdinal, retryCeiling: ceiling }] };
+}
+export function authorizeSafeRetry(state: TraversalState, key: string, retryOrdinal: number, ceiling: number): TraversalState {
+  const previous = state.attempts.findLast(a => a.cellKey === key);
+  if (!previous || previous.status !== 'uncertain' || !Number.isInteger(retryOrdinal) || retryOrdinal < 1 || retryOrdinal > ceiling || state.paused || state.cancelled) throw new Error('Safe retry cannot be authorized');
+  const attempts = [...state.attempts]; attempts[attempts.indexOf(previous)] = { ...previous, safeRetryAuthorization: { ordinal: retryOrdinal, ceiling } };
+  return { ...state, attempts };
+}
 export function reserveSubmission(state: TraversalState, key: string): TraversalState {
   if (state.paused || state.cancelled || state.activeTime >= state.limits.activeTime) throw new Error('Submission stopped');
   if (state.submissions >= state.limits.submissions) throw new Error('Submission limit reached');
@@ -21,7 +34,7 @@ export function reserveSubmission(state: TraversalState, key: string): Traversal
   if (state.cells[key]?.outcome !== 'running') throw new Error('Cell is not running');
   const ordinal = state.attempts.filter(a => a.cellKey === key).length + 1;
   const workId = `work:${key}`;
-  return { ...state, submissions: state.submissions + 1, attempts: [...state.attempts, { id: `${workId}:attempt:${ordinal}`, workId, cellKey: key, status: 'reserved' }] };
+  return { ...state, submissions: state.submissions + 1, attempts: [...state.attempts, { id: `${workId}:attempt:${ordinal}`, workId, cellKey: key, status: 'reserved', submissionRetryOrdinal: 0 }] };
 }
 export function dispatchSubmission(state: TraversalState, key: string): TraversalState {
   if (state.cancelled || state.paused || state.activeTime >= state.limits.activeTime) throw new Error('Dispatch stopped');
@@ -56,6 +69,13 @@ export function authorizeResend(state: TraversalState, key: string, rationale = 
   const ordinal = state.attempts.filter(a => a.cellKey === key).length + 1;
   const workId = `work:${key}`;
   return { ...state, submissions: state.submissions + 1, cells: { ...state.cells, [key]: { outcome: 'running' } }, attempts: [...state.attempts, { id: `${workId}:attempt:${ordinal}`, workId, cellKey: key, status: 'reserved', resendOrdinal: ordinal, approval: { rationale } }] };
+}
+export function recoverKnownId(state: TraversalState, key: string, id: string, evidence: { source: string; evidence: string; timestamp: string }): TraversalState {
+  const i = state.attempts.map(a => a.cellKey).lastIndexOf(key);
+  const attempt = state.attempts[i];
+  if (!attempt || attempt.status !== 'uncertain' || attempt.knownId || !id || !evidence.source || !evidence.evidence || !Number.isFinite(Date.parse(evidence.timestamp))) throw new Error('Invalid recovered ID evidence');
+  const attempts = [...state.attempts]; attempts[i] = { ...attempt, knownId: id, recoveryEvidence: { ...evidence } };
+  return { ...state, attempts };
 }
 export function retryKnownIdObservation(state: TraversalState, key: string, ceiling: number): TraversalState {
   if (!Number.isInteger(ceiling) || ceiling < 0) throw new Error('Invalid finite retry ceiling');

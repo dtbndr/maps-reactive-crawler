@@ -1,21 +1,24 @@
 import type { DurableState } from './durable-state.js';
-import { admitNextCell, applyDiscoveryResult, dispatchSubmission, markUncertain, observeKnownId, reserveSubmission, retryKnownIdObservation, type DiscoveryResult, type TraversalState } from './traversal.js';
+import { admitNextCell, applyDiscoveryResult, authorizeSafeRetry, authorizeSafeRetryReservation, dispatchSubmission, markUncertain, observeKnownId, reserveSubmission, retryKnownIdObservation, recoverKnownId, skipAttempt, authorizeResend, cancelTraversal, type DiscoveryResult, type TraversalState } from './traversal.js';
 
 export type SyntheticSend = (workId: string) => { id: string };
 export type SyntheticObserve = (id: string) => { result: DiscoveryResult; elapsed: number };
-export type DurableRetryPolicy = { observationCeiling: number; knownSafeObservationError: (error: unknown) => boolean };
-export type DurableDiscoveryBoundary = 'dequeued' | 'reserved' | 'dispatched' | 'sent' | 'id-persisted' | 'observing' | 'observed' | 'committed';
+export type DurableRetryPolicy = { observationCeiling: number; knownSafeObservationError: (error: unknown) => boolean; submissionCeiling?: number; knownSafeSubmissionError?: (error: unknown) => boolean };
+export type DurableDiscoveryBoundary = 'dequeued' | 'retry-authorized' | 'reserved' | 'dispatched' | 'sent' | 'id-persisted' | 'observing' | 'observed' | 'committed';
 let boundaryHook: ((boundary: DurableDiscoveryBoundary) => void) | undefined;
 /** Test-only crash injection seam; unset during normal crawler execution. */
 export function setDurableDiscoveryBoundaryHookForTest(hook: ((boundary: DurableDiscoveryBoundary) => void) | undefined): void { boundaryHook = hook; }
 
 /** Reserve before send; known IDs are re-observed on restart without another submission. */
-export function executeDurableDiscovery(state: DurableState, send: SyntheticSend, observe: SyntheticObserve, uncertaintyScope: 'isolated' | 'global' = 'global', retryPolicy?: DurableRetryPolicy): TraversalState {
+function executeDurableDiscoveryImpl(state: DurableState, send: SyntheticSend, observe: SyntheticObserve, uncertaintyScope: 'isolated' | 'global', retryPolicy: DurableRetryPolicy | undefined, reservedRetryId?: string): TraversalState {
   let current = state.readTraversal();
+  if (current.recoveryPending) throw new Error('Recovery accounting is unresolved');
   if (current.paused || current.cancelled) throw new Error(current.paused ? 'Traversal is paused' : 'Traversal is cancelled');
   let running = Object.entries(current.cells).find(([, cell]) => cell.outcome === 'running')?.[0];
+  const latestUncertain = current.attempts.findLast(item => item.status === 'uncertain');
   const recoverable = current.attempts.findLast(item => item.status === 'uncertain' && item.knownId)
-    ?? current.attempts.findLast(item => ['dispatched', 'observing'].includes(item.status) && item.knownId);
+    ?? current.attempts.findLast(item => ['dispatched', 'observing'].includes(item.status) && item.knownId)
+    ?? (latestUncertain && !latestUncertain.knownId && (latestUncertain.submissionRetryOrdinal ?? 0) < (retryPolicy?.submissionCeiling ?? 0) ? latestUncertain : undefined);
   if (recoverable && !current.paused && (current.activeTime >= current.limits.activeTime || current.submissions >= current.limits.submissions || (!running && current.queue.length === 0) || (running && !current.attempts.some(item => item.cellKey === running && ['reserved', 'dispatched', 'observing'].includes(item.status))))) {
     const previousRunning = running;
     running = recoverable.cellKey;
@@ -32,6 +35,11 @@ export function executeDurableDiscovery(state: DurableState, send: SyntheticSend
     running = Object.entries(current.cells).find(([, cell]) => cell.outcome === 'running')![0];
   }
   const latestForCell = current.attempts.findLast(item => item.cellKey === running);
+  if (latestForCell?.status === 'uncertain' && !latestForCell.knownId && latestForCell.safeRetryAuthorization) {
+    const auth = latestForCell.safeRetryAuthorization;
+    state.transitionTraversal(value => authorizeSafeRetryReservation(value, running!, auth.ordinal, auth.ceiling));
+    return executeDurableDiscoveryImpl(state, send, observe, uncertaintyScope, retryPolicy, state.readTraversal().attempts.at(-1)!.id);
+  }
   if (latestForCell?.status === 'uncertain' && !latestForCell.knownId) {
     throw new Error('Dispatched attempt has unknown outcome; refusing resend');
   }
@@ -50,8 +58,8 @@ export function executeDurableDiscovery(state: DurableState, send: SyntheticSend
   }
   let attempt = current.attempts.findLast(item => item.cellKey === running && ['reserved', 'dispatched', 'observing', 'observed', 'uncertain'].includes(item.status));
   if (!attempt) throw new Error('Running cell has no recoverable attempt');
-  const freshlyReserved = attempt.status === 'reserved' && reservedThisInvocation;
-  if (attempt.status === 'reserved' && !reservedThisInvocation) {
+  const freshlyReserved = attempt.status === 'reserved' && (reservedThisInvocation || attempt.id === reservedRetryId);
+  if (attempt.status === 'reserved' && !reservedThisInvocation && attempt.id !== reservedRetryId) {
     state.transitionTraversal(value => ({ ...value, attempts: value.attempts.map(item => item.id === attempt!.id ? { ...item, status: 'uncertain' } : item), cells: { ...value.cells, [running!]: { outcome: 'parked' } }, gaps: [...value.gaps, { cellKey: running!, cause: 'uncertain', scope: uncertaintyScope, status: 'unresolved' }], paused: value.paused || uncertaintyScope === 'global' }));
     throw new Error('Persisted reservation has unknown outcome; refusing send');
   }
@@ -68,6 +76,15 @@ export function executeDurableDiscovery(state: DurableState, send: SyntheticSend
     let response: { id: string };
     try { response = send(attempt.workId); }
     catch (error) {
+      if (retryPolicy?.knownSafeSubmissionError?.(error) && (attempt.submissionRetryOrdinal ?? 0) < (retryPolicy.submissionCeiling ?? 0) && state.readTraversal().submissions < state.readTraversal().limits.submissions) {
+        const retryOrdinal = (attempt.submissionRetryOrdinal ?? 0) + 1;
+        state.transitionTraversal(value => {
+          const uncertain = { ...value, attempts: value.attempts.map(item => item.id === attempt!.id ? { ...item, status: 'uncertain' as const } : item), gaps: [...value.gaps, { cellKey: running!, cause: 'failed' as const, scope: 'isolated' as const, status: 'unresolved' as const }] };
+          return authorizeSafeRetry(uncertain, running!, retryOrdinal, retryPolicy.submissionCeiling!);
+        });
+        boundaryHook?.('retry-authorized');
+        return executeDurableDiscoveryImpl(state, send, observe, uncertaintyScope, retryPolicy, state.readTraversal().attempts.at(-1)!.id);
+      }
       state.transitionTraversal(value => markUncertain(value, running!, uncertaintyScope));
       throw error;
     }
@@ -90,12 +107,13 @@ export function executeDurableDiscovery(state: DurableState, send: SyntheticSend
       throw error;
     }
     let retries = 0;
+    const storedCeiling = attempt.retryCeiling ?? retryPolicy.observationCeiling;
     while (true) {
-      state.transitionTraversal(value => retryKnownIdObservation(value, running!, retryPolicy.observationCeiling));
+      state.transitionTraversal(value => retryKnownIdObservation(value, running!, storedCeiling));
       retries++;
       try { response = observe(id); break; }
       catch (retryError) {
-        if (retries >= retryPolicy.observationCeiling || !retryPolicy.knownSafeObservationError(retryError)) {
+        if (retries >= storedCeiling || !retryPolicy.knownSafeObservationError(retryError)) {
           state.transitionTraversal(value => markUncertain(value, running!, uncertaintyScope, id));
           throw retryError;
         }
@@ -105,5 +123,49 @@ export function executeDurableDiscovery(state: DurableState, send: SyntheticSend
   boundaryHook?.('observed');
   state.transitionTraversal(value => applyDiscoveryResult(observeKnownId(value, running!, id, response.elapsed), running!, response.result));
   boundaryHook?.('committed');
+  return state.readTraversal();
+}
+
+export function executeDurableDiscovery(state: DurableState, send: SyntheticSend, observe: SyntheticObserve, uncertaintyScope: 'isolated' | 'global' = 'global', retryPolicy?: DurableRetryPolicy): TraversalState {
+  return executeDurableDiscoveryImpl(state, send, observe, uncertaintyScope, retryPolicy);
+}
+
+export function recoverDurableKnownId(state: DurableState, key: string, id: string, evidence: { source: string; evidence: string; timestamp: string }, observe: SyntheticObserve): TraversalState {
+  state.transitionTraversal(value => {
+    const recovered = recoverKnownId(value, key, id, evidence);
+    const cells = { ...recovered.cells };
+    for (const [cellKey, cell] of Object.entries(cells)) if (cell.outcome === 'running' && cellKey !== key) cells[cellKey] = { outcome: 'queued' };
+    cells[key] = { outcome: 'running' };
+    return { ...recovered, cells, queue: recovered.queue.filter(item => item !== key) };
+  });
+  // Resume only the specifically recovered ID; the general scheduler may select another queued cell.
+  return executeDurableDiscoveryImpl(state, () => { throw new Error('Recovered ID must not be resubmitted'); }, observe, 'isolated', undefined);
+}
+export function skipDurableAttempt(state: DurableState, key: string): TraversalState {
+  state.transitionTraversal(value => skipAttempt(value, key));
+  return state.readTraversal();
+}
+export function approveDurableResend(state: DurableState, key: string, rationale: string, send: SyntheticSend, observe: SyntheticObserve): TraversalState {
+  state.transitionTraversal(value => authorizeResend(value, key, rationale));
+  return executeDurableDiscoveryImpl(state, send, observe, 'isolated', undefined, state.readTraversal().attempts.at(-1)!.id);
+}
+export function recordDurableCleanPause(state: DurableState, evidence: string): TraversalState {
+  if (typeof evidence !== 'string' || !evidence.trim()) throw new Error('Clean-pause evidence is required');
+  state.transitionTraversal(value => {
+    if (value.recoveryPending) throw new Error('Cannot assert clean pause after interruption');
+    return { ...value, paused: true, recoveryPending: false, cleanPauseEvidence: { evidence } };
+  });
+  return state.readTraversal();
+}
+export function resolveDurableRecoveryDebit(state: DurableState, elapsed: number, evidence: string): TraversalState {
+  if (!Number.isFinite(elapsed) || elapsed < 0 || typeof evidence !== 'string' || !evidence.trim()) throw new Error('A finite nonnegative debit and evidence are required');
+  state.transitionTraversal(value => {
+    if (!value.recoveryPending) throw new Error('No interrupted recovery accounting is pending');
+    return { ...value, activeTime: value.activeTime + elapsed, recoveryPending: false, cleanPauseEvidence: undefined, recoveryDebitEvidence: { elapsed, evidence } };
+  });
+  return state.readTraversal();
+}
+export function cancelDurableDiscovery(state: DurableState): TraversalState {
+  state.transitionTraversal(cancelTraversal);
   return state.readTraversal();
 }

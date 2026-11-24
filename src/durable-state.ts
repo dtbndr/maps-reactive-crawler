@@ -19,6 +19,10 @@ export function setAfterTraversalWriteForTest(hook: (() => void) | undefined): v
 function validate(value: unknown): asserts value is Snapshot {
   if (!value || typeof value !== 'object' || (value as any).version !== 1 || !Array.isArray((value as any).work) || !(value as any).work.every((entry: any) => entry && typeof entry === 'object' && typeof entry.id === 'string' && typeof entry.status === 'string') || !Array.isArray((value as any).observations) || !Array.isArray((value as any).gaps)) throw new Error('Unsupported or corrupt state');
 }
+function validateTraversal(value: unknown): asserts value is TraversalState {
+  const s = value as any;
+  if (!s || typeof s !== 'object' || !s.geometry || !s.limits || ![s.limits.cells, s.limits.submissions, s.limits.activeTime].every(Number.isFinite) || s.limits.cells < 1 || s.limits.submissions < 0 || s.limits.activeTime < 0 || !Array.isArray(s.queue) || !s.queue.every((x: unknown) => typeof x === 'string') || !Array.isArray(s.admitted) || !s.cells || typeof s.cells !== 'object' || !Array.isArray(s.candidates) || !Array.isArray(s.gaps) || !Array.isArray(s.blocked) || !Array.isArray(s.attempts) || ![s.submissions, s.activeTime].every(Number.isFinite) || s.submissions < 0 || s.activeTime < 0 || typeof s.paused !== 'boolean' || typeof s.cancelled !== 'boolean') throw new Error('Corrupt traversal checkpoint');
+}
 
 /** Durable checkpoint foundation; this does not implement restartable discovery. */
 export class DurableState {
@@ -57,11 +61,22 @@ export class DurableState {
       if (row) { if (row.version !== 1) throw new Error('Unsupported schema version'); validate(JSON.parse(String(row.payload))); }
       else throw new Error('Corrupt state: missing checkpoint');
       const owner = db.prepare('SELECT pid FROM owner WHERE id=1').get();
+      let recoveredPreviousOwner = false;
       afterOwnerReadForTest?.();
       if (owner) {
         const pid = owner.pid;
         if (typeof pid !== 'number' || !Number.isSafeInteger(pid) || pid < 1 || pid > 2147483647) throw new Error('Corrupt state: invalid owner PID');
         if (isAlive(pid)) throw new Error('Database is already owned');
+        recoveredPreviousOwner = true;
+      }
+      if (recoveredPreviousOwner) {
+        const traversalRow = db.prepare('SELECT payload FROM traversal WHERE id=1').get();
+        if (traversalRow) {
+          const traversal = JSON.parse(String(traversalRow.payload));
+          validateTraversal(traversal);
+          if (!traversal.cleanPauseEvidence) db.prepare('UPDATE traversal SET payload=? WHERE id=1').run(JSON.stringify({ ...traversal, recoveryPending: true }));
+          else db.prepare('UPDATE traversal SET payload=? WHERE id=1').run(JSON.stringify({ ...traversal, recoveryPending: false }));
+        }
       }
       db.prepare('INSERT OR REPLACE INTO owner(id,pid) VALUES(1,?)').run(process.pid);
       db.exec('COMMIT');
@@ -81,7 +96,9 @@ export class DurableState {
   readTraversal(): TraversalState {
     const row = this.db.prepare('SELECT payload FROM traversal WHERE id=1').get();
     if (!row) throw new Error('Durable traversal has not been initialized');
-    return JSON.parse(String(row.payload)) as TraversalState;
+    const value: unknown = JSON.parse(String(row.payload));
+    validateTraversal(value);
+    return value;
   }
   writeTraversal(state: TraversalState): void {
     this.db.prepare('INSERT INTO traversal(id,payload) VALUES(1,?) ON CONFLICT(id) DO UPDATE SET payload=excluded.payload').run(JSON.stringify(state));
