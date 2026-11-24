@@ -132,6 +132,7 @@ export function executeDurableDiscovery(state: DurableState, send: SyntheticSend
 
 export function recoverDurableKnownId(state: DurableState, key: string, id: string, evidence: { source: string; evidence: string; timestamp: string }, observe: SyntheticObserve): TraversalState {
   state.transitionTraversal(value => {
+    if (value.recoveryPending) throw new Error('Recovery accounting is unresolved');
     const recovered = recoverKnownId(value, key, id, evidence);
     const cells = { ...recovered.cells };
     for (const [cellKey, cell] of Object.entries(cells)) if (cell.outcome === 'running' && cellKey !== key) cells[cellKey] = { outcome: 'queued' };
@@ -146,7 +147,10 @@ export function skipDurableAttempt(state: DurableState, key: string): TraversalS
   return state.readTraversal();
 }
 export function approveDurableResend(state: DurableState, key: string, rationale: string, send: SyntheticSend, observe: SyntheticObserve): TraversalState {
-  state.transitionTraversal(value => authorizeResend(value, key, rationale));
+  state.transitionTraversal(value => {
+    if (value.recoveryPending) throw new Error('Recovery accounting is unresolved');
+    return authorizeResend(value, key, rationale);
+  });
   return executeDurableDiscoveryImpl(state, send, observe, 'isolated', undefined, state.readTraversal().attempts.at(-1)!.id);
 }
 export function recordDurableCleanPause(state: DurableState, evidence: string): TraversalState {
