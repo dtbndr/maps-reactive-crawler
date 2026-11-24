@@ -36,6 +36,7 @@ test('exclusive ownership rejects simultaneous contention and permits reacquisit
 });
 test('simultaneous processes grant checkpoint ownership to at most one contender', async () => {
   const {dir,path}=temp();
+  const initialized=DurableState.open(path); initialized.close();
   const release=join(dir,'release');
   const script=`import { existsSync, writeFileSync } from 'node:fs'; import { DurableState } from ${JSON.stringify(new URL('../dist/durable-state.js', import.meta.url).href)}; const [path,result,release]=process.argv.slice(1); try { const state=DurableState.open(path); writeFileSync(result,'owned'); while (!existsSync(release)) await new Promise(r=>setTimeout(r,1)); state.close(); } catch (e) { if (/owned|busy|locked/i.test(e.message)) writeFileSync(result,'rejected'); else throw e; }`;
   const children=[0,1].map(index=>spawn(process.execPath,['--input-type=module','-e',script,path,join(dir,`result-${index}`),release],{stdio:['ignore','pipe','pipe']}));
@@ -48,7 +49,11 @@ test('simultaneous processes grant checkpoint ownership to at most one contender
     await outcomesPromise;
     const outcomes=[0,1].map(index=>readFileSync(join(dir,`result-${index}`),'utf8'));
     assert.equal(outcomes.filter(x=>x==='owned').length,1,JSON.stringify(outcomes));
-  } finally { for (const child of children) { if (child.exitCode===null) child.kill('SIGKILL'); } rmSync(dir,{recursive:true,force:true}); }
+  } finally {
+    for (const child of children) if (child.exitCode===null) child.kill('SIGKILL');
+    await Promise.all(children.map(child=>child.exitCode!==null ? Promise.resolve() : new Promise(resolve=>{ const timer=setTimeout(resolve,2000); child.once('exit',()=>{clearTimeout(timer);resolve();}); })));
+    rmSync(dir,{recursive:true,force:true});
+  }
 });
 test('rejects structurally corrupt work and missing ownership metadata', () => {
   const {dir,path}=temp();
@@ -58,6 +63,16 @@ test('rejects structurally corrupt work and missing ownership metadata', () => {
     assert.throws(()=>DurableState.open(path),/corrupt/i);
     db=new DatabaseSync(path); db.exec('DROP TABLE owner'); db.close();
     assert.throws(()=>DurableState.open(path),/missing required table/);
+  } finally { rmSync(dir,{recursive:true,force:true}); }
+});
+test('fails closed for existing empty databases and malformed owner PIDs', () => {
+  const {dir,path}=temp();
+  try {
+    writeFileSync(path, '');
+    assert.throws(()=>DurableState.open(path),/corrupt|missing|required/i);
+    const fresh=join(dir,'fresh.db'); const state=DurableState.open(fresh); state.close();
+    const db=new DatabaseSync(fresh); db.prepare('INSERT INTO owner(id,pid) VALUES(1,?)').run(2147483648); db.close();
+    assert.throws(()=>DurableState.open(fresh),/invalid owner PID/);
   } finally { rmSync(dir,{recursive:true,force:true}); }
 });
 test('rejects unsupported schema and corrupt persisted payload', () => {
