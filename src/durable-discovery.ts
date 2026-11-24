@@ -77,11 +77,13 @@ function executeDurableDiscoveryImpl(state: DurableState, send: SyntheticSend, o
     let response: { id: string };
     try { response = send(attempt.workId); }
     catch (error) {
-      if (retryPolicy?.knownSafeSubmissionError?.(error) && (attempt.submissionRetryOrdinal ?? 0) < (retryPolicy.submissionCeiling ?? 0) && state.readTraversal().submissions < state.readTraversal().limits.submissions) {
+      const priorSubmissionCeiling = state.readTraversal().attempts.findLast(item => item.cellKey === running && item.submissionRetryCeiling !== undefined)?.submissionRetryCeiling;
+      const submissionCeiling = priorSubmissionCeiling ?? retryPolicy?.submissionCeiling ?? 0;
+      if (retryPolicy?.knownSafeSubmissionError?.(error) && (attempt.submissionRetryOrdinal ?? 0) < submissionCeiling && state.readTraversal().submissions < state.readTraversal().limits.submissions) {
         const retryOrdinal = (attempt.submissionRetryOrdinal ?? 0) + 1;
         state.transitionTraversal(value => {
           const uncertain = { ...value, attempts: value.attempts.map(item => item.id === attempt!.id ? { ...item, status: 'uncertain' as const } : item), gaps: [...value.gaps, { cellKey: running!, cause: 'failed' as const, scope: 'isolated' as const, status: 'unresolved' as const }] };
-          return authorizeSafeRetry(uncertain, running!, retryOrdinal, retryPolicy.submissionCeiling!);
+          return authorizeSafeRetry(uncertain, running!, retryOrdinal, submissionCeiling);
         });
         boundaryHook?.('retry-authorized');
         return executeDurableDiscoveryImpl(state, send, observe, uncertaintyScope, retryPolicy, state.readTraversal().attempts.at(-1)!.id);
@@ -109,6 +111,10 @@ function executeDurableDiscoveryImpl(state: DurableState, send: SyntheticSend, o
     }
     let retries = 0;
     const storedCeiling = attempt.retryCeiling ?? retryPolicy.observationCeiling;
+    if (storedCeiling === 0) {
+      state.transitionTraversal(value => markUncertain(value, running!, uncertaintyScope, id));
+      throw error;
+    }
     while (true) {
       state.transitionTraversal(value => retryKnownIdObservation(value, running!, storedCeiling));
       retries++;

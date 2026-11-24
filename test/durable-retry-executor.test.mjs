@@ -45,3 +45,19 @@ test('fresh restart never dispatches a persisted retry reservation',()=>{
  const resumed=spawnSync(process.execPath,['--input-type=module','-e',recover],{encoding:'utf8'});assert.equal(resumed.status,0,resumed.stderr);assert.equal(readFileSync(ledger,'utf8'),'send\n');
  }finally{rmSync(dir,{recursive:true,force:true})}
 });
+
+test('persisted submission retry ceiling cannot be widened by a later caller policy',()=>{
+ const dir=mkdtempSync(join(tmpdir(),'retry-ceiling-'));const db=DurableState.open(join(dir,'state.db'));let calls=0;
+ try {db.writeTraversal(createTraversal(geo,{cells:1,submissions:4,activeTime:10}));
+ assert.throws(()=>executeDurableDiscovery(db,()=>{calls++;throw Object.assign(Error('safe'),{safe:true})},()=>{throw Error('unexpected')},'isolated',{submissionCeiling:1,knownSafeSubmissionError:e=>e.safe}));
+ assert.throws(()=>executeDurableDiscovery(db,()=>{calls++;throw Object.assign(Error('safe'),{safe:true})},()=>{throw Error('unexpected')},'isolated',{submissionCeiling:3,knownSafeSubmissionError:e=>e.safe}),/unknown outcome/);
+ assert.equal(calls,2);assert.equal(db.readTraversal().attempts.filter(a=>a.submissionRetryOrdinal>0).length,1);
+ } finally {db.close();rmSync(dir,{recursive:true,force:true})}
+});
+test('observation ceiling zero makes no retry call',()=>{
+ const dir=mkdtempSync(join(tmpdir(),'retry-zero-'));const db=DurableState.open(join(dir,'state.db'));let polls=0;
+ try {db.writeTraversal(createTraversal(geo,{cells:1,submissions:1,activeTime:10}));
+ assert.throws(()=>executeDurableDiscovery(db,()=>({id:'synthetic'}),()=>{polls++;throw Object.assign(Error('safe'),{safe:true})},'isolated',{observationCeiling:0,knownSafeObservationError:e=>e.safe}),/safe/);
+ assert.equal(polls,1);assert.equal(db.readTraversal().attempts[0].retryOrdinal,undefined);
+ } finally {db.close();rmSync(dir,{recursive:true,force:true})}
+});
