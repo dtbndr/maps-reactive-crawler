@@ -139,6 +139,44 @@ test('durable executor commits dispatch, known ID and discovery application', ()
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
+test('fresh process re-observes persisted known ID without resending or duplicating observations', () => {
+  const { dir, path } = temp();
+  try {
+    const durable = DurableState.open(path);
+    durable.writeTraversal(createTraversal(geometry, { cells: 5, submissions: 3, activeTime: 10 }));
+    durable.transitionTraversal(s => reserveSubmission(admitNextCell(s), '0,0'));
+    durable.transitionTraversal(s => ({ ...s, attempts: s.attempts.map(a => ({ ...a, status: 'dispatched' })) }));
+    durable.transitionTraversal(s => ({ ...s, attempts: s.attempts.map(a => ({ ...a, knownId: 'ledger-id' })) }));
+    durable.close();
+
+    const ledgerPath = join(dir, 'send-ledger.json');
+    writeFileSync(ledgerPath, JSON.stringify({ sends: 1, workId: 'work:0,0', id: 'ledger-id' }));
+    const reopened = DurableState.open(path);
+    let observeCount = 0;
+    const result = executeDurableDiscovery(reopened, () => {
+      const ledger = JSON.parse(readFileSync(ledgerPath, 'utf8'));
+      ledger.sends++;
+      writeFileSync(ledgerPath, JSON.stringify(ledger));
+      return { id: ledger.id };
+    }, id => {
+      observeCount++;
+      assert.equal(id, 'ledger-id');
+      return { elapsed: 2, result: { status: 'success', candidates: [{ id: 'same-raw-id', coordinate: null }, { id: 'same-raw-id', coordinate: null }] } };
+    });
+    assert.equal(JSON.parse(readFileSync(ledgerPath, 'utf8')).sends, 1);
+    assert.equal(observeCount, 1);
+    assert.equal(result.submissions, 1);
+    assert.equal(result.activeTime, 2);
+    assert.deepEqual(result.candidates.map(item => item.id), ['same-raw-id', 'same-raw-id']);
+    assert.equal(result.cells['0,0'].outcome, 'nonempty');
+    assert.deepEqual(result.queue, ['0,1', '0,-1', '1,0', '-1,0']);
+    assert.deepEqual(result.gaps, []);
+    assert.equal(result.attempts[0].knownId, 'ledger-id');
+    assert.equal(result.attempts[0].status, 'observed');
+    reopened.close();
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
 test('durable traversal transitions persist queue, observations, attempts and counters atomically', () => {
   const { dir, path } = temp();
   try {
