@@ -175,10 +175,10 @@ export function skipDurableAttempt(state: DurableState, key: string): TraversalS
   state.transitionTraversal(value => skipAttempt(value, key));
   return state.readTraversal();
 }
-export function approveDurableResend(state: DurableState, key: string, rationale: string, send: SyntheticSend, observe: SyntheticObserve): TraversalState {
+export function approveDurableResend(state: DurableState, key: string, rationale: string, send: SyntheticSend, observe: SyntheticObserve, ceiling = 1): TraversalState {
   state.transitionTraversal(value => {
     if (value.recoveryPending) throw new Error('Recovery accounting is unresolved');
-    return authorizeResend(value, key, rationale);
+    return authorizeResend(value, key, rationale, ceiling);
   });
   return executeDurableDiscoveryImpl(state, send, observe, 'isolated', undefined, state.readTraversal().attempts.at(-1)!.id);
 }

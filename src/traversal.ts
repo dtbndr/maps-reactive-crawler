@@ -5,7 +5,7 @@ export type CandidateObservation = { id: string; coordinate?: { latitude: number
 export type TraversalLimits = { cells: number; submissions: number; activeTime: number };
 export type Attempt = { id: string; workId: string; cellKey: string; status: 'reserved' | 'dispatched' | 'uncertain' | 'observing' | 'observed' | 'skipped'; knownId?: string; retryOrdinal?: number; observationRetryCeiling?: number; retryCeiling?: number; submissionRetryOrdinal?: number; submissionRetryCeiling?: number; resendOrdinal?: number; resendCeiling?: number; approval?: { rationale: string }; recoveryEvidence?: { source: string; evidence: string; timestamp: string }; safeRetryAuthorization?: { ordinal: number; ceiling: number; delayMs?: number }; observationRetryPendingDelayMs?: number };
 export type TraversalReport = { stopReason: 'cancelled' | 'paused' | 'active_time' | 'submissions' | 'cells' | 'gaps' | 'failed' | 'unrecognized' | 'empty' | 'in_progress' | 'complete'; outcome: 'complete' | 'in_progress' | 'partial_empty_success' | 'partial_failed' | 'partial_unrecognized' | 'partial_limit' | 'partial_cancelled' | 'partial_gaps'; queue: string[]; blocked: string[]; gaps: TraversalState['gaps']; submissions: number; activeTime: number; cells: TraversalState['cells'] };
-export type TraversalState = { geometry: Geometry; limits: TraversalLimits; queue: string[]; admitted: string[]; cells: Record<string, { outcome: CellOutcome }>; candidates: CandidateObservation[]; gaps: { cellKey: string; cause: 'failed' | 'unrecognized' | 'uncertain'; scope?: 'isolated' | 'global'; status?: 'unresolved' | 'resolved' | 'skipped' }[]; paused: boolean; submissions: number; activeTime: number; blocked: string[]; attempts: Attempt[]; cancelled: boolean; recoveryPending?: boolean; cleanPauseEvidence?: { evidence: string }; recoveryDebitEvidence?: { elapsed: number; evidence: string } };
+export type TraversalState = { geometry: Geometry; limits: TraversalLimits; queue: string[]; admitted: string[]; cells: Record<string, { outcome: CellOutcome }>; candidates: CandidateObservation[]; gaps: { cellKey: string; cause: 'failed' | 'unrecognized' | 'uncertain'; scope?: 'isolated' | 'global'; status?: 'unresolved' | 'resolved' | 'skipped' }[]; paused: boolean; submissions: number; activeTime: number; blocked: string[]; attempts: Attempt[]; cancelled: boolean; recoveryPending?: boolean; cleanPauseEvidence?: { evidence: string }; recoveryDebitEvidence?: { elapsed: number; evidence: string }; resendCeiling?: number };
 export type DiscoveryResult = { status: 'success'; candidates: { id: string; coordinate?: { latitude: number; longitude: number } | null }[] } | { status: 'empty' } | { status: 'failed'; cause?: string; scope: 'isolated' | 'global' } | { status: 'unrecognized' };
 
 export function createTraversal(geometry: Geometry, limits: TraversalLimits): TraversalState {
@@ -66,12 +66,13 @@ export function authorizeResend(state: TraversalState, key: string, rationale = 
   if (i < 0 || state.attempts[i].status !== 'uncertain') throw new Error('Attempt is not uncertain');
   if (!rationale.trim()) throw new Error('Resend rationale is required');
   if (!Number.isSafeInteger(ceiling) || ceiling < 1) throw new Error('Invalid resend ceiling');
-  const ordinal = state.attempts.filter(a => a.resendOrdinal !== undefined).length + 1;
+  if (state.resendCeiling !== undefined && state.resendCeiling !== ceiling) throw new Error('Resend ceiling is immutable');
+  const ordinal = Math.max(0, ...state.attempts.map(a => a.resendOrdinal ?? 0)) + 1;
   if (ordinal > ceiling) throw new Error('Resend ceiling exhausted');
   if (state.submissions >= state.limits.submissions || state.activeTime >= state.limits.activeTime || state.cancelled || state.paused) throw new Error('Resend limit reached');
   const attemptNumber = state.attempts.filter(a => a.cellKey === key).length + 1;
   const workId = `work:${key}`;
-  return { ...state, submissions: state.submissions + 1, cells: { ...state.cells, [key]: { outcome: 'running' } }, attempts: [...state.attempts, { id: `${workId}:attempt:${attemptNumber}`, workId, cellKey: key, status: 'reserved', resendOrdinal: ordinal, resendCeiling: ceiling, approval: { rationale } }] };
+  return { ...state, resendCeiling: ceiling, submissions: state.submissions + 1, cells: { ...state.cells, [key]: { outcome: 'running' } }, attempts: [...state.attempts, { id: `${workId}:attempt:${attemptNumber}`, workId, cellKey: key, status: 'reserved', resendOrdinal: ordinal, resendCeiling: ceiling, approval: { rationale } }] };
 }
 export function recoverKnownId(state: TraversalState, key: string, id: string, evidence: { source: string; evidence: string; timestamp: string }): TraversalState {
   const i = state.attempts.map(a => a.cellKey).lastIndexOf(key);
