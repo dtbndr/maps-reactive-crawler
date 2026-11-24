@@ -127,7 +127,7 @@ function executeDurableDiscoveryImpl(state: DurableState, send: SyntheticSend, o
     }
     const storedCeiling = attempt.observationRetryCeiling ?? (attempt.submissionRetryOrdinal !== undefined && attempt.submissionRetryCeiling === undefined && attempt.retryCeiling !== undefined ? 0 : attempt.retryOrdinal === undefined ? retryPolicy.observationCeiling : 0);
     if ((state.readTraversal().attempts.find(item => item.id === attempt!.id)!.retryOrdinal ?? 0) >= storedCeiling) {
-      state.transitionTraversal(value => markUncertain({ ...value, attempts: value.attempts.map(item => item.id === attempt!.id && !(item.submissionRetryOrdinal !== undefined && item.submissionRetryCeiling === undefined && item.retryCeiling !== undefined) ? { ...item, observationRetryCeiling: storedCeiling } : item) }, running!, uncertaintyScope, id));
+      state.transitionTraversal(value => markUncertain({ ...value, attempts: value.attempts.map(item => item.id === attempt!.id && item.retryCeiling === undefined ? { ...item, observationRetryCeiling: storedCeiling } : item) }, running!, uncertaintyScope, id));
       throw error;
     }
     while (true) {

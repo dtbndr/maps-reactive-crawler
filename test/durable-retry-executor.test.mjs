@@ -177,3 +177,10 @@ test('zero observation allowance survives reopen and cannot be widened',()=>{
  d=DurableState.open(path);assert.throws(()=>executeDurableDiscovery(d,send,observe,'isolated',{observationCeiling:2,knownSafeObservationError:()=>true}),/safe/);assert.equal(sends,1);assert.equal(polls,2);assert.equal(d.readTraversal().submissions,1);d.close();
  }finally{rmSync(dir,{recursive:true,force:true})}
 });
+
+test('legacy exhausted observation parks without changing its ceiling',()=>{
+ const dir=mkdtempSync(join(tmpdir(),'legacy-observation-')),path=join(dir,'state.db');let polls=0,sends=0;
+ try{let d=DurableState.open(path);let s=dispatchSubmission(reserveSubmission(admitNextCell(createTraversal(geo,{cells:1,submissions:1,activeTime:10})),'0,0'),'0,0');s.attempts[0]={...s.attempts[0],knownId:'id',retryOrdinal:1,retryCeiling:1};delete s.attempts[0].submissionRetryOrdinal;d.writeTraversal(s);d.close();
+ for(let i=0;i<2;i++){d=DurableState.open(path);assert.throws(()=>executeDurableDiscovery(d,()=>{sends++;return{id:'bad'}},()=>{polls++;throw Error('safe')},'isolated',{observationCeiling:3,knownSafeObservationError:()=>true}),/safe/);const v=d.readTraversal();assert.equal(v.attempts[0].status,'uncertain');assert.equal(v.attempts[0].retryCeiling,1);assert.equal(v.submissions,1);d.close()};assert.equal(polls,2);assert.equal(sends,0);
+ }finally{rmSync(dir,{recursive:true,force:true})}
+});
