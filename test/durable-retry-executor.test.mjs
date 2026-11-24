@@ -30,3 +30,18 @@ test('known-safe submission transient reserves a fresh durable slot and retries 
  assert.equal(calls,2);assert.equal(db.readTraversal().submissions,2);assert.deepEqual(db.readTraversal().attempts.map(a=>a.submissionRetryOrdinal),[0,1]);
  } finally {db.close();rmSync(dir,{recursive:true,force:true})}
 });
+
+test('fresh restart never dispatches a persisted retry reservation',()=>{
+ const dir=mkdtempSync(join(tmpdir(),'retry-reserved-')),path=join(dir,'state.db'),ledger=join(dir,'ledger');
+ try{
+ const crash=`import {DurableState,setAfterTraversalWriteForTest} from './dist/durable-state.js';import {createTraversal} from './dist/traversal.js';import {executeDurableDiscovery} from './dist/durable-discovery.js';import {appendFileSync} from 'node:fs';const d=DurableState.open(${JSON.stringify(path)});d.writeTraversal(createTraversal(${JSON.stringify(geo)},{cells:1,submissions:3,activeTime:10}));let authorized=false,writes=0;setAfterTraversalWriteForTest(()=>{});import {setDurableDiscoveryBoundaryHookForTest} from './dist/durable-discovery.js';setDurableDiscoveryBoundaryHookForTest(x=>{if(x==='retry-authorized')authorized=true});executeDurableDiscovery(d,()=>{appendFileSync(${JSON.stringify(ledger)},'send\\n');throw Object.assign(Error('safe'),{safe:true})},()=>{throw Error('unexpected observation')},'isolated',{submissionCeiling:1,knownSafeSubmissionError:e=>e.safe});`;
+ // Crash after the retry reservation has committed, before its dispatch.
+ const script=crash.replace("setAfterTraversalWriteForTest(()=>{});", "setAfterTraversalWriteForTest(()=>{});").replace("if(x==='retry-authorized')authorized=true", "if(x==='retry-authorized')authorized=true");
+ // The reservation transition has no public post-commit hook; crash at the next dispatch write, before commit.
+ const injection=script.replace("setAfterTraversalWriteForTest(()=>{});", "setAfterTraversalWriteForTest(()=>{if(authorized&&++writes===3)process.exit(42)});");
+ const child=spawnSync(process.execPath,['--input-type=module','-e',injection],{encoding:'utf8'});assert.equal(child.status,42,child.stderr);
+ const before=DurableState.open(path);const s=before.readTraversal();assert.equal(s.submissions,2);assert.equal(s.attempts[1].status,'reserved');before.close();
+ const recover=`import {DurableState} from './dist/durable-state.js';import {executeDurableDiscovery,resolveDurableRecoveryDebit} from './dist/durable-discovery.js';const d=DurableState.open(${JSON.stringify(path)});resolveDurableRecoveryDebit(d,1,'synthetic bounded interruption');try{executeDurableDiscovery(d,()=>{throw Error('unexpected send')},()=>{throw Error('unexpected observation')},'isolated');throw Error('unexpected success')}catch(e){if(!/unknown outcome/.test(e.message))throw e}const s=d.readTraversal();if(s.submissions!==2||s.attempts[1].status!=='uncertain'||s.cells['0,0'].outcome!=='parked')throw Error(JSON.stringify(s));d.close()`;
+ const resumed=spawnSync(process.execPath,['--input-type=module','-e',recover],{encoding:'utf8'});assert.equal(resumed.status,0,resumed.stderr);assert.equal(readFileSync(ledger,'utf8'),'send\n');
+ }finally{rmSync(dir,{recursive:true,force:true})}
+});
