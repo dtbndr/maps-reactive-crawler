@@ -1,7 +1,7 @@
 # Durable Recovery and Result Identity Workstream Brief
 
 **Date**: 2026-11-24
-**Status**: Planned
+**Status**: Approved
 
 ## Why
 Make the bounded offline traversal restartable without silently losing observations, exceeding independent budgets, or hiding uncertainty and gaps.
