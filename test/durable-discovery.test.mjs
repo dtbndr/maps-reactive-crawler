@@ -91,7 +91,9 @@ test('SQLite traversal entries and fractional count limits are rejected without 
       const d = DurableState.open(path); d.writeTraversal(createTraversal(geometry, { cells: 1, submissions: 3, activeTime: 10 })); d.close();
       const db = new DatabaseSync(path); const payload = JSON.parse(db.prepare('SELECT payload FROM traversal WHERE id=1').get().payload);
       const malformed = JSON.stringify(mutate(payload)); db.prepare('UPDATE traversal SET payload=? WHERE id=1').run(malformed); db.close();
-      assert.throws(() => { const reopened = DurableState.open(path); try { reopened.readTraversal(); } finally { reopened.close(); } }, /Corrupt traversal checkpoint/);
+      let sends = 0;
+      assert.throws(() => { const reopened = DurableState.open(path); try { executeDurableDiscovery(reopened, () => { sends++; return { status: 'empty' }; }); } finally { reopened.close(); } }, /Corrupt traversal checkpoint/);
+      assert.equal(sends, 0);
       const check = new DatabaseSync(path); assert.equal(check.prepare('SELECT payload FROM traversal WHERE id=1').get().payload, malformed); check.close();
     } finally { rmSync(dir, { recursive: true, force: true }); }
   }

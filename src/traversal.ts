@@ -9,7 +9,7 @@ export type TraversalState = { geometry: Geometry; limits: TraversalLimits; queu
 export type DiscoveryResult = { status: 'success'; candidates: { id: string; coordinate?: { latitude: number; longitude: number } | null }[] } | { status: 'empty' } | { status: 'failed'; cause?: string; scope: 'isolated' | 'global' } | { status: 'unrecognized' };
 
 export function createTraversal(geometry: Geometry, limits: TraversalLimits): TraversalState {
-  if (!limits || ![limits.cells, limits.submissions, limits.activeTime].every(Number.isFinite) || limits.cells < 1 || limits.submissions < 0 || limits.activeTime < 0) throw new Error('Invalid finite traversal limits');
+  if (!limits || ![limits.cells, limits.submissions, limits.activeTime].every(Number.isFinite) || !Number.isSafeInteger(limits.cells) || !Number.isSafeInteger(limits.submissions) || limits.cells < 1 || limits.submissions < 0 || limits.activeTime < 0) throw new Error('Invalid finite traversal limits');
   const key = cellKey(0, 0);
   return { geometry, limits, queue: [key], admitted: [key], cells: { [key]: { outcome: 'queued' } }, candidates: [], gaps: [], paused: false, submissions: 0, activeTime: 0, blocked: [], attempts: [], cancelled: false, recoveryPending: false };
 }
@@ -104,7 +104,7 @@ export function resumeTraversal(state: TraversalState): TraversalState {
   return { ...state, paused: false };
 }
 export function updateTraversalLimits(state: TraversalState, limits: TraversalLimits): TraversalState {
-  if (!limits || ![limits.cells, limits.submissions, limits.activeTime].every(Number.isFinite) || limits.cells < 1 || limits.submissions < 0 || limits.activeTime < 0) throw new Error('Invalid finite traversal limits');
+  if (!limits || ![limits.cells, limits.submissions, limits.activeTime].every(Number.isFinite) || !Number.isSafeInteger(limits.cells) || !Number.isSafeInteger(limits.submissions) || limits.cells < 1 || limits.submissions < 0 || limits.activeTime < 0) throw new Error('Invalid finite traversal limits');
   return { ...state, limits: { ...limits } };
 }
 export function cancelTraversal(state: TraversalState): TraversalState { return { ...state, cancelled: true }; }
