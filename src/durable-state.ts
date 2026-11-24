@@ -1,5 +1,5 @@
 import { DatabaseSync } from 'node:sqlite';
-import { existsSync } from 'node:fs';
+import { closeSync, existsSync, openSync, unlinkSync } from 'node:fs';
 
 type Snapshot = { version: 1; work: { id: string; status: string }[]; observations: unknown[]; gaps: unknown[] };
 const initial = (): Snapshot => ({ version: 1, work: [], observations: [], gaps: [] });
@@ -15,12 +15,18 @@ export class DurableState {
   private constructor(private db: DatabaseSync) {}
   static open(path: string): DurableState {
     const existed = existsSync(path);
+    const marker = `${path}.initializing`;
+    if (!existed && !existsSync(marker)) {
+      try { closeSync(openSync(marker, 'wx')); }
+      catch (error) { if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error; }
+    }
+    const recoveryMarker = existsSync(marker);
     const db = new DatabaseSync(path);
     try {
       db.exec('PRAGMA journal_mode=WAL; BEGIN IMMEDIATE');
       const tables = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name IN ('checkpoint','owner')").all().map((r: any) => r.name);
       const userTables = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'").all();
-      if (tables.length === 0 && !existed && userTables.length === 0) {
+      if (tables.length === 0 && (!existed || recoveryMarker) && userTables.length === 0) {
         db.exec('CREATE TABLE checkpoint (id INTEGER PRIMARY KEY CHECK(id=1), version INTEGER NOT NULL, payload TEXT NOT NULL); CREATE TABLE owner (id INTEGER PRIMARY KEY CHECK(id=1), pid INTEGER NOT NULL);');
       } else if (!tables.includes('checkpoint') || !tables.includes('owner')) throw new Error('Corrupt state: missing required table');
       const row = db.prepare('SELECT version, payload FROM checkpoint WHERE id=1').get();
@@ -36,6 +42,7 @@ export class DurableState {
       db.prepare('INSERT OR REPLACE INTO owner(id,pid) VALUES(1,?)').run(process.pid);
       if (!row) db.prepare('INSERT INTO checkpoint(id,version,payload) VALUES(1,1,?)').run(JSON.stringify(initial()));
       db.exec('COMMIT');
+      if (recoveryMarker) unlinkSync(marker);
       return new DurableState(db);
     } catch (error) {
       try { db.exec('ROLLBACK'); } catch (rollbackError) { if (!(rollbackError instanceof Error)) throw rollbackError; }

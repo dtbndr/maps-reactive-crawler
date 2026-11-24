@@ -46,7 +46,7 @@ test('simultaneous processes grant checkpoint ownership to at most one contender
     while ((!existsSync(join(dir,'result-0')) || !existsSync(join(dir,'result-1'))) && Date.now()<deadline) await new Promise(r=>setTimeout(r,10));
     assert.ok(existsSync(join(dir,'result-0')) && existsSync(join(dir,'result-1')),'contenders did not report in time');
     writeFileSync(release,'go');
-    await outcomesPromise;
+    await Promise.race([outcomesPromise, new Promise((_, reject) => setTimeout(() => reject(new Error('contenders did not exit within 5s after release')), 5000))]);
     const outcomes=[0,1].map(index=>readFileSync(join(dir,`result-${index}`),'utf8'));
     assert.equal(outcomes.filter(x=>x==='owned').length,1,JSON.stringify(outcomes));
   } finally {
@@ -82,6 +82,14 @@ test('rejects unsupported schema and corrupt persisted payload', () => {
     assert.throws(()=>DurableState.open(path),/schema version/);
     db=new DatabaseSync(path); db.exec("UPDATE checkpoint SET version=1,payload='not-json'"); db.close();
     assert.throws(()=>DurableState.open(path));
+  } finally { rmSync(dir,{recursive:true,force:true}); }
+});
+test('recovers first initialization interrupted before commit', () => {
+  const {dir,path}=temp();
+  try {
+    const child=spawnSync(process.execPath,['--input-type=module','-e',`import {DurableState,setAfterOwnerReadForTest} from ${JSON.stringify(new URL('../dist/durable-state.js', import.meta.url).href)}; setAfterOwnerReadForTest(()=>process.kill(process.pid,'SIGKILL')); DurableState.open(${JSON.stringify(path)});`],{encoding:'utf8'});
+    assert.equal(child.signal,'SIGKILL');
+    const recovered=DurableState.open(path); assert.deepEqual(recovered.read(),{version:1,work:[],observations:[],gaps:[]}); recovered.close();
   } finally { rmSync(dir,{recursive:true,force:true}); }
 });
 test('reacquires ownership after abrupt owner process death', () => {
