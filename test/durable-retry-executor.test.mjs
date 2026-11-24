@@ -69,7 +69,7 @@ test('persisted submission retry ceiling cannot be widened by a later caller pol
  const dir=mkdtempSync(join(tmpdir(),'retry-ceiling-'));const db=DurableState.open(join(dir,'state.db'));let calls=0;
  try {db.writeTraversal(createTraversal(geo,{cells:1,submissions:4,activeTime:10}));
  assert.throws(()=>executeDurableDiscovery(db,()=>{calls++;throw Object.assign(Error('safe'),{safe:true})},()=>{throw Error('unexpected')},'isolated',{submissionCeiling:1,knownSafeSubmissionError:e=>e.safe}));
- assert.throws(()=>executeDurableDiscovery(db,()=>{calls++;throw Object.assign(Error('safe'),{safe:true})},()=>{throw Error('unexpected')},'isolated',{submissionCeiling:3,knownSafeSubmissionError:e=>e.safe}),/unknown outcome/);
+ assert.throws(()=>executeDurableDiscovery(db,()=>{calls++;throw Object.assign(Error('safe'),{safe:true})},()=>{throw Error('unexpected')},'isolated',{submissionCeiling:3,knownSafeSubmissionError:e=>e.safe}),/No recoverable discovery work/);
  assert.equal(calls,2);assert.equal(db.readTraversal().attempts.filter(a=>a.submissionRetryOrdinal>0).length,1);
  } finally {db.close();rmSync(dir,{recursive:true,force:true})}
 });
