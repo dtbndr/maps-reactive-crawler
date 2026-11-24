@@ -61,3 +61,22 @@ test('observation ceiling zero makes no retry call',()=>{
  assert.equal(polls,1);assert.equal(db.readTraversal().attempts[0].retryOrdinal,undefined);
  } finally {db.close();rmSync(dir,{recursive:true,force:true})}
 });
+
+test('legacy retryCeiling bounds submission ordinal and never authorizes observation retries',()=>{
+ const dir=mkdtempSync(join(tmpdir(),'legacy-retry-'));const db=DurableState.open(join(dir,'state.db'));let sends=0,polls=0;
+ try {
+  let s=createTraversal(geo,{cells:1,submissions:3,activeTime:10});s=admitNextCell(s);s=reserveSubmission(s,'0,0');s=dispatchSubmission(s,'0,0');
+  s={...s,attempts:s.attempts.map(a=>({...a,status:'uncertain',retryCeiling:1,submissionRetryOrdinal:1}))};db.writeTraversal(s);
+  assert.throws(()=>executeDurableDiscovery(db,()=>{sends++;throw Object.assign(Error('safe'),{safe:true})},()=>{polls++;throw Object.assign(Error('safe observation'),{safe:true})},'isolated',{submissionCeiling:5,observationCeiling:5,knownSafeSubmissionError:e=>e.safe,knownSafeObservationError:e=>e.safe}));
+  assert.equal(sends,0);assert.equal(polls,0);
+ } finally {db.close();rmSync(dir,{recursive:true,force:true})}
+});
+
+test('legacy submission retry ceiling is used when a retry is authorized',()=>{
+ const dir=mkdtempSync(join(tmpdir(),'legacy-ceiling-'));const db=DurableState.open(join(dir,'state.db'));let sends=0;
+ try {
+  db.writeTraversal(createTraversal(geo,{cells:1,submissions:4,activeTime:10}));
+  assert.throws(()=>executeDurableDiscovery(db,()=>{sends++;throw Object.assign(Error('safe'),{safe:true})},()=>{throw Error('unexpected')},'isolated',{submissionCeiling:1,knownSafeSubmissionError:e=>e.safe}));
+  assert.equal(sends,2);
+ } finally {db.close();rmSync(dir,{recursive:true,force:true})}
+});
