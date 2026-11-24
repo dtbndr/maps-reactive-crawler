@@ -3,6 +3,9 @@ import { existsSync } from 'node:fs';
 
 type Snapshot = { version: 1; work: { id: string; status: string }[]; observations: unknown[]; gaps: unknown[] };
 const initial = (): Snapshot => ({ version: 1, work: [], observations: [], gaps: [] });
+let afterOwnerReadForTest: (() => void) | undefined;
+/** Internal synchronization seam for deterministic ownership-race tests. */
+export function setAfterOwnerReadForTest(hook: (() => void) | undefined): void { afterOwnerReadForTest = hook; }
 function validate(value: unknown): asserts value is Snapshot {
   if (!value || typeof value !== 'object' || (value as any).version !== 1 || !Array.isArray((value as any).work) || !Array.isArray((value as any).observations) || !Array.isArray((value as any).gaps)) throw new Error('Unsupported or corrupt state');
 }
@@ -20,6 +23,7 @@ export class DurableState {
       if (row) { if (row.version !== 1) throw new Error('Unsupported schema version'); validate(JSON.parse(String(row.payload))); }
       else if (existed) throw new Error('Corrupt state: missing checkpoint');
       const owner = db.prepare('SELECT pid FROM owner WHERE id=1').get();
+      afterOwnerReadForTest?.();
       if (owner && isAlive(Number(owner.pid))) throw new Error('Database is already owned');
       db.prepare('INSERT OR REPLACE INTO owner(id,pid) VALUES(1,?)').run(process.pid);
       if (!row) db.prepare('INSERT INTO checkpoint(id,version,payload) VALUES(1,1,?)').run(JSON.stringify(initial()));
