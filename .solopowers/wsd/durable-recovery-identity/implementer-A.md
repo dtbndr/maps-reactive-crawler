@@ -12,6 +12,14 @@ Added deterministic replay identities to traversal attempts. Each attempt now ca
 - RED: `mise exec -- npm run build && mise exec -- node --test test/durable-discovery.test.mjs` — initially the test had an import error (`createGeometry` is not exported); corrected test setup using existing `validateGeometry`; rerun failed as intended because attempt ID was `undefined`.
 - GREEN: after adding IDs to `Attempt`, reservation and resend: build and focused test passed.
 
+## Incremental durable traversal persistence
+
+Added a separate durable traversal payload and methods to initialize, read, write, and atomically transition it under SQLite transactions. A focused test exercises reopen persistence of queue state, attempts and submission counter.
+
+- RED: build passed; focused durable discovery test failed with `TypeError: state.writeTraversal is not a function`.
+- GREEN: after implementation, `mise exec -- npm run build && mise exec -- node --test test/durable-discovery.test.mjs` passed (2 tests).
+- Full verification: `mise exec -- npm run check` passed (65 tests, typecheck and build).
+
 ## Acceptance still outstanding
 
 Slice A remains a full restartable discovery gate. Current work does not implement durable traversal serialization, atomic intents/ID/application markers, independent synthetic send ledger, fresh-process crash matrix, exactly-once application assertions, or uncertainty isolation scenarios. A0's generic checkpoint API does not yet persist traversal state. Therefore no durable recovery claim is made. No scope was reduced and no provider calls were made.

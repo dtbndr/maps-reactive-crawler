@@ -1,6 +1,7 @@
 import { DatabaseSync } from 'node:sqlite';
 import { closeSync, linkSync, mkdtempSync, openSync, rmSync, statSync } from 'node:fs';
 import { join, basename, dirname } from 'node:path';
+import type { TraversalState } from './traversal.js';
 
 type Snapshot = { version: 1; work: { id: string; status: string }[]; observations: unknown[]; gaps: unknown[] };
 let afterOwnerReadForTest: (() => void) | undefined;
@@ -46,7 +47,7 @@ export class DurableState {
     afterCreateForTest?.();
     db = new DatabaseSync(path);
     try {
-      db.exec('PRAGMA journal_mode=WAL; BEGIN IMMEDIATE');
+      db.exec('PRAGMA journal_mode=WAL; CREATE TABLE IF NOT EXISTS traversal (id INTEGER PRIMARY KEY CHECK(id=1), payload TEXT NOT NULL); BEGIN IMMEDIATE');
       const tables = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name IN ('checkpoint','owner')").all().map((r: any) => r.name);
       if (!tables.includes('checkpoint') || !tables.includes('owner')) throw new Error('Corrupt state: missing required table');
       const row = db.prepare('SELECT version, payload FROM checkpoint WHERE id=1').get();
@@ -73,6 +74,22 @@ export class DurableState {
     this.db.exec('BEGIN IMMEDIATE');
     try { const next = change(this.read()); validate(next); this.db.prepare('UPDATE checkpoint SET payload=? WHERE id=1').run(JSON.stringify(next)); this.db.exec('COMMIT'); }
     catch (error) { this.db.exec('ROLLBACK'); throw error; }
+  }
+  readTraversal(): TraversalState {
+    const row = this.db.prepare('SELECT payload FROM traversal WHERE id=1').get();
+    if (!row) throw new Error('Durable traversal has not been initialized');
+    return JSON.parse(String(row.payload)) as TraversalState;
+  }
+  writeTraversal(state: TraversalState): void {
+    this.db.prepare('INSERT INTO traversal(id,payload) VALUES(1,?) ON CONFLICT(id) DO UPDATE SET payload=excluded.payload').run(JSON.stringify(state));
+  }
+  transitionTraversal(change: (state: TraversalState) => TraversalState): void {
+    this.db.exec('BEGIN IMMEDIATE');
+    try {
+      const next = change(this.readTraversal());
+      this.db.prepare('UPDATE traversal SET payload=? WHERE id=1').run(JSON.stringify(next));
+      this.db.exec('COMMIT');
+    } catch (error) { this.db.exec('ROLLBACK'); throw error; }
   }
   close(): void { this.db.prepare('DELETE FROM owner WHERE id=1 AND pid=?').run(process.pid); this.db.close(); }
 }
