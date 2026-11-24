@@ -46,6 +46,18 @@ test('fresh restart never dispatches a persisted retry reservation',()=>{
  }finally{rmSync(dir,{recursive:true,force:true})}
 });
 
+test('fresh process waits on persisted authorized submission retry before exactly one resend',()=>{
+ const dir=mkdtempSync(join(tmpdir(),'retry-wait-restart-')),path=join(dir,'state.db'),ledger=join(dir,'sends'),waitLog=join(dir,'waits');
+ try {
+  const crash=`import {DurableState} from './dist/durable-state.js';import {createTraversal} from './dist/traversal.js';import {executeDurableDiscovery,setDurableDiscoveryBoundaryHookForTest} from './dist/durable-discovery.js';import {appendFileSync} from 'node:fs';const d=DurableState.open(${JSON.stringify(path)});d.writeTraversal(createTraversal(${JSON.stringify(geo)},{cells:1,submissions:3,activeTime:10}));setDurableDiscoveryBoundaryHookForTest(x=>{if(x==='retry-authorized')process.exit(42)});executeDurableDiscovery(d,()=>{appendFileSync(${JSON.stringify(ledger)},'send\\n');throw Object.assign(Error('safe'),{safe:true})},()=>{throw Error('unexpected')},'isolated',{submissionCeiling:1,knownSafeSubmissionError:e=>e.safe,retryBaseDelayMs:20,retryMaxDelayMs:50,wait:()=>{throw Error('first process should crash before wait')}})`;
+  const first=spawnSync(process.execPath,['--input-type=module','-e',crash],{encoding:'utf8'});assert.equal(first.status,42,first.stderr);
+  const prior=DurableState.open(path);const before=prior.readTraversal();assert.equal(before.attempts[0].safeRetryAuthorization.ordinal,1);assert.equal(before.submissions,1);prior.close();assert.equal(readFileSync(ledger,'utf8'),'send\n');
+  const resume=`import {DurableState} from './dist/durable-state.js';import {executeDurableDiscovery,resolveDurableRecoveryDebit} from './dist/durable-discovery.js';import {appendFileSync} from 'node:fs';const d=DurableState.open(${JSON.stringify(path)});resolveDurableRecoveryDebit(d,1,'synthetic interruption');executeDurableDiscovery(d,()=>{appendFileSync(${JSON.stringify(ledger)},'send\\n');return{id:'known'}},()=>({result:{status:'empty'},elapsed:2}),'isolated',{submissionCeiling:0,observationCeiling:0,knownSafeSubmissionError:()=>false,knownSafeObservationError:()=>false,retryBaseDelayMs:20,retryMaxDelayMs:50,wait:ms=>{const s=d.readTraversal();if(s.attempts[0].safeRetryAuthorization?.ordinal!==1||s.submissions!==1)throw Error('authorization not persisted before wait');appendFileSync(${JSON.stringify(waitLog)},String(ms))}});d.close()`;
+  const second=spawnSync(process.execPath,['--input-type=module','-e',resume],{encoding:'utf8'});assert.equal(second.status,0,second.stderr);assert.equal(readFileSync(waitLog,'utf8'),'20');assert.equal(readFileSync(ledger,'utf8'),'send\nsend\n');
+  const finalDb=DurableState.open(path);const after=finalDb.readTraversal();assert.equal(after.submissions,2);assert.equal(after.activeTime,3);assert.equal(after.attempts.length,2);assert.equal(after.attempts[1].submissionRetryOrdinal,1);finalDb.close();
+ } finally {rmSync(dir,{recursive:true,force:true})}
+});
+
 test('persisted submission retry ceiling cannot be widened by a later caller policy',()=>{
  const dir=mkdtempSync(join(tmpdir(),'retry-ceiling-'));const db=DurableState.open(join(dir,'state.db'));let calls=0;
  try {db.writeTraversal(createTraversal(geo,{cells:1,submissions:4,activeTime:10}));
