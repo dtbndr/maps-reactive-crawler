@@ -15,9 +15,9 @@ function executeDurableDiscoveryImpl(state: DurableState, send: SyntheticSend, o
   if (current.recoveryPending) throw new Error('Recovery accounting is unresolved');
   if (current.paused || current.cancelled) throw new Error(current.paused ? 'Traversal is paused' : 'Traversal is cancelled');
   let running = Object.entries(current.cells).find(([, cell]) => cell.outcome === 'running')?.[0];
-  const latestUncertain = current.attempts.findLast(item => item.status === 'uncertain');
-  const recoverable = current.attempts.findLast(item => item.status === 'uncertain' && item.knownId)
-    ?? current.attempts.findLast(item => ['dispatched', 'observing'].includes(item.status) && item.knownId)
+  const latestAttempt = current.attempts.at(-1);
+  const latestUncertain = latestAttempt?.status === 'uncertain' ? latestAttempt : undefined;
+  const recoverable = current.attempts.findLast(item => ['uncertain', 'dispatched', 'observing'].includes(item.status) && item.knownId)
     ?? (latestUncertain && !latestUncertain.knownId && (latestUncertain.submissionRetryOrdinal ?? 0) < (retryPolicy?.submissionCeiling ?? 0) ? latestUncertain : undefined);
   if (recoverable && !current.paused && (current.activeTime >= current.limits.activeTime || current.submissions >= current.limits.submissions || (!running && current.queue.length === 0) || (running && !current.attempts.some(item => item.cellKey === running && ['reserved', 'dispatched', 'observing'].includes(item.status))))) {
     const previousRunning = running;
@@ -73,6 +73,7 @@ function executeDurableDiscoveryImpl(state: DurableState, send: SyntheticSend, o
     throw new Error('Dispatched attempt has unknown outcome; refusing resend');
   }
   if (!attempt.knownId) {
+    if (!freshlyReserved || attempt.status !== 'dispatched') throw new Error('Send requires a freshly reserved and dispatched attempt');
     let response: { id: string };
     try { response = send(attempt.workId); }
     catch (error) {
