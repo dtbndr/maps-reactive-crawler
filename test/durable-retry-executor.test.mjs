@@ -72,6 +72,46 @@ test('legacy retryCeiling bounds submission ordinal and never authorizes observa
  } finally {db.close();rmSync(dir,{recursive:true,force:true})}
 });
 
+test('caller ceiling widening during a send does not permit another submission retry',()=>{
+ const dir=mkdtempSync(join(tmpdir(),'retry-widen-'));const db=DurableState.open(join(dir,'state.db'));let sends=0,polls=0;const policy={submissionCeiling:1,observationCeiling:0,knownSafeSubmissionError:()=>true,knownSafeObservationError:()=>true};
+ try {db.writeTraversal(createTraversal(geo,{cells:1,submissions:5,activeTime:10}));
+  assert.throws(()=>executeDurableDiscovery(db,()=>{sends++;if(sends===2)policy.submissionCeiling=2;throw Error('synthetic send failure')},()=>{polls++;throw Error('synthetic observe failure')},'isolated',policy),/synthetic send failure/);
+  assert.equal(sends,2);assert.equal(polls,0);
+ } finally {db.close();rmSync(dir,{recursive:true,force:true})}
+});
+
+test('successful submission retry is observed even when observation retry ceiling is zero',()=>{
+ const dir=mkdtempSync(join(tmpdir(),'retry-zero-observe-'));const db=DurableState.open(join(dir,'state.db'));let sends=0,polls=0;
+ try {db.writeTraversal(createTraversal(geo,{cells:1,submissions:5,activeTime:10}));
+  assert.throws(()=>executeDurableDiscovery(db,()=>{sends++;if(sends===2)return{id:'retry-id'};throw Object.assign(Error('synthetic send failure'),{safe:true})},()=>{polls++;throw Error('synthetic observe failure')},'isolated',{submissionCeiling:1,observationCeiling:0,knownSafeSubmissionError:e=>e.safe,knownSafeObservationError:()=>true}),/synthetic observe failure/);
+  assert.equal(sends,2);assert.equal(polls,1);
+ } finally {db.close();rmSync(dir,{recursive:true,force:true})}
+});
+
+test('legacy known ID skips submission and performs one observation',()=>{
+ const dir=mkdtempSync(join(tmpdir(),'legacy-known-id-'));const db=DurableState.open(join(dir,'state.db'));let sends=0,polls=0;
+ try {let s=createTraversal(geo,{cells:1,submissions:5,activeTime:10});s=admitNextCell(s);s=reserveSubmission(s,'0,0');s=dispatchSubmission(s,'0,0');s.attempts[0]={...s.attempts[0],submissionRetryOrdinal:1,retryCeiling:1,knownId:'legacy-id'};db.writeTraversal(s);
+  assert.throws(()=>executeDurableDiscovery(db,()=>{sends++;throw Error('synthetic send failure')},()=>{polls++;throw Error('synthetic observe failure')},'isolated',{submissionCeiling:1,observationCeiling:5,knownSafeSubmissionError:()=>true,knownSafeObservationError:()=>true}),/synthetic observe failure/);
+  assert.equal(sends,0);assert.equal(polls,1);
+ } finally {db.close();rmSync(dir,{recursive:true,force:true})}
+});
+
+test('legacy submission ordinal above ceiling is rejected before callbacks',()=>{
+ const dir=mkdtempSync(join(tmpdir(),'legacy-invalid-ordinal-'));const db=DurableState.open(join(dir,'state.db'));let sends=0,polls=0;
+ try {let s=createTraversal(geo,{cells:1,submissions:5,activeTime:10});s=admitNextCell(s);s=reserveSubmission(s,'0,0');s=dispatchSubmission(s,'0,0');s.attempts[0]={...s.attempts[0],submissionRetryOrdinal:2,retryCeiling:1,knownId:'legacy-id'};
+  assert.throws(()=>db.writeTraversal(s),/Corrupt traversal checkpoint/);
+  assert.equal(sends,0);assert.equal(polls,0);
+ } finally {db.close();rmSync(dir,{recursive:true,force:true})}
+});
+
+test('legacy safe retry authorization permits exactly its authorized retry',()=>{
+ const dir=mkdtempSync(join(tmpdir(),'legacy-safe-auth-'));const db=DurableState.open(join(dir,'state.db'));let sends=0,polls=0;const policy={submissionCeiling:1,observationCeiling:5,knownSafeSubmissionError:()=>true,knownSafeObservationError:()=>true};
+ try {let s=createTraversal(geo,{cells:1,submissions:5,activeTime:10});s=admitNextCell(s);s=reserveSubmission(s,'0,0');s=dispatchSubmission(s,'0,0');s.attempts[0]={...s.attempts[0],status:'uncertain',submissionRetryOrdinal:0,retryCeiling:1,safeRetryAuthorization:{ordinal:1,ceiling:1}};db.writeTraversal(s);
+  assert.throws(()=>executeDurableDiscovery(db,()=>{sends++;if(sends===1)policy.submissionCeiling=5;throw Error('synthetic send failure')},()=>{polls++;throw Error('synthetic observe failure')},'isolated',policy),/synthetic send failure/);
+  assert.equal(sends,1);assert.equal(polls,0);
+ } finally {db.close();rmSync(dir,{recursive:true,force:true})}
+});
+
 test('legacy submission retry ceiling is used when a retry is authorized',()=>{
  const dir=mkdtempSync(join(tmpdir(),'legacy-ceiling-'));const db=DurableState.open(join(dir,'state.db'));let sends=0;
  try {
