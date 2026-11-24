@@ -1,6 +1,6 @@
 import { classifyCandidate, cellKey, isCellEligible, neighbors, type CandidateClass, type Geometry } from './index.js';
 
-export type CellOutcome = 'queued' | 'running' | 'nonempty' | 'empty' | 'failed' | 'unrecognized';
+export type CellOutcome = 'queued' | 'running' | 'parked' | 'nonempty' | 'empty' | 'failed' | 'unrecognized';
 export type CandidateObservation = { id: string; coordinate?: { latitude: number; longitude: number } | null; classification: CandidateClass; sourceCell: string };
 export type TraversalLimits = { cells: number; submissions: number; activeTime: number };
 export type Attempt = { id: string; workId: string; cellKey: string; status: 'reserved' | 'dispatched' | 'uncertain' | 'observing' | 'observed' | 'skipped'; knownId?: string };
@@ -54,14 +54,14 @@ export function authorizeResend(state: TraversalState, key: string): TraversalSt
   if (state.submissions >= state.limits.submissions || state.activeTime >= state.limits.activeTime || state.cancelled || state.paused) throw new Error('Resend limit reached');
   const ordinal = state.attempts.filter(a => a.cellKey === key).length + 1;
   const workId = `work:${key}`;
-  return { ...state, submissions: state.submissions + 1, attempts: [...state.attempts, { id: `${workId}:attempt:${ordinal}`, workId, cellKey: key, status: 'reserved' }] };
+  return { ...state, submissions: state.submissions + 1, cells: { ...state.cells, [key]: { outcome: 'running' } }, attempts: [...state.attempts, { id: `${workId}:attempt:${ordinal}`, workId, cellKey: key, status: 'reserved' }] };
 }
 export function observeKnownId(state: TraversalState, key: string, id: string, elapsed: number): TraversalState {
   if (!id || !Number.isFinite(elapsed) || elapsed < 0) throw new Error('Invalid observation');
   const i = state.attempts.map(a => a.cellKey).lastIndexOf(key);
   if (i < 0 || !['dispatched', 'uncertain'].includes(state.attempts[i].status)) throw new Error('No known submission to observe');
   const attempts = [...state.attempts]; attempts[i] = { ...attempts[i], status: 'observed', knownId: id };
-  return { ...state, attempts, activeTime: state.activeTime + elapsed };
+  return { ...state, attempts, cells: { ...state.cells, [key]: { outcome: 'running' } }, activeTime: state.activeTime + elapsed };
 }
 export function pauseTraversal(state: TraversalState): TraversalState {
   if (state.cancelled) throw new Error('Traversal is cancelled');
@@ -101,11 +101,11 @@ export function debitActiveTime(state: TraversalState, elapsed: number): Travers
   if (!Number.isFinite(elapsed) || elapsed < 0) throw new Error('Invalid elapsed time');
   return { ...state, activeTime: state.activeTime + elapsed };
 }
-export function markUncertain(state: TraversalState, key: string): TraversalState {
+export function markUncertain(state: TraversalState, key: string, scope: 'isolated' | 'global' = 'isolated'): TraversalState {
   const i = state.attempts.map(a => a.cellKey).lastIndexOf(key);
   if (i < 0 || state.attempts[i].status !== 'dispatched') throw new Error('Attempt is not dispatched');
   const attempts = [...state.attempts]; attempts[i] = { ...attempts[i], status: 'uncertain' };
-  return { ...state, attempts, gaps: [...state.gaps, { cellKey: key, cause: 'uncertain', status: 'unresolved' }] };
+  return { ...state, attempts, cells: { ...state.cells, [key]: { outcome: 'parked' } }, paused: state.paused || scope === 'global', gaps: [...state.gaps, { cellKey: key, cause: 'uncertain', scope, status: 'unresolved' }] };
 }
 export function applyDiscoveryResult(state: TraversalState, key: string, result: DiscoveryResult): TraversalState {
   if (!state.admitted.includes(key) || state.cells[key]?.outcome !== 'running') throw new Error('Cell is not awaiting a result');

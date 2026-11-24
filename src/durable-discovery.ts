@@ -5,7 +5,7 @@ export type SyntheticSend = (workId: string) => { id: string };
 export type SyntheticObserve = (id: string) => { result: DiscoveryResult; elapsed: number };
 
 /** Reserve before send; known IDs are re-observed on restart without another submission. */
-export function executeDurableDiscovery(state: DurableState, send: SyntheticSend, observe: SyntheticObserve): TraversalState {
+export function executeDurableDiscovery(state: DurableState, send: SyntheticSend, observe: SyntheticObserve, uncertaintyScope: 'isolated' | 'global' = 'isolated'): TraversalState {
   let current = state.readTraversal();
   let running = Object.entries(current.cells).find(([, cell]) => cell.outcome === 'running')?.[0];
   if (!running) {
@@ -23,11 +23,11 @@ export function executeDurableDiscovery(state: DurableState, send: SyntheticSend
     let response: { id: string };
     try { response = send(attempt.workId); }
     catch (error) {
-      state.transitionTraversal(value => markUncertain(value, running!));
+      state.transitionTraversal(value => markUncertain(value, running!, uncertaintyScope));
       throw error;
     }
     if (!response.id) {
-      state.transitionTraversal(value => markUncertain(value, running!));
+      state.transitionTraversal(value => markUncertain(value, running!, uncertaintyScope));
       throw new Error('Synthetic send returned no durable ID');
     }
     state.transitionTraversal(value => ({ ...value, attempts: value.attempts.map(item => item.id === attempt!.id ? { ...item, knownId: response.id } : item) }));

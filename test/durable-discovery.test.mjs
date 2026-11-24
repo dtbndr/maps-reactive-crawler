@@ -91,10 +91,36 @@ test('send exception parks uncertain attempt and never automatically resends', (
     assert.throws(() => executeDurableDiscovery(durable, () => { sends++; throw new Error('send boundary'); }, () => { throw new Error('must not observe'); }), /send boundary/);
     assert.equal(sends, 1);
     assert.equal(durable.readTraversal().attempts[0].status, 'uncertain');
-    assert.throws(() => executeDurableDiscovery(durable, () => { sends++; return { id: 'unexpected' }; }, () => ({ elapsed: 0, result: { status: 'empty' } })), /recoverable attempt/);
+    assert.throws(() => executeDurableDiscovery(durable, () => { sends++; return { id: 'unexpected' }; }, () => ({ elapsed: 0, result: { status: 'empty' } })), /No queued cell to admit/);
     assert.equal(sends, 1);
     durable.close();
   } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('isolated parked cell does not block the next queued cell, while global uncertainty blocks it', () => {
+  for (const scope of ['isolated', 'global']) {
+    const { dir, path } = temp();
+    try {
+      const durable = DurableState.open(path);
+      const initial = createTraversal(geometry, { cells: 5, submissions: 3, activeTime: 10 });
+      const key = initial.queue[0];
+      let parked = reserveSubmission(admitNextCell(initial), key);
+      parked = { ...parked, attempts: parked.attempts.map(attempt => ({ ...attempt, status: 'dispatched' })) };
+      parked = markUncertain(parked, key, scope);
+      const nextKey = '1,0';
+      parked = { ...parked, queue: [nextKey], admitted: [...parked.admitted, nextKey], cells: { ...parked.cells, [nextKey]: { outcome: 'queued' } } };
+      durable.writeTraversal(parked);
+      if (scope === 'global') {
+        assert.throws(() => executeDurableDiscovery(durable, () => ({ id: 'unused' }), () => ({ elapsed: 0, result: { status: 'empty' } })), /Traversal is paused/);
+      } else {
+        const result = executeDurableDiscovery(durable, () => ({ id: 'next-id' }), () => ({ elapsed: 0, result: { status: 'empty' } }));
+        assert.equal(result.cells[key].outcome, 'parked');
+        assert.equal(result.cells[nextKey].outcome, 'empty');
+        assert.equal(result.attempts[0].status, 'uncertain');
+      }
+      durable.close();
+    } finally { rmSync(dir, { recursive: true, force: true }); }
+  }
 });
 
 test('durable executor commits dispatch, known ID and discovery application', () => {
