@@ -7,7 +7,7 @@ test('known-ID retry ordinal is durable state, does not consume submissions, and
  s = admitNextCell(s); s = reserveSubmission(s, '0,0'); s = dispatchSubmission(s, '0,0');
  s = markUncertain(s, '0,0', 'isolated', 'synthetic-id');
  s = retryKnownIdObservation(s, '0,0', 1);
- assert.equal(s.submissions, 1); assert.equal(s.attempts.at(-1).retryOrdinal, 1);
+ assert.equal(s.submissions, 1); assert.equal(s.attempts.at(-1).retryOrdinal, 1); assert.equal(s.attempts.at(-1).observationRetryCeiling, 1);
  s = updateTraversalLimits(s, { cells: 5, submissions: 10, activeTime: 100 });
  assert.throws(() => retryKnownIdObservation(s, '0,0', 5), /ceiling exhausted/);
 });

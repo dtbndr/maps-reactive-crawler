@@ -3,7 +3,7 @@ import { classifyCandidate, cellKey, isCellEligible, neighbors, type CandidateCl
 export type CellOutcome = 'queued' | 'running' | 'parked' | 'nonempty' | 'empty' | 'failed' | 'unrecognized';
 export type CandidateObservation = { id: string; coordinate?: { latitude: number; longitude: number } | null; classification: CandidateClass; sourceCell: string; observationId: string; attemptId: string; occurrence: number };
 export type TraversalLimits = { cells: number; submissions: number; activeTime: number };
-export type Attempt = { id: string; workId: string; cellKey: string; status: 'reserved' | 'dispatched' | 'uncertain' | 'observing' | 'observed' | 'skipped'; knownId?: string; retryOrdinal?: number; retryCeiling?: number; submissionRetryOrdinal?: number; submissionRetryCeiling?: number; resendOrdinal?: number; approval?: { rationale: string }; recoveryEvidence?: { source: string; evidence: string; timestamp: string }; safeRetryAuthorization?: { ordinal: number; ceiling: number } };
+export type Attempt = { id: string; workId: string; cellKey: string; status: 'reserved' | 'dispatched' | 'uncertain' | 'observing' | 'observed' | 'skipped'; knownId?: string; retryOrdinal?: number; observationRetryCeiling?: number; retryCeiling?: number; submissionRetryOrdinal?: number; submissionRetryCeiling?: number; resendOrdinal?: number; approval?: { rationale: string }; recoveryEvidence?: { source: string; evidence: string; timestamp: string }; safeRetryAuthorization?: { ordinal: number; ceiling: number } };
 export type TraversalReport = { stopReason: 'cancelled' | 'paused' | 'active_time' | 'submissions' | 'cells' | 'gaps' | 'failed' | 'unrecognized' | 'empty' | 'in_progress' | 'complete'; outcome: 'complete' | 'in_progress' | 'partial_empty_success' | 'partial_failed' | 'partial_unrecognized' | 'partial_limit' | 'partial_cancelled' | 'partial_gaps'; queue: string[]; blocked: string[]; gaps: TraversalState['gaps']; submissions: number; activeTime: number; cells: TraversalState['cells'] };
 export type TraversalState = { geometry: Geometry; limits: TraversalLimits; queue: string[]; admitted: string[]; cells: Record<string, { outcome: CellOutcome }>; candidates: CandidateObservation[]; gaps: { cellKey: string; cause: 'failed' | 'unrecognized' | 'uncertain'; scope?: 'isolated' | 'global'; status?: 'unresolved' | 'resolved' | 'skipped' }[]; paused: boolean; submissions: number; activeTime: number; blocked: string[]; attempts: Attempt[]; cancelled: boolean; recoveryPending?: boolean; cleanPauseEvidence?: { evidence: string }; recoveryDebitEvidence?: { elapsed: number; evidence: string } };
 export type DiscoveryResult = { status: 'success'; candidates: { id: string; coordinate?: { latitude: number; longitude: number } | null }[] } | { status: 'empty' } | { status: 'failed'; cause?: string; scope: 'isolated' | 'global' } | { status: 'unrecognized' };
@@ -83,9 +83,9 @@ export function retryKnownIdObservation(state: TraversalState, key: string, ceil
   const attempt = state.attempts[i];
   if (!attempt?.knownId || !['dispatched', 'observing', 'uncertain'].includes(attempt.status)) throw new Error('No known ID to retry observation');
   const ordinal = (attempt.retryOrdinal ?? 0) + 1;
-  const effectiveCeiling = attempt.retryCeiling ?? ceiling;
+  const effectiveCeiling = attempt.observationRetryCeiling ?? (attempt.retryOrdinal === undefined ? ceiling : 0);
   if (ordinal > effectiveCeiling) throw new Error('Observation retry ceiling exhausted');
-  const attempts = [...state.attempts]; attempts[i] = { ...attempt, status: 'observing', retryOrdinal: ordinal, retryCeiling: effectiveCeiling };
+  const attempts = [...state.attempts]; attempts[i] = { ...attempt, status: 'observing', retryOrdinal: ordinal, observationRetryCeiling: effectiveCeiling };
   return { ...state, attempts };
 }
 export function observeKnownId(state: TraversalState, key: string, id: string, elapsed: number): TraversalState {
