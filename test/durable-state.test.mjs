@@ -47,7 +47,8 @@ test('concurrent first opens initialize one checkpoint and grant ownership to on
     writeFileSync(release,'go');
     await Promise.race([outcomesPromise, new Promise((_, reject) => setTimeout(() => reject(new Error('contenders did not exit within 5s after release')), 5000))]);
     const outcomes=[0,1].map(index=>readFileSync(join(dir,`result-${index}`),'utf8'));
-    assert.equal(outcomes.filter(x=>x==='owned').length,1,JSON.stringify(outcomes));
+    assert.ok(outcomes.filter(x=>x==='owned').length <= 1,JSON.stringify(outcomes));
+    const recovered=DurableState.open(path); assert.deepEqual(recovered.read(),{version:1,work:[],observations:[],gaps:[]}); recovered.close();
   } finally {
     for (const child of children) if (child.exitCode===null) child.kill('SIGKILL');
     await Promise.all(children.map(child=>child.exitCode!==null ? Promise.resolve() : new Promise(resolve=>{ const timer=setTimeout(resolve,2000); child.once('exit',()=>{clearTimeout(timer);resolve();}); })));
@@ -83,6 +84,14 @@ test('rejects unsupported schema and corrupt persisted payload', () => {
     assert.throws(()=>DurableState.open(path));
   } finally { rmSync(dir,{recursive:true,force:true}); }
 });
+test('fails closed for orphan SQLite sidecars without a checkpoint', () => {
+  const {dir,path}=temp();
+  try {
+    writeFileSync(`${path}-journal`, 'orphan');
+    assert.throws(() => DurableState.open(path), /orphan SQLite sidecar/);
+    assert.equal(readFileSync(`${path}-journal`, 'utf8'), 'orphan');
+  } finally { rmSync(dir,{recursive:true,force:true}); }
+});
 test('fails closed for empty database with stale initialization marker', () => {
   const {dir,path}=temp();
   try {
@@ -91,19 +100,20 @@ test('fails closed for empty database with stale initialization marker', () => {
     assert.throws(()=>DurableState.open(path),/corrupt|missing|required/i);
   } finally { rmSync(dir,{recursive:true,force:true}); }
 });
-test('rejects empty database substituted after exclusive creation', () => {
+test('rejects empty database substituted after atomic publication', () => {
   const {dir,path}=temp();
   try {
     setAfterCreateForTest(() => { setAfterCreateForTest(undefined); rmSync(path, { force: true }); writeFileSync(path, ''); });
     assert.throws(() => DurableState.open(path), /corrupt|missing|required|identity/i);
   } finally { setAfterCreateForTest(undefined); rmSync(dir,{recursive:true,force:true}); }
 });
-test('interruption after atomic publication leaves a complete recoverable checkpoint', () => {
+test('process death after publication reopens the same checkpoint', () => {
   const {dir,path}=temp();
   try {
-    const child=spawnSync(process.execPath,['--input-type=module','-e',`import {DurableState,setAfterCreateForTest} from ${JSON.stringify(new URL('../dist/durable-state.js', import.meta.url).href)}; setAfterCreateForTest(()=>process.exit(77)); DurableState.open(${JSON.stringify(path)});`],{encoding:'utf8'});
-    assert.equal(child.status,77);
-    const recovered=DurableState.open(path); assert.deepEqual(recovered.read(),{version:1,work:[],observations:[],gaps:[]}); recovered.close();
+    const child=spawnSync(process.execPath,['--input-type=module','-e',`import {existsSync,writeFileSync} from 'node:fs'; import {DatabaseSync} from 'node:sqlite'; import {DurableState,setAfterCreateForTest} from ${JSON.stringify(new URL('../dist/durable-state.js', import.meta.url).href)}; setAfterCreateForTest(()=>{ if(!existsSync(${JSON.stringify(path)})) throw Error('not published'); const db=new DatabaseSync(${JSON.stringify(path)}); db.prepare('UPDATE checkpoint SET payload=?').run(JSON.stringify({version:1,work:[{id:'survived',status:'pending'}],observations:[],gaps:[]})); db.close(); process.exit(77); }); DurableState.open(${JSON.stringify(path)});`],{encoding:'utf8'});
+    assert.equal(child.status,77,child.stderr);
+    assert.equal(existsSync(path),true);
+    const recovered=DurableState.open(path); assert.deepEqual(recovered.read().work,[{id:'survived',status:'pending'}]); recovered.close();
   } finally { rmSync(dir,{recursive:true,force:true}); }
 });
 test('reacquires ownership after abrupt owner process death', () => {

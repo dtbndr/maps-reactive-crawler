@@ -1,9 +1,8 @@
 import { DatabaseSync } from 'node:sqlite';
-import { closeSync, linkSync, mkdtempSync, openSync, rmSync } from 'node:fs';
+import { closeSync, linkSync, mkdtempSync, openSync, rmSync, statSync } from 'node:fs';
 import { join, basename, dirname } from 'node:path';
 
 type Snapshot = { version: 1; work: { id: string; status: string }[]; observations: unknown[]; gaps: unknown[] };
-const initial = (): Snapshot => ({ version: 1, work: [], observations: [], gaps: [] });
 let afterOwnerReadForTest: (() => void) | undefined;
 let afterCreateForTest: (() => void) | undefined;
 /** Internal synchronization seam for deterministic ownership-race tests. */
@@ -18,7 +17,6 @@ function validate(value: unknown): asserts value is Snapshot {
 export class DurableState {
   private constructor(private db: DatabaseSync) {}
   static open(path: string): DurableState {
-    let created = false;
     let db: DatabaseSync;
     const staging = mkdtempSync(join(dirname(path), `.${basename(path)}.init-`));
     const stagingPath = join(staging, 'checkpoint.db');
@@ -29,26 +27,27 @@ export class DurableState {
         else throw error;
       }
       if (!exists) {
+        for (const suffix of ['-journal', '-wal', '-shm']) {
+          try { statSync(`${path}${suffix}`); throw new Error('Corrupt state: orphan SQLite sidecar without checkpoint'); }
+          catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
+        }
         const staged = new DatabaseSync(stagingPath);
         staged.exec('PRAGMA journal_mode=DELETE; CREATE TABLE checkpoint (id INTEGER PRIMARY KEY CHECK(id=1), version INTEGER NOT NULL, payload TEXT NOT NULL); CREATE TABLE owner (id INTEGER PRIMARY KEY CHECK(id=1), pid INTEGER NOT NULL); INSERT INTO checkpoint VALUES(1,1,\'{"version":1,"work":[],"observations":[],"gaps":[]}\');');
         staged.close();
-        afterCreateForTest?.();
-        try { linkSync(stagingPath, path); created = true; } catch (error) {
+        try { linkSync(stagingPath, path); } catch (error) {
           if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
         }
       }
     } finally { rmSync(staging, { recursive: true, force: true }); }
+    afterCreateForTest?.();
     db = new DatabaseSync(path);
     try {
       db.exec('PRAGMA journal_mode=WAL; BEGIN IMMEDIATE');
       const tables = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name IN ('checkpoint','owner')").all().map((r: any) => r.name);
-      const userTables = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'").all();
-      if (tables.length === 0 && created && userTables.length === 0) {
-        db.exec('CREATE TABLE checkpoint (id INTEGER PRIMARY KEY CHECK(id=1), version INTEGER NOT NULL, payload TEXT NOT NULL); CREATE TABLE owner (id INTEGER PRIMARY KEY CHECK(id=1), pid INTEGER NOT NULL);');
-      } else if (!tables.includes('checkpoint') || !tables.includes('owner')) throw new Error('Corrupt state: missing required table');
+      if (!tables.includes('checkpoint') || !tables.includes('owner')) throw new Error('Corrupt state: missing required table');
       const row = db.prepare('SELECT version, payload FROM checkpoint WHERE id=1').get();
       if (row) { if (row.version !== 1) throw new Error('Unsupported schema version'); validate(JSON.parse(String(row.payload))); }
-      else if (!created && tables.length !== 0) throw new Error('Corrupt state: missing checkpoint');
+      else throw new Error('Corrupt state: missing checkpoint');
       const owner = db.prepare('SELECT pid FROM owner WHERE id=1').get();
       afterOwnerReadForTest?.();
       if (owner) {
@@ -57,7 +56,6 @@ export class DurableState {
         if (isAlive(pid)) throw new Error('Database is already owned');
       }
       db.prepare('INSERT OR REPLACE INTO owner(id,pid) VALUES(1,?)').run(process.pid);
-      if (!row) db.prepare('INSERT INTO checkpoint(id,version,payload) VALUES(1,1,?)').run(JSON.stringify(initial()));
       db.exec('COMMIT');
       return new DurableState(db);
     } catch (error) {
