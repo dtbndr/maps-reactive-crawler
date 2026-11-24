@@ -71,32 +71,38 @@ Durable intent may over-count unsent work. Ensure application marker and depende
 #### Carry-forward
 Durable discovery observations, replay keys, attempts, queue and accounting.
 
-### Slice A1a: Checkpoint and accounting safety
+### Slice A1: Checkpoint and accounting safety
 **Goal**: Make recovery entry and every work-producing transition fail closed on untrustworthy state or unresolved accounting, without claiming recovery controls complete.
 
 - [ ] Validate persisted counters against reservations, attempts and queue/cell consistency; corrupt or unsupported state must block all new work before send. Guard recovery scheduling mutations and resend reservations as well as executor entry. Test nonnegative understated submissions, malformed attempts and inconsistent queue/cell state; assert no reservation or send.
 - [ ] After abrupt restart require a defensible bounded conservative debit before continuation, or a clean-pause marker where applicable; never assume zero crash time. Exercise debit followed by continuation with an independent durable send ledger. Full unbounded-time accounting remains Slice B.
-- [ ] Establish focused failing tests before changes and run the full check; document the existing WIP baseline separately, including its accounting failures. Do not treat WIP code as trusted.
+- [ ] Repair the four existing restart fixtures blocked at recoveryPending: assert pending accounting, apply and verify a defensible nonzero synthetic debit before intended continuation, and retain independent no-debit fail-closed tests. Atomically persist the debit and evidence before continuation; recognize clean pause only if durably recorded before interruption. Run a fresh full check. Existing fixture failures are not RED evidence for checkpoint-integrity or mutation-guard defects; establish separate meaningful failing tests for each. Document the WIP baseline; do not treat WIP code as trusted.
 
-**Carry-forward:** Validated checkpoint and guarded transitions for A1b/A1c; cumulative active-time enforcement remains B.
+**Verification:** Build before RED and GREEN and focused tests: `mise exec -- npm run build`, then `mise exec -- node --test test/durable-recovery-accounting.test.mjs test/durable-recovery-controls.test.mjs test/durable-discovery.test.mjs`; build immediately before `mise exec -- npm run check`. Record exact baseline, RED and GREEN results and independent send counts.
 
-### Slice A1b: Durable retry and recovered-ID execution
+**Carry-forward:** Validated checkpoint and guarded transitions for A2/A3; cumulative active-time enforcement remains B.
+
+### Slice A2: Durable retry and recovered-ID execution
 **Goal**: Recover isolated work and enforce operation-scoped retry decisions across restart.
 
 - [ ] Persist authoritative synthetic recovered-ID evidence/source/time linked to the original intent before observation. Recover parked A without dispatching it again or altering unrelated running B; B advances only with isolation and trustworthy accounting. Global uncertainty blocks B. Test fresh processes, exact state and independent send counts, including crash after evidence persistence.
+- [ ] In the actual fresh-process A/B recovery trace use the established accounting path, verifying debit and evidence before continuation.
+- [ ] Test distinct fresh-process boundaries: after durable known-safe authorization but before reservation, consume it exactly once under its stored ordinal and ceiling despite changed caller policy; after reservation but before durable provider ID, refuse automatic dispatch. Assert exact durable state and independent send counts in both.
 - [ ] Persist retry ordinals and finite ceilings before retry, initial ordinal zero, no reset on restart or cap change. Enforce durable authorization, ordinal succession and stored ceiling continuity rather than caller policy; only fixture-defined known-safe transients retry automatically, with bounded backoff. Observation retry consumes allowance but no submission slot.
 - [ ] Test real isolated known-safe submission attempts across fresh-process restart: S=3, ordinal 2/2, cap 5, durable discovery gap A, admitted B proceeds at S=4, exhaustion reports partial_gaps. Test known-ID observation retry at submission cap without submission increments and allowance survival across cap changes.
 
-**Carry-forward:** Durable operation-scoped retry and recovered-ID controls for A1c and detail work.
+**Verification:** Build before RED and GREEN and focused tests: `mise exec -- npm run build`, then `mise exec -- node --test test/durable-recovery.test.mjs test/durable-retry-executor.test.mjs test/durable-retry-exhaustion.test.mjs test/durable-discovery.test.mjs`; build immediately before `mise exec -- npm run check`. Record exact baseline, RED and GREEN results and independent send counts.
 
-### Slice A1c: Recovery decisions and acceptance
-**Goal**: Complete the original A1 recovery controls and fresh-process acceptance; A1 is complete only when A1a, A1b and A1c pass in order.
+**Carry-forward:** Durable operation-scoped retry and recovered-ID controls for A3 and detail work.
+
+### Slice A3: Recovery decisions and acceptance
+**Goal**: Complete the original A1 recovery controls and fresh-process acceptance; A1 is complete only when A1, A2 and A3 pass in order.
 
 - [ ] Persist skip, cancellation, isolated/global failures and approved resend with rationale, independently bounded durable resend ordinal/ceiling and a fresh submission reservation. Preserve prior uncertainty, billing history and gaps until verified completion; never claim remote cancellation or billing certainty.
 - [ ] Test last reserved slot dispatch at cap uninterrupted; separately crash after reservation before durable ID and prove restart neither dispatches nor blindly resends regardless of the independent ledger. Test fresh-process admitted dispatch at cell cap, approved resend and cancellation with exact durable state and send counts. Skip and approval do not erase gaps; corrupt/untrusted checkpoints block new work.
 - [ ] Run the complete recovery suite and full project check with fresh-process evidence for the preceding gates. Record exact baseline failures and meaningful RED for each gate before implementation, then GREEN; no baseline waiver for final verification.
 
-**Verification for A1a–A1c:** Build before RED, GREEN, focused tests and full check as above; run `mise exec -- node --test test/durable-recovery.test.mjs` and relevant focused recovery, accounting, retry and discovery tests, plus full project check at each gate. Assert durable state and independent fixture send counts.
+**Verification:** Build before RED and GREEN and focused tests: `mise exec -- npm run build`, then `mise exec -- node --test test/durable-recovery.test.mjs test/durable-recovery-controls.test.mjs test/durable-recovery-accounting.test.mjs test/durable-retry-executor.test.mjs test/durable-retry-exhaustion.test.mjs test/durable-discovery.test.mjs`; build immediately before `mise exec -- npm run check`. Record exact baseline, RED and GREEN results; assert durable state and independent fixture send counts. Historical ledger entries for unsplit A1 remain unchanged and do not signify completion of the new A1 gate.
 
 **Carry-forward:** Operation-scoped durable recovery controls usable for detail work; Slice B supplies full cumulative active-time accounting and unbounded-interval fail-closed behavior.
 
