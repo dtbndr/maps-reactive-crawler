@@ -2,7 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { validateGeometry, createTraversal, admitNextCell, reserveSubmission, authorizeResend, markUncertain } from '../dist/index.js';
 import { DurableState } from '../dist/durable-state.js';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { executeDurableDiscovery } from '../dist/durable-discovery.js';
+import { mkdtempSync, rmSync, writeFileSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
@@ -53,6 +54,31 @@ test('fresh process recovers traversal state after reservation before dispatch',
     assert.equal(state.attempts[0].status, 'reserved');
     assert.equal(state.attempts[0].id, 'work:0,0:attempt:1');
     recovered.close();
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('durable executor persists reservation before fixture send and applies response', () => {
+  const { dir, path } = temp();
+  try {
+    const durable = DurableState.open(path);
+    durable.writeTraversal(createTraversal(geometry, { cells: 5, submissions: 3, activeTime: 10 }));
+    const ledgerPath = join(dir, 'send-ledger.json');
+    let sends = 0;
+    const result = executeDurableDiscovery(durable, workId => {
+      const before = durable.readTraversal();
+      assert.equal(before.attempts[0].status, 'dispatched');
+      assert.equal(before.attempts[0].workId, workId);
+      sends++;
+      const ledger = { sends, workId, id: 'synthetic-id-1' };
+      writeFileSync(ledgerPath, JSON.stringify(ledger));
+      return { id: ledger.id, elapsed: 1, result: { status: 'success', candidates: [{ id: 'raw-id', coordinate: null }, { id: 'raw-id', coordinate: null }] } };
+    });
+    assert.equal(sends, 1);
+    assert.equal(JSON.parse(readFileSync(ledgerPath, 'utf8')).sends, 1);
+    assert.equal(result.attempts[0].knownId, 'synthetic-id-1');
+    assert.deepEqual(result.candidates.map(candidate => candidate.id), ['raw-id', 'raw-id']);
+    assert.equal(result.cells['0,0'].outcome, 'nonempty');
+    durable.close();
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
