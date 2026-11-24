@@ -82,6 +82,21 @@ test('durable executor persists reservation before fixture send and applies resp
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
+test('send exception parks uncertain attempt and never automatically resends', () => {
+  const { dir, path } = temp();
+  try {
+    const durable = DurableState.open(path);
+    durable.writeTraversal(createTraversal(geometry, { cells: 5, submissions: 3, activeTime: 10 }));
+    let sends = 0;
+    assert.throws(() => executeDurableDiscovery(durable, () => { sends++; throw new Error('send boundary'); }, () => { throw new Error('must not observe'); }), /send boundary/);
+    assert.equal(sends, 1);
+    assert.equal(durable.readTraversal().attempts[0].status, 'uncertain');
+    assert.throws(() => executeDurableDiscovery(durable, () => { sends++; return { id: 'unexpected' }; }, () => ({ elapsed: 0, result: { status: 'empty' } })), /recoverable attempt/);
+    assert.equal(sends, 1);
+    durable.close();
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
 test('durable executor commits dispatch, known ID and discovery application', () => {
   const { dir, path } = temp();
   try {

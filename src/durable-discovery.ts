@@ -1,5 +1,5 @@
 import type { DurableState } from './durable-state.js';
-import { admitNextCell, applyDiscoveryResult, dispatchSubmission, observeKnownId, reserveSubmission, type DiscoveryResult, type TraversalState } from './traversal.js';
+import { admitNextCell, applyDiscoveryResult, dispatchSubmission, markUncertain, observeKnownId, reserveSubmission, type DiscoveryResult, type TraversalState } from './traversal.js';
 
 export type SyntheticSend = (workId: string) => { id: string };
 export type SyntheticObserve = (id: string) => { result: DiscoveryResult; elapsed: number };
@@ -20,8 +20,16 @@ export function executeDurableDiscovery(state: DurableState, send: SyntheticSend
     attempt = state.readTraversal().attempts.findLast(item => item.cellKey === running)!;
   }
   if (!attempt.knownId) {
-    const response = send(attempt.workId);
-    if (!response.id) throw new Error('Synthetic send returned no durable ID');
+    let response: { id: string };
+    try { response = send(attempt.workId); }
+    catch (error) {
+      state.transitionTraversal(value => markUncertain(value, running!));
+      throw error;
+    }
+    if (!response.id) {
+      state.transitionTraversal(value => markUncertain(value, running!));
+      throw new Error('Synthetic send returned no durable ID');
+    }
     state.transitionTraversal(value => ({ ...value, attempts: value.attempts.map(item => item.id === attempt!.id ? { ...item, knownId: response.id } : item) }));
   }
   const id = state.readTraversal().attempts.find(item => item.id === attempt!.id)!.knownId!;
