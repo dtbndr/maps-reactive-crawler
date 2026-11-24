@@ -83,7 +83,7 @@ test('fresh-process crash matrix records independent sends and durable transitio
       const resumed = DurableState.open(path);
       resumed.close();
       if (['dispatched', 'sent', 'reserved'].includes(boundary)) {
-        const recoveryScript = `import * as fs from 'node:fs'; import {DurableState} from ${JSON.stringify(durableUrl)}; import {executeDurableDiscovery} from ${JSON.stringify(executorUrl)}; const d=DurableState.open(${JSON.stringify(path)}); try { executeDurableDiscovery(d,()=>{throw Error('unexpected send')},()=>{throw Error('unexpected observation')}); process.exit(44); } catch(e) { if(!/unknown outcome/.test(e.message)) throw e; } const s=d.readTraversal(); if(s.attempts[0].workId!=='work:0,0'||s.attempts[0].status!=='uncertain'||s.cells['0,0'].outcome!=='parked'||s.gaps.length!==1||s.gaps[0].cellKey!=='0,0'||s.gaps[0].cause!=='uncertain'||!s.paused||s.queue.length) { console.error(JSON.stringify({attempt:s.attempts[0],cell:s.cells['0,0'],gaps:s.gaps,paused:s.paused,queue:s.queue})); process.exit(45); } d.close();`;
+        const recoveryScript = `import * as fs from 'node:fs'; import {DurableState} from ${JSON.stringify(durableUrl)}; import {executeDurableDiscovery,resolveDurableRecoveryDebit} from ${JSON.stringify(executorUrl)}; const d=DurableState.open(${JSON.stringify(path)}); if(!d.readTraversal().recoveryPending) throw Error('missing recovery accounting'); const beforeTime=d.readTraversal().activeTime; resolveDurableRecoveryDebit(d,1,'synthetic bounded interruption'); if(d.readTraversal().recoveryPending||d.readTraversal().activeTime!==beforeTime+1) throw Error('debit not persisted'); try { executeDurableDiscovery(d,()=>{throw Error('unexpected send')},()=>{throw Error('unexpected observation')}); process.exit(44); } catch(e) { if(!/unknown outcome/.test(e.message)) throw e; } const s=d.readTraversal(); if(s.attempts[0].workId!=='work:0,0'||s.attempts[0].status!=='uncertain'||s.cells['0,0'].outcome!=='parked'||s.gaps.length!==1||s.gaps[0].cellKey!=='0,0'||s.gaps[0].cause!=='uncertain'||!s.paused||s.queue.length) { console.error(JSON.stringify({attempt:s.attempts[0],cell:s.cells['0,0'],gaps:s.gaps,paused:s.paused,queue:s.queue})); process.exit(45); } d.close();`;
         const recoveredChild = spawnSync(process.execPath, ['--input-type=module', '-e', recoveryScript], { encoding: 'utf8' });
         assert.equal(recoveredChild.status, 0, recoveredChild.stderr);
         const parkedState = DurableState.open(path); const parked = parkedState.readTraversal(); parkedState.close();
@@ -94,7 +94,7 @@ test('fresh-process crash matrix records independent sends and durable transitio
         assert.equal(parked.paused, true);
         assert.deepEqual(parked.queue, []);
       } else if (boundary !== 'committed') {
-        const recoveryScript = `import * as fs from 'node:fs'; import {DurableState} from ${JSON.stringify(durableUrl)}; import {executeDurableDiscovery} from ${JSON.stringify(executorUrl)}; const d=DurableState.open(${JSON.stringify(path)}); const p=${JSON.stringify(ledgerPath)}; executeDurableDiscovery(d,w=>{const l=JSON.parse(fs.readFileSync(p)); if(l[w]) throw Error('duplicate send '+w); l[w]='process-job-id'; fs.writeFileSync(p,JSON.stringify(l)); return {id:'process-job-id'}},()=>({elapsed:2,result:{status:'success',candidates:[{id:'fixture-result',coordinate:null}]}})); d.close();`;
+        const recoveryScript = `import * as fs from 'node:fs'; import {DurableState} from ${JSON.stringify(durableUrl)}; import {executeDurableDiscovery,resolveDurableRecoveryDebit} from ${JSON.stringify(executorUrl)}; const d=DurableState.open(${JSON.stringify(path)}); if(!d.readTraversal().recoveryPending) throw Error('missing recovery accounting'); const beforeTime=d.readTraversal().activeTime; resolveDurableRecoveryDebit(d,1,'synthetic bounded interruption'); if(d.readTraversal().recoveryPending||d.readTraversal().activeTime!==beforeTime+1) throw Error('debit not persisted'); const p=${JSON.stringify(ledgerPath)}; executeDurableDiscovery(d,w=>{const l=JSON.parse(fs.readFileSync(p)); if(l[w]) throw Error('duplicate send '+w); l[w]='process-job-id'; fs.writeFileSync(p,JSON.stringify(l)); return {id:'process-job-id'}},()=>({elapsed:2,result:{status:'success',candidates:[{id:'fixture-result',coordinate:null}]}})); d.close();`;
         const recoveredChild = spawnSync(process.execPath, ['--input-type=module', '-e', recoveryScript], { encoding: 'utf8' });
         assert.equal(recoveredChild.status, 0, recoveredChild.stderr);
         const verified = DurableState.open(path); const recovered = verified.readTraversal(); verified.close();
@@ -103,10 +103,10 @@ test('fresh-process crash matrix records independent sends and durable transitio
         assert.deepEqual(recovered.candidates.map(item => item.id), ['fixture-result']);
         assert.deepEqual(recovered.queue, ['0,1', '0,-1', '1,0', '-1,0']);
         assert.equal(recovered.submissions, 1);
-        assert.equal(recovered.activeTime, 2);
+        assert.equal(recovered.activeTime, 3);
         assert.deepEqual(Object.keys(JSON.parse(readFileSync(ledgerPath, 'utf8'))), ['work:0,0']);
       } else {
-        const recoveryScript = `import * as fs from 'node:fs'; import {DurableState} from ${JSON.stringify(durableUrl)}; import {executeDurableDiscovery} from ${JSON.stringify(executorUrl)}; const d=DurableState.open(${JSON.stringify(path)}); const ledgerPath=${JSON.stringify(ledgerPath)}; const before=d.readTraversal(); executeDurableDiscovery(d,w=>{const l=JSON.parse(fs.readFileSync(ledgerPath)); if(l[w]) throw new Error('duplicate work send'); l[w]=1; fs.writeFileSync(ledgerPath,JSON.stringify(l)); return {id:'id:'+w}},id=>({elapsed:1,result:{status:'empty'}})); const s=d.readTraversal(); if(s.cells['0,0'].outcome!=='nonempty'||s.candidates.length!==1||s.submissions!==2||s.activeTime!==3||s.cells['0,1'].outcome!=='empty'||s.attempts.length!==before.attempts.length+1) process.exit(43); d.close();`;
+        const recoveryScript = `import * as fs from 'node:fs'; import {DurableState} from ${JSON.stringify(durableUrl)}; import {executeDurableDiscovery,resolveDurableRecoveryDebit} from ${JSON.stringify(executorUrl)}; const d=DurableState.open(${JSON.stringify(path)}); if(!d.readTraversal().recoveryPending) throw Error('missing recovery accounting'); const beforeTime=d.readTraversal().activeTime; resolveDurableRecoveryDebit(d,1,'synthetic bounded interruption'); if(d.readTraversal().recoveryPending||d.readTraversal().activeTime!==beforeTime+1) throw Error('debit not persisted'); const ledgerPath=${JSON.stringify(ledgerPath)}; const before=d.readTraversal(); executeDurableDiscovery(d,w=>{const l=JSON.parse(fs.readFileSync(ledgerPath)); if(l[w]) throw new Error('duplicate work send'); l[w]=1; fs.writeFileSync(ledgerPath,JSON.stringify(l)); return {id:'id:'+w}},id=>({elapsed:1,result:{status:'empty'}})); const s=d.readTraversal(); if(s.cells['0,0'].outcome!=='nonempty'||s.candidates.length!==1||s.submissions!==2||s.activeTime!==4||s.cells['0,1'].outcome!=='empty'||s.attempts.length!==before.attempts.length+1) process.exit(43); d.close();`;
         const recoveredChild = spawnSync(process.execPath, ['--input-type=module', '-e', recoveryScript], { encoding: 'utf8' });
         assert.equal(recoveredChild.status, 0, recoveredChild.stderr);
         const afterChild = DurableState.open(path);
@@ -116,7 +116,7 @@ test('fresh-process crash matrix records independent sends and durable transitio
         assert.deepEqual(committed.gaps, []);
         assert.deepEqual(committed.queue, ['0,-1', '1,0', '-1,0']);
         assert.equal(committed.submissions, 2);
-        assert.equal(committed.activeTime, 3);
+        assert.equal(committed.activeTime, 4);
         assert.deepEqual(Object.keys(JSON.parse(readFileSync(ledgerPath, 'utf8'))), ['work:0,0', 'work:0,1']);
         afterChild.close();
       }
@@ -151,7 +151,7 @@ test('fresh process death after application UPDATE but before COMMIT rolls back 
     assert.deepEqual(state.gaps, []);
     assert.deepEqual(state.queue, []);
     reopened.close();
-    const replayScript = `import * as fs from 'node:fs'; import {DurableState} from ${JSON.stringify(durableUrl)}; import {executeDurableDiscovery} from ${JSON.stringify(new URL('../dist/durable-discovery.js', import.meta.url).href)}; const d=DurableState.open(${JSON.stringify(path)}); const s=executeDurableDiscovery(d,w=>{const l=JSON.parse(fs.readFileSync(${JSON.stringify(ledgerPath)})); if(l[w]) throw Error('duplicate resend'); throw Error('unexpected send')},id=>{if(id!=='ledger-id') throw new Error('wrong ID'); return {elapsed:1,result:{status:'success',candidates:[{id:'raw',coordinate:null},{id:'raw',coordinate:null}]}}}); if(JSON.stringify(s.candidates.map(x=>[x.id,x.sourceCell]))!==JSON.stringify([['raw','0,0'],['raw','0,0']])||s.gaps.length||JSON.stringify(s.queue)!==JSON.stringify(['0,1','0,-1','1,0','-1,0'])||s.activeTime!==1||s.submissions!==1) process.exit(45); d.close();`;
+    const replayScript = `import * as fs from 'node:fs'; import {DurableState} from ${JSON.stringify(durableUrl)}; import {executeDurableDiscovery,resolveDurableRecoveryDebit} from ${JSON.stringify(new URL('../dist/durable-discovery.js', import.meta.url).href)}; const d=DurableState.open(${JSON.stringify(path)}); if(!d.readTraversal().recoveryPending) throw Error('missing recovery accounting'); resolveDurableRecoveryDebit(d,1,'synthetic bounded interruption'); if(d.readTraversal().activeTime!==1||d.readTraversal().recoveryPending) throw Error('debit not persisted'); const s=executeDurableDiscovery(d,w=>{const l=JSON.parse(fs.readFileSync(${JSON.stringify(ledgerPath)})); if(l[w]) throw Error('duplicate resend'); throw Error('unexpected send')},id=>{if(id!=='ledger-id') throw new Error('wrong ID'); return {elapsed:1,result:{status:'success',candidates:[{id:'raw',coordinate:null},{id:'raw',coordinate:null}]}}}); if(JSON.stringify(s.candidates.map(x=>[x.id,x.sourceCell]))!==JSON.stringify([['raw','0,0'],['raw','0,0']])||s.gaps.length||JSON.stringify(s.queue)!==JSON.stringify(['0,1','0,-1','1,0','-1,0'])||s.activeTime!==2||s.submissions!==1) process.exit(45); d.close();`;
     const replayed = spawnSync(process.execPath, ['--input-type=module', '-e', replayScript], { encoding: 'utf8' });
     assert.equal(replayed.status, 0, replayed.stderr);
     const verified = DurableState.open(path);
@@ -159,7 +159,7 @@ test('fresh process death after application UPDATE but before COMMIT rolls back 
     assert.deepEqual(recovered.candidates.map(item => [item.id, item.sourceCell]), [['raw', '0,0'], ['raw', '0,0']]);
     assert.deepEqual(recovered.gaps, []);
     assert.deepEqual(recovered.queue, ['0,1', '0,-1', '1,0', '-1,0']);
-    assert.equal(recovered.activeTime, 1);
+    assert.equal(recovered.activeTime, 2);
     assert.equal(recovered.submissions, 1);
     verified.close();
   } finally { rmSync(dir, { recursive: true, force: true }); }
@@ -335,7 +335,7 @@ test('seed-expanded A and B survive process death at active-time cap and recover
     const crashScript = `import * as fs from 'node:fs'; import {DurableState} from ${JSON.stringify(durableUrl)}; import {executeDurableDiscovery} from ${JSON.stringify(executorUrl)}; const d=DurableState.open(${JSON.stringify(path)}); const ledger=${JSON.stringify(ledgerPath)}; const ids=${JSON.stringify([[keyA,'A-id'],[keyB,'B-id']])}; for(const [key,id] of ids) { let failed=false; try { executeDurableDiscovery(d,w=>{const l=JSON.parse(fs.readFileSync(ledger)); if(l[w]) throw Error('duplicate send'); l[w]={id,count:1}; fs.writeFileSync(ledger,JSON.stringify(l)); return {id}; },known=>{if(known!==id) throw Error('wrong ID '+known); throw Error('interrupt observation '+id);},'isolated'); } catch(e) { if(e.message!=='interrupt observation '+id) throw e; failed=true; } if(!failed) throw Error('observation did not interrupt '+id); } d.transitionTraversal(s=>({...s,activeTime:s.limits.activeTime})); if(d.readTraversal().activeTime!==d.readTraversal().limits.activeTime) throw Error('active-time cap not debited in child'); process.exit(42);`;
     const crashed = spawnSync(process.execPath, ['--input-type=module', '-e', crashScript], { encoding: 'utf8' });
     assert.equal(crashed.status, 42, crashed.stderr);
-    const recovery = `import * as fs from 'node:fs'; import {DurableState} from ${JSON.stringify(durableUrl)}; import {executeDurableDiscovery} from ${JSON.stringify(executorUrl)}; const d=DurableState.open(${JSON.stringify(path)}); const keys=${JSON.stringify([keyA,keyB])}; for(const [key,id] of [[keys[1],'B-id'],[keys[0],'A-id']]) { let observations=0; executeDurableDiscovery(d,()=>{throw Error('resent')},known=>{observations++; if(known!==id) throw Error('wrong ID '+known); return {elapsed:0,result:{status:'empty'}}},'isolated'); if(observations!==1) throw Error('observation count '+observations+' for '+id); if(d.readTraversal().cells[key].outcome!=='empty') throw Error('not applied '+key); } const l=JSON.parse(fs.readFileSync(${JSON.stringify(ledgerPath)})); if(Object.keys(l).length!==3 || Object.values(l).some(x=>x.count!==1)) throw Error('bad send ledger '+JSON.stringify(l)); if(d.readTraversal().submissions!==3) throw Error('submission cap exhausted/incorrect'); d.close();`;
+    const recovery = `import * as fs from 'node:fs'; import {DurableState} from ${JSON.stringify(durableUrl)}; import {executeDurableDiscovery,resolveDurableRecoveryDebit} from ${JSON.stringify(executorUrl)}; const d=DurableState.open(${JSON.stringify(path)}); if(!d.readTraversal().recoveryPending) throw Error('missing recovery accounting'); const before=d.readTraversal().activeTime; resolveDurableRecoveryDebit(d,1,'synthetic bounded interruption'); if(d.readTraversal().recoveryPending||d.readTraversal().activeTime!==before+1) throw Error('debit not persisted'); const keys=${JSON.stringify([keyA,keyB])}; for(const [key,id] of [[keys[1],'B-id'],[keys[0],'A-id']]) { let observations=0; executeDurableDiscovery(d,()=>{throw Error('resent')},known=>{observations++; if(known!==id) throw Error('wrong ID '+known); return {elapsed:0,result:{status:'empty'}}},'isolated'); if(observations!==1) throw Error('observation count '+observations+' for '+id); if(d.readTraversal().cells[key].outcome!=='empty') throw Error('not applied '+key); } const l=JSON.parse(fs.readFileSync(${JSON.stringify(ledgerPath)})); if(Object.keys(l).length!==3 || Object.values(l).some(x=>x.count!==1)) throw Error('bad send ledger '+JSON.stringify(l)); if(d.readTraversal().submissions!==3) throw Error('submission cap exhausted/incorrect'); d.close();`;
     const child = spawnSync(process.execPath, ['--input-type=module', '-e', recovery], { encoding: 'utf8' });
     assert.equal(child.status, 0, child.stderr);
     assert.deepEqual(Object.keys(JSON.parse(readFileSync(ledgerPath, 'utf8'))).sort(), ['work:0,0', `work:${keyA}`, `work:${keyB}`].sort());
@@ -428,3 +428,16 @@ test('durable traversal transitions persist queue, observations, attempts and co
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 function stateSnapshot(initial) { return reserveSubmission(admitNextCell(initial), '0,0'); }
+
+test('corrupt queue referencing missing cell fails before send', () => {
+  const { dir, path } = temp();
+  try {
+    const durable = DurableState.open(path);
+    const state = createTraversal(geometry, { cells: 5, submissions: 3, activeTime: 10 });
+    durable.writeTraversal({ ...state, queue: ['missing'] });
+    let sends = 0;
+    assert.throws(() => executeDurableDiscovery(durable, () => { sends++; return { id: 'bad' }; }, () => ({ elapsed: 0, result: { status: 'empty' } })), /Corrupt traversal checkpoint/);
+    assert.equal(sends, 0);
+    durable.close();
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});

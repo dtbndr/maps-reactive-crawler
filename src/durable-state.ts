@@ -22,6 +22,7 @@ function validate(value: unknown): asserts value is Snapshot {
 function validateTraversal(value: unknown): asserts value is TraversalState {
   const s = value as any;
   if (!s || typeof s !== 'object' || !s.geometry || !s.limits || ![s.limits.cells, s.limits.submissions, s.limits.activeTime].every(Number.isFinite) || s.limits.cells < 1 || s.limits.submissions < 0 || s.limits.activeTime < 0 || !Array.isArray(s.queue) || !s.queue.every((x: unknown) => typeof x === 'string') || !Array.isArray(s.admitted) || !s.cells || typeof s.cells !== 'object' || !Array.isArray(s.candidates) || !Array.isArray(s.gaps) || !Array.isArray(s.blocked) || !Array.isArray(s.attempts) || ![s.submissions, s.activeTime].every(Number.isFinite) || s.submissions < 0 || s.activeTime < 0 || typeof s.paused !== 'boolean' || typeof s.cancelled !== 'boolean') throw new Error('Corrupt traversal checkpoint');
+  if (new Set(s.queue).size !== s.queue.length || !s.queue.every((key: string) => s.cells[key]?.outcome === 'queued' && s.admitted.includes(key))) throw new Error('Corrupt traversal checkpoint');
 }
 
 /** Durable checkpoint foundation; this does not implement restartable discovery. */
