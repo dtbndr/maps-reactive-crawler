@@ -55,6 +55,30 @@ test('invalid durable traversal transition rolls back and invalid ordinary write
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
+test('malformed SQLite traversal payloads fail before execution and remain unchanged', () => {
+  for (const mutate of [
+    state => ({ ...state, cells: { ...state.cells, '0,0': { outcome: 'bogus' } } }),
+    state => ({ ...state, admitted: [...state.admitted, '1,0'], cells: { ...state.cells, '1,0': { outcome: 'queued' } }, queue: [...state.queue, '1,0'] }),
+    state => ({ ...state, attempts: [{ id: 'a', workId: 'work:0,0', cellKey: '0,0', status: 'dispatched', knownId: 42 }], submissions: 1 })
+  ]) {
+    const { dir, path } = temp();
+    try {
+      const d = DurableState.open(path);
+      const initial = createTraversal(geometry, { cells: 1, submissions: 3, activeTime: 10 });
+      d.writeTraversal(initial); d.close();
+      const raw = new DatabaseSync(path);
+      const payload = JSON.parse(raw.prepare('SELECT payload FROM traversal WHERE id=1').get().payload);
+      raw.prepare('UPDATE traversal SET payload=? WHERE id=1').run(JSON.stringify(mutate(payload)));
+      const malformed = raw.prepare('SELECT payload FROM traversal WHERE id=1').get().payload;
+      raw.close();
+      assert.throws(() => { const reopened = DurableState.open(path); try { reopened.readTraversal(); } finally { reopened.close(); } }, /Corrupt traversal checkpoint/);
+      const verify = new DatabaseSync(path);
+      assert.equal(verify.prepare('SELECT payload FROM traversal WHERE id=1').get().payload, malformed);
+      verify.close();
+    } finally { rmSync(dir, { recursive: true, force: true }); }
+  }
+});
+
 test('fresh process recovers traversal state after reservation before dispatch', () => {
   const { dir, path } = temp();
   try {
