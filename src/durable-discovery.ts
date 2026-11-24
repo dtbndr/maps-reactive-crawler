@@ -127,7 +127,7 @@ function executeDurableDiscoveryImpl(state: DurableState, send: SyntheticSend, o
     }
     let retries = 0;
     const storedCeiling = attempt.observationRetryCeiling ?? (attempt.submissionRetryOrdinal !== undefined && attempt.submissionRetryCeiling === undefined && attempt.retryCeiling !== undefined ? 0 : attempt.retryOrdinal === undefined ? retryPolicy.observationCeiling : 0);
-    if (storedCeiling === 0) {
+    if ((state.readTraversal().attempts.find(item => item.id === attempt!.id)!.retryOrdinal ?? 0) >= storedCeiling) {
       state.transitionTraversal(value => markUncertain(value, running!, uncertaintyScope, id));
       throw error;
     }
