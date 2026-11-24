@@ -10,16 +10,16 @@ let boundaryHook: ((boundary: DurableDiscoveryBoundary) => void) | undefined;
 export function setDurableDiscoveryBoundaryHookForTest(hook: ((boundary: DurableDiscoveryBoundary) => void) | undefined): void { boundaryHook = hook; }
 
 /** Reserve before send; known IDs are re-observed on restart without another submission. */
-function executeDurableDiscoveryImpl(state: DurableState, send: SyntheticSend, observe: SyntheticObserve, uncertaintyScope: 'isolated' | 'global', retryPolicy: DurableRetryPolicy | undefined, reservedRetryId?: string): TraversalState {
+function executeDurableDiscoveryImpl(state: DurableState, send: SyntheticSend, observe: SyntheticObserve, uncertaintyScope: 'isolated' | 'global', retryPolicy: DurableRetryPolicy | undefined, reservedRetryId?: string, targetKey?: string): TraversalState {
   let current = state.readTraversal();
   if (current.recoveryPending) throw new Error('Recovery accounting is unresolved');
   if (current.paused || current.cancelled) throw new Error(current.paused ? 'Traversal is paused' : 'Traversal is cancelled');
-  let running = Object.entries(current.cells).find(([, cell]) => cell.outcome === 'running')?.[0];
+  let running = targetKey ?? Object.entries(current.cells).find(([, cell]) => cell.outcome === 'running')?.[0];
   const latestAttempt = current.attempts.at(-1);
   const latestUncertain = latestAttempt?.status === 'uncertain' ? latestAttempt : undefined;
   const recoverable = current.attempts.findLast(item => ['uncertain', 'dispatched', 'observing'].includes(item.status) && item.knownId)
     ?? (latestUncertain && !latestUncertain.knownId && (latestUncertain.submissionRetryOrdinal ?? 0) < (retryPolicy?.submissionCeiling ?? 0) ? latestUncertain : undefined);
-  if (recoverable && !current.paused && (current.activeTime >= current.limits.activeTime || current.submissions >= current.limits.submissions || (!running && current.queue.length === 0) || (running && !current.attempts.some(item => item.cellKey === running && ['reserved', 'dispatched', 'observing'].includes(item.status))))) {
+  if (!targetKey && recoverable && !current.paused && (current.activeTime >= current.limits.activeTime || current.submissions >= current.limits.submissions || (!running && current.queue.length === 0) || (running && !current.attempts.some(item => item.cellKey === running && ['reserved', 'dispatched', 'observing'].includes(item.status))))) {
     const previousRunning = running;
     running = recoverable.cellKey;
     state.transitionTraversal(value => ({ ...value, queue: previousRunning && previousRunning !== running ? [previousRunning, ...value.queue.filter(key => key !== previousRunning && key !== running)] : value.queue.filter(key => key !== running), cells: { ...value.cells, ...(previousRunning && previousRunning !== running ? { [previousRunning]: { outcome: 'queued' as const } } : {}), [running!]: { outcome: 'running' } } }));
@@ -136,12 +136,11 @@ export function recoverDurableKnownId(state: DurableState, key: string, id: stri
     if (value.recoveryPending) throw new Error('Recovery accounting is unresolved');
     const recovered = recoverKnownId(value, key, id, evidence);
     const cells = { ...recovered.cells };
-    for (const [cellKey, cell] of Object.entries(cells)) if (cell.outcome === 'running' && cellKey !== key) cells[cellKey] = { outcome: 'queued' };
     cells[key] = { outcome: 'running' };
     return { ...recovered, cells, queue: recovered.queue.filter(item => item !== key) };
   });
   // Resume only the specifically recovered ID; the general scheduler may select another queued cell.
-  return executeDurableDiscoveryImpl(state, () => { throw new Error('Recovered ID must not be resubmitted'); }, observe, 'isolated', undefined);
+  return executeDurableDiscoveryImpl(state, () => { throw new Error('Recovered ID must not be resubmitted'); }, observe, 'isolated', undefined, undefined, key);
 }
 export function skipDurableAttempt(state: DurableState, key: string): TraversalState {
   state.transitionTraversal(value => skipAttempt(value, key));
