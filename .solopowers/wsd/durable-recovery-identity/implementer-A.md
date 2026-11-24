@@ -20,6 +20,14 @@ Added a separate durable traversal payload and methods to initialize, read, writ
 - GREEN: after implementation, `mise exec -- npm run build && mise exec -- node --test test/durable-discovery.test.mjs` passed (2 tests).
 - Full verification: `mise exec -- npm run check` passed (65 tests, typecheck and build).
 
+## Further atomicity and process-death evidence
+
+Added a failure-injection test confirming a thrown reducer leaves the previous traversal state unchanged, and a fresh child-process exit/reopen test at the after-reservation/before-dispatch boundary. Child exits without calling `close`; the parent reopens and verifies reserved attempt identity and submission count.
+
+- RED/GREEN: build ran before focused test. The new rollback test passed on the existing SQLite transaction implementation (characterization); fresh-process reserved-state recovery passed after adding the child harness.
+- `mise exec -- npm run build && mise exec -- node --test test/durable-discovery.test.mjs` — passed (4 tests).
+- `mise exec -- npm run check` — passed (67 tests, typecheck and build).
+
 ## Acceptance still outstanding
 
 Slice A remains a full restartable discovery gate. Current work does not implement durable traversal serialization, atomic intents/ID/application markers, independent synthetic send ledger, fresh-process crash matrix, exactly-once application assertions, or uncertainty isolation scenarios. A0's generic checkpoint API does not yet persist traversal state. Therefore no durable recovery claim is made. No scope was reduced and no provider calls were made.
