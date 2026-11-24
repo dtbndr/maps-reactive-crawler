@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { spawn, spawnSync } from 'node:child_process';
-import { DurableState, setAfterCreateForTest, setAfterOwnerReadForTest } from '../dist/durable-state.js';
+import { DurableState, setAfterCreateForTest, setAfterOwnerReadForTest, setBeforePublishForTest } from '../dist/durable-state.js';
 
 const temp = () => { const dir = mkdtempSync(join(tmpdir(), 'crawler-state-')); return { dir, path: join(dir, 'state.db') }; };
 test('durable state persists atomic transitions and can be reopened', () => {
@@ -106,6 +106,17 @@ test('rejects empty database substituted after atomic publication', () => {
     setAfterCreateForTest(() => { setAfterCreateForTest(undefined); rmSync(path, { force: true }); writeFileSync(path, ''); });
     assert.throws(() => DurableState.open(path), /corrupt|missing|required|identity/i);
   } finally { setAfterCreateForTest(undefined); rmSync(dir,{recursive:true,force:true}); }
+});
+test('process death before publication leaves no final checkpoint and initializes safely afterward', () => {
+  const {dir,path}=temp();
+  try {
+    const child=spawnSync(process.execPath,['--input-type=module','-e',`import {existsSync} from 'node:fs'; import {DurableState,setBeforePublishForTest} from ${JSON.stringify(new URL('../dist/durable-state.js', import.meta.url).href)}; setBeforePublishForTest(()=>{ if(existsSync(${JSON.stringify(path)})) throw Error('checkpoint published too early'); process.exit(78); }); DurableState.open(${JSON.stringify(path)});`],{encoding:'utf8'});
+    assert.equal(child.status,78,child.stderr);
+    assert.equal(existsSync(path),false,'interrupted initialization exposed a final checkpoint');
+    const recovered=DurableState.open(path);
+    assert.deepEqual(recovered.read(),{version:1,work:[],observations:[],gaps:[]});
+    recovered.close();
+  } finally { rmSync(dir,{recursive:true,force:true}); }
 });
 test('process death after publication reopens the same checkpoint', () => {
   const {dir,path}=temp();

@@ -4,9 +4,12 @@ import { join, basename, dirname } from 'node:path';
 
 type Snapshot = { version: 1; work: { id: string; status: string }[]; observations: unknown[]; gaps: unknown[] };
 let afterOwnerReadForTest: (() => void) | undefined;
+let beforePublishForTest: (() => void) | undefined;
 let afterCreateForTest: (() => void) | undefined;
 /** Internal synchronization seam for deterministic ownership-race tests. */
 export function setAfterOwnerReadForTest(hook: (() => void) | undefined): void { afterOwnerReadForTest = hook; }
+/** Internal synchronization seam for deterministic interruption tests. */
+export function setBeforePublishForTest(hook: (() => void) | undefined): void { beforePublishForTest = hook; }
 /** Internal synchronization seam for deterministic creation-race tests. */
 export function setAfterCreateForTest(hook: (() => void) | undefined): void { afterCreateForTest = hook; }
 function validate(value: unknown): asserts value is Snapshot {
@@ -34,6 +37,7 @@ export class DurableState {
         const staged = new DatabaseSync(stagingPath);
         staged.exec('PRAGMA journal_mode=DELETE; CREATE TABLE checkpoint (id INTEGER PRIMARY KEY CHECK(id=1), version INTEGER NOT NULL, payload TEXT NOT NULL); CREATE TABLE owner (id INTEGER PRIMARY KEY CHECK(id=1), pid INTEGER NOT NULL); INSERT INTO checkpoint VALUES(1,1,\'{"version":1,"work":[],"observations":[],"gaps":[]}\');');
         staged.close();
+        beforePublishForTest?.();
         try { linkSync(stagingPath, path); } catch (error) {
           if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
         }
