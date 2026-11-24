@@ -1,5 +1,6 @@
 import { DatabaseSync } from 'node:sqlite';
-import { closeSync, openSync, statSync } from 'node:fs';
+import { closeSync, linkSync, mkdtempSync, openSync, rmSync } from 'node:fs';
+import { join, basename, dirname } from 'node:path';
 
 type Snapshot = { version: 1; work: { id: string; status: string }[]; observations: unknown[]; gaps: unknown[] };
 const initial = (): Snapshot => ({ version: 1, work: [], observations: [], gaps: [] });
@@ -18,23 +19,26 @@ export class DurableState {
   private constructor(private db: DatabaseSync) {}
   static open(path: string): DurableState {
     let created = false;
+    let db: DatabaseSync;
+    const staging = mkdtempSync(join(dirname(path), `.${basename(path)}.init-`));
+    const stagingPath = join(staging, 'checkpoint.db');
     try {
-      const fd = openSync(path, 'wx');
-      closeSync(fd);
-      created = true;
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
-    }
-    const identity = created ? statSync(path) : undefined;
-    if (created) afterCreateForTest?.();
-    const db = new DatabaseSync(path);
-    if (identity) {
-      const openedIdentity = statSync(path);
-      if (identity.dev !== openedIdentity.dev || identity.ino !== openedIdentity.ino) {
-        db.close();
-        throw new Error('Cannot establish database creation identity');
+      let exists = true;
+      try { closeSync(openSync(path, 'r')); } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === 'ENOENT') exists = false;
+        else throw error;
       }
-    }
+      if (!exists) {
+        const staged = new DatabaseSync(stagingPath);
+        staged.exec('PRAGMA journal_mode=DELETE; CREATE TABLE checkpoint (id INTEGER PRIMARY KEY CHECK(id=1), version INTEGER NOT NULL, payload TEXT NOT NULL); CREATE TABLE owner (id INTEGER PRIMARY KEY CHECK(id=1), pid INTEGER NOT NULL); INSERT INTO checkpoint VALUES(1,1,\'{"version":1,"work":[],"observations":[],"gaps":[]}\');');
+        staged.close();
+        afterCreateForTest?.();
+        try { linkSync(stagingPath, path); created = true; } catch (error) {
+          if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
+        }
+      }
+    } finally { rmSync(staging, { recursive: true, force: true }); }
+    db = new DatabaseSync(path);
     try {
       db.exec('PRAGMA journal_mode=WAL; BEGIN IMMEDIATE');
       const tables = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name IN ('checkpoint','owner')").all().map((r: any) => r.name);

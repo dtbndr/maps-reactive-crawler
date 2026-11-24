@@ -34,9 +34,8 @@ test('exclusive ownership rejects simultaneous contention and permits reacquisit
   try { const owner=DurableState.open(path); assert.throws(()=>DurableState.open(path),/owned/); owner.close(); const reopened=DurableState.open(path); reopened.close(); }
   finally { rmSync(dir,{recursive:true,force:true}); }
 });
-test('simultaneous processes grant checkpoint ownership to at most one contender', async () => {
+test('concurrent first opens initialize one checkpoint and grant ownership to one contender', async () => {
   const {dir,path}=temp();
-  const initialized=DurableState.open(path); initialized.close();
   const release=join(dir,'release');
   const script=`import { existsSync, writeFileSync } from 'node:fs'; import { DurableState } from ${JSON.stringify(new URL('../dist/durable-state.js', import.meta.url).href)}; const [path,result,release]=process.argv.slice(1); try { const state=DurableState.open(path); writeFileSync(result,'owned'); while (!existsSync(release)) await new Promise(r=>setTimeout(r,1)); state.close(); } catch (e) { if (/owned|busy|locked/i.test(e.message)) writeFileSync(result,'rejected'); else throw e; }`;
   const children=[0,1].map(index=>spawn(process.execPath,['--input-type=module','-e',script,path,join(dir,`result-${index}`),release],{stdio:['ignore','pipe','pipe']}));
@@ -95,16 +94,16 @@ test('fails closed for empty database with stale initialization marker', () => {
 test('rejects empty database substituted after exclusive creation', () => {
   const {dir,path}=temp();
   try {
-    setAfterCreateForTest(() => { setAfterCreateForTest(undefined); rmSync(path); writeFileSync(path, ''); });
+    setAfterCreateForTest(() => { setAfterCreateForTest(undefined); rmSync(path, { force: true }); writeFileSync(path, ''); });
     assert.throws(() => DurableState.open(path), /corrupt|missing|required|identity/i);
   } finally { setAfterCreateForTest(undefined); rmSync(dir,{recursive:true,force:true}); }
 });
-test('fails closed when first initialization is interrupted before commit', () => {
+test('interruption after atomic publication leaves a complete recoverable checkpoint', () => {
   const {dir,path}=temp();
   try {
-    const child=spawnSync(process.execPath,['--input-type=module','-e',`import {DurableState,setAfterOwnerReadForTest} from ${JSON.stringify(new URL('../dist/durable-state.js', import.meta.url).href)}; setAfterOwnerReadForTest(()=>process.kill(process.pid,'SIGKILL')); DurableState.open(${JSON.stringify(path)});`],{encoding:'utf8'});
-    assert.equal(child.signal,'SIGKILL');
-    assert.throws(()=>DurableState.open(path),/corrupt|missing|required/i);
+    const child=spawnSync(process.execPath,['--input-type=module','-e',`import {DurableState,setAfterCreateForTest} from ${JSON.stringify(new URL('../dist/durable-state.js', import.meta.url).href)}; setAfterCreateForTest(()=>process.exit(77)); DurableState.open(${JSON.stringify(path)});`],{encoding:'utf8'});
+    assert.equal(child.status,77);
+    const recovered=DurableState.open(path); assert.deepEqual(recovered.read(),{version:1,work:[],observations:[],gaps:[]}); recovered.close();
   } finally { rmSync(dir,{recursive:true,force:true}); }
 });
 test('reacquires ownership after abrupt owner process death', () => {
