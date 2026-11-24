@@ -16,9 +16,9 @@ export function createTraversal(geometry: Geometry, limits: TraversalLimits): Tr
 
 export function reserveSubmission(state: TraversalState, key: string): TraversalState {
   if (state.paused || state.cancelled || state.activeTime >= state.limits.activeTime) throw new Error('Submission stopped');
-  if (state.cells[key]?.outcome !== 'running') throw new Error('Cell is not running');
   if (state.submissions >= state.limits.submissions) throw new Error('Submission limit reached');
   if (state.attempts.some(a => a.cellKey === key && ['reserved','dispatched','uncertain','observing','observed','skipped'].includes(a.status))) throw new Error('Attempt outstanding');
+  if (state.cells[key]?.outcome !== 'running') throw new Error('Cell is not running');
   const ordinal = state.attempts.filter(a => a.cellKey === key).length + 1;
   const workId = `work:${key}`;
   return { ...state, submissions: state.submissions + 1, attempts: [...state.attempts, { id: `${workId}:attempt:${ordinal}`, workId, cellKey: key, status: 'reserved' }] };

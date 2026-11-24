@@ -57,6 +57,32 @@ test('fresh process recovers traversal state after reservation before dispatch',
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
+test('fresh-process crash matrix records independent sends and durable transition boundaries', () => {
+  const durableUrl = new URL('../dist/durable-state.js', import.meta.url).href;
+  const executorUrl = new URL('../dist/durable-discovery.js', import.meta.url).href;
+  for (const boundary of ['dequeued', 'reserved', 'dispatched', 'sent', 'id-persisted', 'committed']) {
+    const { dir, path } = temp();
+    try {
+      const setup = DurableState.open(path);
+      setup.writeTraversal(createTraversal(geometry, { cells: 5, submissions: 3, activeTime: 10 }));
+      setup.close();
+      const ledgerPath = join(dir, 'independent-ledger.json');
+      writeFileSync(ledgerPath, JSON.stringify({ sends: 0, id: 'process-job-id' }));
+      const script = `import * as fs from 'node:fs'; import {DurableState} from ${JSON.stringify(durableUrl)}; import {executeDurableDiscovery,setDurableDiscoveryBoundaryHookForTest} from ${JSON.stringify(executorUrl)}; const d=DurableState.open(${JSON.stringify(path)}); setDurableDiscoveryBoundaryHookForTest(x=>{if(x===${JSON.stringify(boundary)}) process.exit(41)}); executeDurableDiscovery(d,()=>{const p=${JSON.stringify(ledgerPath)}; const l=JSON.parse(fs.readFileSync(p)); l.sends++; fs.writeFileSync(p,JSON.stringify(l)); return {id:l.id}},()=>({elapsed:1,result:{status:'empty'}}));`;
+      const child = spawnSync(process.execPath, ['--input-type=module', '-e', script], { encoding: 'utf8' });
+      assert.equal(child.status, 41, child.stderr);
+      const ledger = JSON.parse(readFileSync(ledgerPath, 'utf8'));
+      const reopened = DurableState.open(path);
+      const state = reopened.readTraversal();
+      assert.equal(ledger.sends, ['sent', 'id-persisted', 'committed'].includes(boundary) ? 1 : 0, boundary);
+      assert.equal(state.submissions, ['reserved', 'dispatched', 'sent', 'id-persisted', 'committed'].includes(boundary) ? 1 : 0, boundary);
+      if (boundary === 'committed') { assert.equal(state.cells['0,0'].outcome, 'empty'); assert.equal(state.activeTime, 1); }
+      else assert.equal(state.cells['0,0'].outcome, ['dequeued', 'reserved', 'dispatched', 'sent', 'id-persisted'].includes(boundary) ? 'running' : 'queued');
+      reopened.close();
+    } finally { rmSync(dir, { recursive: true, force: true }); }
+  }
+});
+
 test('durable executor persists reservation before fixture send and applies response', () => {
   const { dir, path } = temp();
   try {
