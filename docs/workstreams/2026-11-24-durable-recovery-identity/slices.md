@@ -71,23 +71,34 @@ Durable intent may over-count unsent work. Ensure application marker and depende
 #### Carry-forward
 Durable discovery observations, replay keys, attempts, queue and accounting.
 
-### Slice A1: Recovery controls
-**Goal**: Persist bounded recovery decisions and honest stops.
+### Slice A1a: Checkpoint and accounting safety
+**Goal**: Make recovery entry and every work-producing transition fail closed on untrustworthy state or unresolved accounting, without claiming recovery controls complete.
 
-#### Tasks
-- [ ] Implement durable known-ID recovery evidence, retry and resend ordinals/ceilings, approvals, skip, cancellation and isolated/global failure handling according to the handoff. Verify recovered-ID evidence persists before observation, observation retry increments only its ordinal, and allowances survive restart and cap changes.
-- [ ] Test last reserved slot dispatch at the cap in the same uninterrupted execution. Separately crash after reservation before durable ID and assert restart does not dispatch or blindly resend, regardless of the independent fixture send ledger. Test fresh-process restart for admitted dispatch at cell cap, observation retry at submission cap without submission increments, fresh reservation for approved resend and cancellation.
-- [ ] Test parked A recovered by durably recording authoritative synthetic ID evidence before observation; B can advance only with isolation and trustworthy accounting, and A is never dispatched twice. After abrupt restart use a defensible bounded conservative debit before continuation, or a clean-pause marker where applicable; unbounded time fails closed once Slice B lands.
-- [ ] Test exhausted isolated known-safe submission retries across restart: S=3, ordinal 2/2, cap 5, durable discovery gap A, admitted B proceeds at S=4, and exhaustion reports partial_gaps.
+- [ ] Validate persisted counters against reservations, attempts and queue/cell consistency; corrupt or unsupported state must block all new work before send. Guard recovery scheduling mutations and resend reservations as well as executor entry. Test nonnegative understated submissions, malformed attempts and inconsistent queue/cell state; assert no reservation or send.
+- [ ] After abrupt restart require a defensible bounded conservative debit before continuation, or a clean-pause marker where applicable; never assume zero crash time. Exercise debit followed by continuation with an independent durable send ledger. Full unbounded-time accounting remains Slice B.
+- [ ] Establish focused failing tests before changes and run the full check; document the existing WIP baseline separately, including its accounting failures. Do not treat WIP code as trusted.
 
-#### Watch out
-Never claim remote cancellation or billing certainty; skip and approval do not erase a gap. Corrupt/untrusted checkpoints block new work.
+**Carry-forward:** Validated checkpoint and guarded transitions for A1b/A1c; cumulative active-time enforcement remains B.
 
-#### Verification
-`mise exec -- node --test test/durable-recovery.test.mjs` and full project check; assert durable state and fixture send counts.
+### Slice A1b: Durable retry and recovered-ID execution
+**Goal**: Recover isolated work and enforce operation-scoped retry decisions across restart.
 
-#### Carry-forward
-Operation-scoped durable recovery control usable for detail work.
+- [ ] Persist authoritative synthetic recovered-ID evidence/source/time linked to the original intent before observation. Recover parked A without dispatching it again or altering unrelated running B; B advances only with isolation and trustworthy accounting. Global uncertainty blocks B. Test fresh processes, exact state and independent send counts, including crash after evidence persistence.
+- [ ] Persist retry ordinals and finite ceilings before retry, initial ordinal zero, no reset on restart or cap change. Enforce durable authorization, ordinal succession and stored ceiling continuity rather than caller policy; only fixture-defined known-safe transients retry automatically, with bounded backoff. Observation retry consumes allowance but no submission slot.
+- [ ] Test real isolated known-safe submission attempts across fresh-process restart: S=3, ordinal 2/2, cap 5, durable discovery gap A, admitted B proceeds at S=4, exhaustion reports partial_gaps. Test known-ID observation retry at submission cap without submission increments and allowance survival across cap changes.
+
+**Carry-forward:** Durable operation-scoped retry and recovered-ID controls for A1c and detail work.
+
+### Slice A1c: Recovery decisions and acceptance
+**Goal**: Complete the original A1 recovery controls and fresh-process acceptance; A1 is complete only when A1a, A1b and A1c pass in order.
+
+- [ ] Persist skip, cancellation, isolated/global failures and approved resend with rationale, independently bounded durable resend ordinal/ceiling and a fresh submission reservation. Preserve prior uncertainty, billing history and gaps until verified completion; never claim remote cancellation or billing certainty.
+- [ ] Test last reserved slot dispatch at cap uninterrupted; separately crash after reservation before durable ID and prove restart neither dispatches nor blindly resends regardless of the independent ledger. Test fresh-process admitted dispatch at cell cap, approved resend and cancellation with exact durable state and send counts. Skip and approval do not erase gaps; corrupt/untrusted checkpoints block new work.
+- [ ] Run the complete recovery suite and full project check with fresh-process evidence for the preceding gates. Record exact baseline failures and meaningful RED for each gate before implementation, then GREEN; no baseline waiver for final verification.
+
+**Verification for A1a–A1c:** Build before RED, GREEN, focused tests and full check as above; run `mise exec -- node --test test/durable-recovery.test.mjs` and relevant focused recovery, accounting, retry and discovery tests, plus full project check at each gate. Assert durable state and independent fixture send counts.
+
+**Carry-forward:** Operation-scoped durable recovery controls usable for detail work; Slice B supplies full cumulative active-time accounting and unbounded-interval fail-closed behavior.
 
 ### Slice B: Durable active-time accounting
 **Goal**: Preserve time limits safely across process failure.
