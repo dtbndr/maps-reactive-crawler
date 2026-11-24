@@ -1,15 +1,16 @@
 import type { DurableState } from './durable-state.js';
-import { admitNextCell, applyDiscoveryResult, dispatchSubmission, markUncertain, observeKnownId, reserveSubmission, type DiscoveryResult, type TraversalState } from './traversal.js';
+import { admitNextCell, applyDiscoveryResult, dispatchSubmission, markUncertain, observeKnownId, reserveSubmission, retryKnownIdObservation, type DiscoveryResult, type TraversalState } from './traversal.js';
 
 export type SyntheticSend = (workId: string) => { id: string };
 export type SyntheticObserve = (id: string) => { result: DiscoveryResult; elapsed: number };
+export type DurableRetryPolicy = { observationCeiling: number; knownSafeObservationError: (error: unknown) => boolean };
 export type DurableDiscoveryBoundary = 'dequeued' | 'reserved' | 'dispatched' | 'sent' | 'id-persisted' | 'observing' | 'observed' | 'committed';
 let boundaryHook: ((boundary: DurableDiscoveryBoundary) => void) | undefined;
 /** Test-only crash injection seam; unset during normal crawler execution. */
 export function setDurableDiscoveryBoundaryHookForTest(hook: ((boundary: DurableDiscoveryBoundary) => void) | undefined): void { boundaryHook = hook; }
 
 /** Reserve before send; known IDs are re-observed on restart without another submission. */
-export function executeDurableDiscovery(state: DurableState, send: SyntheticSend, observe: SyntheticObserve, uncertaintyScope: 'isolated' | 'global' = 'global'): TraversalState {
+export function executeDurableDiscovery(state: DurableState, send: SyntheticSend, observe: SyntheticObserve, uncertaintyScope: 'isolated' | 'global' = 'global', retryPolicy?: DurableRetryPolicy): TraversalState {
   let current = state.readTraversal();
   if (current.paused || current.cancelled) throw new Error(current.paused ? 'Traversal is paused' : 'Traversal is cancelled');
   let running = Object.entries(current.cells).find(([, cell]) => cell.outcome === 'running')?.[0];
@@ -84,8 +85,22 @@ export function executeDurableDiscovery(state: DurableState, send: SyntheticSend
   boundaryHook?.('observing');
   try { response = observe(id); }
   catch (error) {
-    state.transitionTraversal(value => markUncertain(value, running!, uncertaintyScope, id));
-    throw error;
+    if (!retryPolicy?.knownSafeObservationError(error)) {
+      state.transitionTraversal(value => markUncertain(value, running!, uncertaintyScope, id));
+      throw error;
+    }
+    let retries = 0;
+    while (true) {
+      state.transitionTraversal(value => retryKnownIdObservation(value, running!, retryPolicy.observationCeiling));
+      retries++;
+      try { response = observe(id); break; }
+      catch (retryError) {
+        if (retries >= retryPolicy.observationCeiling || !retryPolicy.knownSafeObservationError(retryError)) {
+          state.transitionTraversal(value => markUncertain(value, running!, uncertaintyScope, id));
+          throw retryError;
+        }
+      }
+    }
   }
   boundaryHook?.('observed');
   state.transitionTraversal(value => applyDiscoveryResult(observeKnownId(value, running!, id, response.elapsed), running!, response.result));
