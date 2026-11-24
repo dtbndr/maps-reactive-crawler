@@ -58,6 +58,13 @@ test('fresh process waits on persisted authorized submission retry before exactl
  } finally {rmSync(dir,{recursive:true,force:true})}
 });
 
+test('corrupt pending observation delay is rejected before callbacks',()=>{
+ const dir=mkdtempSync(join(tmpdir(),'retry-corrupt-pending-'));const path=join(dir,'state.db');let sends=0,polls=0;
+ try {const db=DurableState.open(path);let s=createTraversal(geo,{cells:1,submissions:1,activeTime:10});s=admitNextCell(s);s=reserveSubmission(s,'0,0');s=dispatchSubmission(s,'0,0');s=markUncertain(s,'0,0','isolated','known');s={...s,attempts:s.attempts.map(a=>({...a,status:'observing',retryOrdinal:1,observationRetryCeiling:1,observationRetryPendingDelayMs:-1}))};
+  assert.throws(()=>db.writeTraversal(s),/Corrupt traversal checkpoint/);db.close();assert.equal(sends,0);assert.equal(polls,0);
+ } finally {rmSync(dir,{recursive:true,force:true})}
+});
+
 test('persisted submission retry ceiling cannot be widened by a later caller policy',()=>{
  const dir=mkdtempSync(join(tmpdir(),'retry-ceiling-'));const db=DurableState.open(join(dir,'state.db'));let calls=0;
  try {db.writeTraversal(createTraversal(geo,{cells:1,submissions:4,activeTime:10}));
