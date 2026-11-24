@@ -17,3 +17,5 @@ test('clean pause must be durable before crash and restart does not demand debit
  const dir=mkdtempSync(join(tmpdir(),'clean-pause-'));const path=join(dir,'state.db');
  try {const d=DurableState.open(path);d.writeTraversal(createTraversal(geo,{cells:1,submissions:1,activeTime:10}));recordDurableCleanPause(d,'operator paused before exit');d.close();const reopened=DurableState.open(path);assert.equal(reopened.readTraversal().recoveryPending,false);reopened.close()}finally{rmSync(dir,{recursive:true,force:true})}
 });
+
+test('overflowing recovery debit preserves pending snapshot',()=>{const dir=mkdtempSync(join(tmpdir(),'debit-overflow-'));const d=DurableState.open(join(dir,'state.db'));try{d.writeTraversal({...createTraversal(geo,{cells:1,submissions:1,activeTime:10}),activeTime:Number.MAX_VALUE,recoveryPending:true});const before=d.readTraversal();assert.throws(()=>resolveDurableRecoveryDebit(d,Number.MAX_VALUE,'synthetic bound'));assert.deepEqual(d.readTraversal(),before)}finally{d.close();rmSync(dir,{recursive:true,force:true})}});

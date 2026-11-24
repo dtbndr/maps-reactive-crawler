@@ -165,6 +165,7 @@ export function resolveDurableRecoveryDebit(state: DurableState, elapsed: number
   if (!Number.isFinite(elapsed) || elapsed < 0 || typeof evidence !== 'string' || !evidence.trim()) throw new Error('A finite nonnegative debit and evidence are required');
   state.transitionTraversal(value => {
     if (!value.recoveryPending) throw new Error('No interrupted recovery accounting is pending');
+    if (!Number.isFinite(value.activeTime + elapsed)) throw new Error('Recovery debit exceeds finite accounting range');
     return { ...value, activeTime: value.activeTime + elapsed, recoveryPending: false, cleanPauseEvidence: undefined, recoveryDebitEvidence: { elapsed, evidence } };
   });
   return state.readTraversal();
