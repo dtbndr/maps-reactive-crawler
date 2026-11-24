@@ -110,7 +110,7 @@ function executeDurableDiscoveryImpl(state: DurableState, send: SyntheticSend, o
       throw error;
     }
     let retries = 0;
-    const legacySubmissionCeiling = attempt.submissionRetryOrdinal !== undefined && attempt.submissionRetryCeiling === undefined;
+    const legacySubmissionCeiling = attempt.submissionRetryOrdinal !== undefined && attempt.submissionRetryCeiling === undefined && attempt.retryCeiling !== undefined;
     const storedCeiling = legacySubmissionCeiling ? 0 : (attempt.retryCeiling ?? retryPolicy.observationCeiling);
     if (storedCeiling === 0) {
       state.transitionTraversal(value => markUncertain(value, running!, uncertaintyScope, id));
