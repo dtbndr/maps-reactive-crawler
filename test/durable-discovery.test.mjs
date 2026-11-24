@@ -562,3 +562,29 @@ for (const [name, mutate] of [
  ['retry ordinal regression', s => ({...s,queue:[],cells:{'0,0':{outcome:'running'}},submissions:1,attempts:[{id:'work:0,0:attempt:1',workId:'work:0,0',cellKey:'0,0',status:'uncertain',submissionRetryOrdinal:2,safeRetryAuthorization:{ordinal:1,ceiling:3}}]})],
  ['retry authorization type', s => ({...s,queue:[],cells:{'0,0':{outcome:'running'}},submissions:1,attempts:[{id:'work:0,0:attempt:1',workId:'work:0,0',cellKey:'0,0',status:'uncertain',safeRetryAuthorization:{ordinal:1,ceiling:'2'}}]})]
 ]) test('reject invalid '+name+' before work',()=>{const {dir,path}=temp();try{const d=DurableState.open(path);d.writeTraversal(createTraversal(geometry,{cells:5,submissions:3,activeTime:10}));d.close();const db=new DatabaseSync(path);const initial=JSON.parse(db.prepare('SELECT payload FROM traversal WHERE id=1').get().payload);const bad=JSON.stringify(mutate(initial));db.prepare('UPDATE traversal SET payload=? WHERE id=1').run(bad);db.close();let calls=0;assert.throws(()=>{const x=DurableState.open(path);try{executeDurableDiscovery(x,()=>{calls++;return{id:'x'}},()=>{calls++;return{elapsed:0,result:{status:'empty'}}},'isolated',{submissionCeiling:2,isKnownSafeSubmissionError:()=>true})}finally{x.close()}},/Corrupt traversal checkpoint/);assert.equal(calls,0);const verify=new DatabaseSync(path);assert.equal(verify.prepare('SELECT payload FROM traversal WHERE id=1').get().payload,bad);verify.close()}finally{rmSync(dir,{recursive:true,force:true})}});
+
+test('fresh-process recovery does not revive exhausted retry using a raised caller ceiling', () => {
+  const { dir, path } = temp();
+  try {
+    const durableUrl = new URL('../dist/durable-state.js', import.meta.url).href;
+    const executorUrl = new URL('../dist/durable-discovery.js', import.meta.url).href;
+    const ledgerPath = join(dir, 'ceiling-ledger.json');
+    writeFileSync(ledgerPath, JSON.stringify({}));
+    const setupScript = `import * as fs from 'node:fs'; import {DurableState} from ${JSON.stringify(durableUrl)}; import {executeDurableDiscovery} from ${JSON.stringify(executorUrl)}; import {validateGeometry,createTraversal} from ${JSON.stringify(new URL('../dist/index.js', import.meta.url).href)}; const g=validateGeometry({seed:{latitude:0,longitude:0},spacing:100,area:{type:'bbox',south:-1,north:1,west:-1,east:1}}); const d=DurableState.open(${JSON.stringify(path)}); const initial=createTraversal(g,{cells:5,submissions:20,activeTime:20}); d.writeTraversal({...initial,queue:['0,0','1,0'],admitted:['0,0','1,0'],cells:{'0,0':{outcome:'queued'},'1,0':{outcome:'queued'}}}); let sends=0; try { executeDurableDiscovery(d,w=>{const l=JSON.parse(fs.readFileSync(${JSON.stringify(ledgerPath)})); l[w]=(l[w]||0)+1; sends++; fs.writeFileSync(${JSON.stringify(ledgerPath)},JSON.stringify(l)); throw Error('safe failure')},()=>{throw Error('unexpected observe')},'isolated',{observationCeiling:0,submissionCeiling:2,knownSafeSubmissionError:()=>true}); } catch(e) { if(e.message!=='safe failure') throw e; } if(sends!==3) throw Error('A did not send three times: '+sends); d.close();`;
+    const setup = spawnSync(process.execPath, ['--input-type=module', '-e', setupScript], { encoding: 'utf8' });
+    assert.equal(setup.status, 0, setup.stderr);
+    assert.deepEqual(Object.keys(JSON.parse(readFileSync(ledgerPath, 'utf8'))), ['work:0,0']);
+    const killScript = `import {DurableState} from ${JSON.stringify(durableUrl)}; import {executeDurableDiscovery,setDurableDiscoveryBoundaryHookForTest} from ${JSON.stringify(executorUrl)}; const d=DurableState.open(${JSON.stringify(path)}); setDurableDiscoveryBoundaryHookForTest(x=>{if(x==='dequeued') process.exit(42)}); executeDurableDiscovery(d,()=>({id:'unexpected'}),()=>({elapsed:1,result:{status:'empty'}}),'isolated',{observationCeiling:0,submissionCeiling:2,knownSafeSubmissionError:()=>true});`;
+    const killed = spawnSync(process.execPath, ['--input-type=module', '-e', killScript], { encoding: 'utf8' });
+    assert.equal(killed.status, 42, killed.stderr);
+    const resumeScript = `import * as fs from 'node:fs'; import {DurableState} from ${JSON.stringify(durableUrl)}; import {executeDurableDiscovery,resolveDurableRecoveryDebit} from ${JSON.stringify(executorUrl)}; const d=DurableState.open(${JSON.stringify(path)}); if(!d.readTraversal().recoveryPending) throw Error('missing debit'); resolveDurableRecoveryDebit(d,1,'synthetic interruption'); executeDurableDiscovery(d,w=>{const l=JSON.parse(fs.readFileSync(${JSON.stringify(ledgerPath)})); if(l[w]) throw Error('duplicate '+w); l[w]=1; fs.writeFileSync(${JSON.stringify(ledgerPath)},JSON.stringify(l)); return {id:'B'}},()=>({elapsed:1,result:{status:'empty'}}),'isolated',{observationCeiling:0,submissionCeiling:9,knownSafeSubmissionError:()=>true}); d.close();`;
+    const resumed = spawnSync(process.execPath, ['--input-type=module', '-e', resumeScript], { encoding: 'utf8' });
+    assert.equal(resumed.status, 0, resumed.stderr);
+    const state = DurableState.open(path); const result = state.readTraversal(); state.close();
+    assert.deepEqual(JSON.parse(readFileSync(ledgerPath, 'utf8')), {'work:0,0':3,'work:1,0':1});
+    assert.equal(result.attempts.filter(a => a.cellKey === '0,0').length, 3);
+    assert.equal(result.cells['0,0'].outcome, 'parked');
+    assert.equal(result.cells['1,0'].outcome, 'empty');
+    assert.deepEqual(result.gaps.map(g => [g.cellKey, g.cause]), [['0,0', 'failed'], ['0,0', 'failed'], ['0,0', 'uncertain']]);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
