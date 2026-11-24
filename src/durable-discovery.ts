@@ -180,7 +180,7 @@ export function approveDurableResend(state: DurableState, key: string, rationale
     if (value.recoveryPending) throw new Error('Recovery accounting is unresolved');
     return authorizeResend(value, key, rationale, ceiling);
   });
-  return executeDurableDiscoveryImpl(state, send, observe, 'isolated', undefined, state.readTraversal().attempts.at(-1)!.id);
+  return executeDurableDiscoveryImpl(state, send, observe, 'isolated', undefined, state.readTraversal().attempts.at(-1)!.id, key);
 }
 export function recordDurableCleanPause(state: DurableState, evidence: string): TraversalState {
   if (typeof evidence !== 'string' || !evidence.trim()) throw new Error('Clean-pause evidence is required');
