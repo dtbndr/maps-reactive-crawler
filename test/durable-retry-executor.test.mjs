@@ -3,11 +3,11 @@ import { validateGeometry, createTraversal, admitNextCell, reserveSubmission, di
 import { DurableState } from '../dist/durable-state.js'; import { executeDurableDiscovery } from '../dist/durable-discovery.js';
 import { mkdtempSync, rmSync, readFileSync } from 'node:fs'; import { tmpdir } from 'node:os'; import { join } from 'node:path'; import { spawnSync } from 'node:child_process';
 const geo=validateGeometry({seed:{latitude:0,longitude:0},spacing:10,area:{type:'bbox',south:-1,north:1,west:-1,east:1}});
-test('executor retries known ID safely and persists ordinal without spending a submission across restart',()=>{
- const dir=mkdtempSync(join(tmpdir(),'retry-')); const path=join(dir,'state.db'); let sends=0, polls=0;
+test('executor retries known ID safely with deterministic capped backoff',()=>{
+ const dir=mkdtempSync(join(tmpdir(),'retry-')); const path=join(dir,'state.db'); let sends=0, polls=0, waits=[];
  try { let db=DurableState.open(path); let s=createTraversal(geo,{cells:1,submissions:1,activeTime:10}); s=admitNextCell(s); s=reserveSubmission(s,'0,0'); s=dispatchSubmission(s,'0,0'); s=markUncertain(s,'0,0','isolated','id-1'); db.writeTraversal(s); db.close();
- db=DurableState.open(path); executeDurableDiscovery(db,()=>{sends++;return{id:'bad'}},()=>{polls++;if(polls===1)throw Error('known-safe');return{result:{status:'empty'},elapsed:1}},'isolated',{observationCeiling:1,knownSafeObservationError:e=>e.message==='known-safe'});
- assert.equal(sends,0); assert.equal(db.readTraversal().submissions,1); assert.equal(db.readTraversal().attempts[0].retryOrdinal,1); db.close();
+ db=DurableState.open(path); executeDurableDiscovery(db,()=>{sends++;return{id:'bad'}},()=>{polls++;if(polls===1)throw Error('known-safe');return{result:{status:'empty'},elapsed:1}},'isolated',{observationCeiling:1,knownSafeObservationError:e=>e.message==='known-safe',retryBaseDelayMs:25,retryMaxDelayMs:30,wait:ms=>waits.push(ms)});
+ assert.equal(sends,0); assert.deepEqual(waits,[25]); assert.equal(db.readTraversal().submissions,1); assert.equal(db.readTraversal().attempts[0].retryOrdinal,1); db.close();
  } finally {rmSync(dir,{recursive:true,force:true})}
 });
 test('unsafe observation error is not retried',()=>{const dir=mkdtempSync(join(tmpdir(),'retry-'));const db=DurableState.open(join(dir,'state.db'));let s=createTraversal(geo,{cells:1,submissions:1,activeTime:10});s=admitNextCell(s);s=reserveSubmission(s,'0,0');s=dispatchSubmission(s,'0,0');s=markUncertain(s,'0,0','isolated','id');db.writeTraversal(s);let calls=0;assert.throws(()=>executeDurableDiscovery(db,()=>({id:'x'}),()=>{calls++;throw Error('unsafe')},'isolated',{observationCeiling:2,knownSafeObservationError:()=>false}));assert.equal(calls,1);assert.equal(db.readTraversal().attempts[0].retryOrdinal,undefined);db.close();rmSync(dir,{recursive:true,force:true})});
@@ -24,10 +24,10 @@ test('fresh process consumes separately persisted authorization after crash befo
  } finally {rmSync(dir,{recursive:true,force:true})}
 });
 test('known-safe submission transient reserves a fresh durable slot and retries within ceiling',()=>{
- const dir=mkdtempSync(join(tmpdir(),'submission-retry-'));const db=DurableState.open(join(dir,'state.db'));let calls=0;
+ const dir=mkdtempSync(join(tmpdir(),'submission-retry-'));const db=DurableState.open(join(dir,'state.db'));let calls=0;const waits=[];
  try {db.writeTraversal(createTraversal(geo,{cells:1,submissions:2,activeTime:10}));
- executeDurableDiscovery(db,()=>{calls++;if(calls===1)throw Object.assign(Error('transient'),{safe:true});return{id:'synthetic'}},()=>({result:{status:'empty'},elapsed:1}),'isolated',{submissionCeiling:1,knownSafeSubmissionError:e=>e.safe});
- assert.equal(calls,2);assert.equal(db.readTraversal().submissions,2);assert.deepEqual(db.readTraversal().attempts.map(a=>a.submissionRetryOrdinal),[0,1]);
+ executeDurableDiscovery(db,()=>{calls++;if(calls===1)throw Object.assign(Error('transient'),{safe:true});return{id:'synthetic'}},()=>({result:{status:'empty'},elapsed:1}),'isolated',{submissionCeiling:1,knownSafeSubmissionError:e=>e.safe,retryBaseDelayMs:10,retryMaxDelayMs:15,wait:ms=>waits.push(ms)});
+ assert.deepEqual(waits,[10]);assert.equal(calls,2);assert.equal(db.readTraversal().submissions,2);assert.deepEqual(db.readTraversal().attempts.map(a=>a.submissionRetryOrdinal),[0,1]);
  } finally {db.close();rmSync(dir,{recursive:true,force:true})}
 });
 

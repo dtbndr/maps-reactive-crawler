@@ -3,7 +3,17 @@ import { admitNextCell, applyDiscoveryResult, authorizeSafeRetry, authorizeSafeR
 
 export type SyntheticSend = (workId: string) => { id: string };
 export type SyntheticObserve = (id: string) => { result: DiscoveryResult; elapsed: number };
-export type DurableRetryPolicy = { observationCeiling: number; knownSafeObservationError: (error: unknown) => boolean; submissionCeiling?: number; knownSafeSubmissionError?: (error: unknown) => boolean };
+export type DurableRetryPolicy = { observationCeiling: number; knownSafeObservationError: (error: unknown) => boolean; submissionCeiling?: number; knownSafeSubmissionError?: (error: unknown) => boolean; retryBaseDelayMs?: number; retryMaxDelayMs?: number; wait?: (milliseconds: number) => void };
+function retryDelay(policy: DurableRetryPolicy | undefined, ordinal: number): number {
+  const base = policy?.retryBaseDelayMs ?? 0;
+  const cap = policy?.retryMaxDelayMs ?? base;
+  if (!Number.isFinite(base) || base < 0 || !Number.isFinite(cap) || cap < 0) throw new Error('Invalid retry delay bounds');
+  return Math.min(cap, base * 2 ** Math.max(0, ordinal - 1));
+}
+function waitForRetry(policy: DurableRetryPolicy | undefined, ordinal: number): void {
+  const delay = retryDelay(policy, ordinal);
+  if (delay > 0) (policy?.wait ?? (milliseconds => { const end = Date.now() + milliseconds; while (Date.now() < end) {} }))(delay);
+}
 export type DurableDiscoveryBoundary = 'dequeued' | 'retry-authorized' | 'reserved' | 'dispatched' | 'sent' | 'id-persisted' | 'observing' | 'observed' | 'committed';
 let boundaryHook: ((boundary: DurableDiscoveryBoundary) => void) | undefined;
 /** Test-only crash injection seam; unset during normal crawler execution. */
@@ -37,6 +47,7 @@ function executeDurableDiscoveryImpl(state: DurableState, send: SyntheticSend, o
   const latestForCell = current.attempts.findLast(item => item.cellKey === running);
   if (latestForCell?.status === 'uncertain' && !latestForCell.knownId && latestForCell.safeRetryAuthorization) {
     const auth = latestForCell.safeRetryAuthorization;
+    waitForRetry(retryPolicy, auth.ordinal);
     state.transitionTraversal(value => authorizeSafeRetryReservation(value, running!, auth.ordinal, auth.ceiling));
     return executeDurableDiscoveryImpl(state, send, observe, uncertaintyScope, retryPolicy, state.readTraversal().attempts.at(-1)!.id);
   }
@@ -87,6 +98,7 @@ function executeDurableDiscoveryImpl(state: DurableState, send: SyntheticSend, o
           return authorizeSafeRetry(uncertain, running!, retryOrdinal, submissionCeiling);
         });
         boundaryHook?.('retry-authorized');
+        waitForRetry(retryPolicy, retryOrdinal);
         return executeDurableDiscoveryImpl(state, send, observe, uncertaintyScope, retryPolicy, state.readTraversal().attempts.at(-1)!.id);
       }
       state.transitionTraversal(value => markUncertain(value, running!, uncertaintyScope));
@@ -119,6 +131,7 @@ function executeDurableDiscoveryImpl(state: DurableState, send: SyntheticSend, o
     while (true) {
       state.transitionTraversal(value => retryKnownIdObservation(value, running!, storedCeiling));
       retries++;
+      waitForRetry(retryPolicy, attempt.retryOrdinal === undefined ? retries : attempt.retryOrdinal + retries);
       try { response = observe(id); break; }
       catch (retryError) {
         if (retries >= storedCeiling || !retryPolicy.knownSafeObservationError(retryError)) {
