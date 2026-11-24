@@ -3,7 +3,7 @@ import { classifyCandidate, cellKey, isCellEligible, neighbors, type CandidateCl
 export type CellOutcome = 'queued' | 'running' | 'nonempty' | 'empty' | 'failed' | 'unrecognized';
 export type CandidateObservation = { id: string; coordinate?: { latitude: number; longitude: number } | null; classification: CandidateClass; sourceCell: string };
 export type TraversalLimits = { cells: number; submissions: number; activeTime: number };
-export type Attempt = { cellKey: string; status: 'reserved' | 'dispatched' | 'uncertain' | 'observing' | 'observed' | 'skipped'; knownId?: string };
+export type Attempt = { id: string; workId: string; cellKey: string; status: 'reserved' | 'dispatched' | 'uncertain' | 'observing' | 'observed' | 'skipped'; knownId?: string };
 export type TraversalReport = { stopReason: 'cancelled' | 'paused' | 'active_time' | 'submissions' | 'cells' | 'gaps' | 'failed' | 'unrecognized' | 'empty' | 'in_progress' | 'complete'; outcome: 'complete' | 'in_progress' | 'partial_empty_success' | 'partial_failed' | 'partial_unrecognized' | 'partial_limit' | 'partial_cancelled' | 'partial_gaps'; queue: string[]; blocked: string[]; gaps: TraversalState['gaps']; submissions: number; activeTime: number; cells: TraversalState['cells'] };
 export type TraversalState = { geometry: Geometry; limits: TraversalLimits; queue: string[]; admitted: string[]; cells: Record<string, { outcome: CellOutcome }>; candidates: CandidateObservation[]; gaps: { cellKey: string; cause: 'failed' | 'unrecognized' | 'uncertain'; scope?: 'isolated' | 'global'; status?: 'unresolved' | 'resolved' | 'skipped' }[]; paused: boolean; submissions: number; activeTime: number; blocked: string[]; attempts: Attempt[]; cancelled: boolean };
 export type DiscoveryResult = { status: 'success'; candidates: { id: string; coordinate?: { latitude: number; longitude: number } | null }[] } | { status: 'empty' } | { status: 'failed'; cause?: string; scope: 'isolated' | 'global' } | { status: 'unrecognized' };
@@ -19,7 +19,9 @@ export function reserveSubmission(state: TraversalState, key: string): Traversal
   if (state.cells[key]?.outcome !== 'running') throw new Error('Cell is not running');
   if (state.submissions >= state.limits.submissions) throw new Error('Submission limit reached');
   if (state.attempts.some(a => a.cellKey === key && ['reserved','dispatched','uncertain','observing','observed','skipped'].includes(a.status))) throw new Error('Attempt outstanding');
-  return { ...state, submissions: state.submissions + 1, attempts: [...state.attempts, { cellKey: key, status: 'reserved' }] };
+  const ordinal = state.attempts.filter(a => a.cellKey === key).length + 1;
+  const workId = `work:${key}`;
+  return { ...state, submissions: state.submissions + 1, attempts: [...state.attempts, { id: `${workId}:attempt:${ordinal}`, workId, cellKey: key, status: 'reserved' }] };
 }
 export function dispatchSubmission(state: TraversalState, key: string): TraversalState {
   if (state.cancelled || state.paused || state.activeTime >= state.limits.activeTime) throw new Error('Dispatch stopped');
@@ -50,7 +52,9 @@ export function authorizeResend(state: TraversalState, key: string): TraversalSt
   const i = state.attempts.map(a => a.cellKey).lastIndexOf(key);
   if (i < 0 || state.attempts[i].status !== 'uncertain') throw new Error('Attempt is not uncertain');
   if (state.submissions >= state.limits.submissions || state.activeTime >= state.limits.activeTime || state.cancelled || state.paused) throw new Error('Resend limit reached');
-  return { ...state, submissions: state.submissions + 1, attempts: [...state.attempts, { cellKey: key, status: 'reserved' }] };
+  const ordinal = state.attempts.filter(a => a.cellKey === key).length + 1;
+  const workId = `work:${key}`;
+  return { ...state, submissions: state.submissions + 1, attempts: [...state.attempts, { id: `${workId}:attempt:${ordinal}`, workId, cellKey: key, status: 'reserved' }] };
 }
 export function observeKnownId(state: TraversalState, key: string, id: string, elapsed: number): TraversalState {
   if (!id || !Number.isFinite(elapsed) || elapsed < 0) throw new Error('Invalid observation');
