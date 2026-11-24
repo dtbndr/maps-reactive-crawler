@@ -45,6 +45,7 @@ export function executeDurableDiscovery(state: DurableState, send: SyntheticSend
   }
   const id = state.readTraversal().attempts.find(item => item.id === attempt!.id)!.knownId!;
   const response = observe(id);
+  boundaryHook?.('observed');
   state.transitionTraversal(value => applyDiscoveryResult(observeKnownId(value, running!, id, response.elapsed), running!, response.result));
   boundaryHook?.('committed');
   return state.readTraversal();

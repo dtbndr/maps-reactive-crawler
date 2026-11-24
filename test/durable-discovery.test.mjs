@@ -83,6 +83,31 @@ test('fresh-process crash matrix records independent sends and durable transitio
   }
 });
 
+test('fresh process death after application UPDATE but before COMMIT rolls back atomically', () => {
+  const { dir, path } = temp();
+  try {
+    const setup = DurableState.open(path);
+    setup.writeTraversal(createTraversal(geometry, { cells: 5, submissions: 3, activeTime: 10 }));
+    setup.close();
+    const durableUrl = new URL('../dist/durable-state.js', import.meta.url).href;
+    const traversalUrl = new URL('../dist/index.js', import.meta.url).href;
+    const script = `import {DurableState,setAfterTraversalWriteForTest} from ${JSON.stringify(durableUrl)}; import {admitNextCell,reserveSubmission,dispatchSubmission,observeKnownId,applyDiscoveryResult} from ${JSON.stringify(traversalUrl)}; const d=DurableState.open(${JSON.stringify(path)}); d.transitionTraversal(s=>dispatchSubmission(reserveSubmission(admitNextCell(s),'0,0'),'0,0')); d.transitionTraversal(s=>({...s,attempts:s.attempts.map(a=>({...a,knownId:'ledger-id'}))})); setAfterTraversalWriteForTest(()=>process.exit(42)); d.transitionTraversal(s=>applyDiscoveryResult(observeKnownId(s,'0,0','ledger-id',1),'0,0',{status:'success',candidates:[{id:'raw',coordinate:null},{id:'raw',coordinate:null}]}));`;
+    const child = spawnSync(process.execPath, ['--input-type=module', '-e', script], { encoding: 'utf8' });
+    assert.equal(child.status, 42, child.stderr);
+    const reopened = DurableState.open(path);
+    const state = reopened.readTraversal();
+    assert.equal(state.submissions, 1);
+    assert.equal(state.activeTime, 0);
+    assert.equal(state.cells['0,0'].outcome, 'running');
+    assert.equal(state.attempts[0].knownId, 'ledger-id');
+    assert.equal(state.attempts[0].status, 'dispatched');
+    assert.deepEqual(state.candidates, []);
+    assert.deepEqual(state.gaps, []);
+    assert.deepEqual(state.queue, []);
+    reopened.close();
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
 test('durable executor persists reservation before fixture send and applies response', () => {
   const { dir, path } = temp();
   try {

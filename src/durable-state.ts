@@ -7,12 +7,15 @@ type Snapshot = { version: 1; work: { id: string; status: string }[]; observatio
 let afterOwnerReadForTest: (() => void) | undefined;
 let beforePublishForTest: (() => void) | undefined;
 let afterCreateForTest: (() => void) | undefined;
+let afterTraversalWriteForTest: (() => void) | undefined;
 /** Internal synchronization seam for deterministic ownership-race tests. */
 export function setAfterOwnerReadForTest(hook: (() => void) | undefined): void { afterOwnerReadForTest = hook; }
 /** Internal synchronization seam for deterministic interruption tests. */
 export function setBeforePublishForTest(hook: (() => void) | undefined): void { beforePublishForTest = hook; }
 /** Internal synchronization seam for deterministic creation-race tests. */
 export function setAfterCreateForTest(hook: (() => void) | undefined): void { afterCreateForTest = hook; }
+/** Test-only crash injection after the traversal UPDATE and before COMMIT. */
+export function setAfterTraversalWriteForTest(hook: (() => void) | undefined): void { afterTraversalWriteForTest = hook; }
 function validate(value: unknown): asserts value is Snapshot {
   if (!value || typeof value !== 'object' || (value as any).version !== 1 || !Array.isArray((value as any).work) || !(value as any).work.every((entry: any) => entry && typeof entry === 'object' && typeof entry.id === 'string' && typeof entry.status === 'string') || !Array.isArray((value as any).observations) || !Array.isArray((value as any).gaps)) throw new Error('Unsupported or corrupt state');
 }
@@ -88,6 +91,7 @@ export class DurableState {
     try {
       const next = change(this.readTraversal());
       this.db.prepare('UPDATE traversal SET payload=? WHERE id=1').run(JSON.stringify(next));
+      afterTraversalWriteForTest?.();
       this.db.exec('COMMIT');
     } catch (error) { this.db.exec('ROLLBACK'); throw error; }
   }
