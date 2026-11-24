@@ -77,7 +77,8 @@ function executeDurableDiscoveryImpl(state: DurableState, send: SyntheticSend, o
     let response: { id: string };
     try { response = send(attempt.workId); }
     catch (error) {
-      const priorSubmissionCeiling = state.readTraversal().attempts.findLast(item => item.cellKey === running && item.submissionRetryCeiling !== undefined)?.submissionRetryCeiling;
+      const priorAttempt = state.readTraversal().attempts.findLast(item => item.cellKey === running && (item.submissionRetryCeiling !== undefined || (item.submissionRetryOrdinal !== undefined && item.retryCeiling !== undefined)));
+      const priorSubmissionCeiling = priorAttempt?.submissionRetryCeiling ?? (priorAttempt?.submissionRetryOrdinal !== undefined ? priorAttempt.retryCeiling : undefined);
       const submissionCeiling = priorSubmissionCeiling ?? retryPolicy?.submissionCeiling ?? 0;
       if (retryPolicy?.knownSafeSubmissionError?.(error) && (attempt.submissionRetryOrdinal ?? 0) < submissionCeiling && state.readTraversal().submissions < state.readTraversal().limits.submissions) {
         const retryOrdinal = (attempt.submissionRetryOrdinal ?? 0) + 1;
@@ -110,7 +111,7 @@ function executeDurableDiscoveryImpl(state: DurableState, send: SyntheticSend, o
       throw error;
     }
     let retries = 0;
-    const storedCeiling = attempt.observationRetryCeiling ?? (attempt.retryOrdinal === undefined ? retryPolicy.observationCeiling : 0);
+    const storedCeiling = attempt.observationRetryCeiling ?? (attempt.submissionRetryOrdinal !== undefined ? 0 : attempt.retryOrdinal === undefined ? retryPolicy.observationCeiling : 0);
     if (storedCeiling === 0) {
       state.transitionTraversal(value => markUncertain(value, running!, uncertaintyScope, id));
       throw error;
