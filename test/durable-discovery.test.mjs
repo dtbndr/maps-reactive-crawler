@@ -56,6 +56,22 @@ test('fresh process recovers traversal state after reservation before dispatch',
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
+test('durable executor commits dispatch, known ID and discovery application', () => {
+  const { dir, path } = temp();
+  try {
+    const durable = DurableState.open(path);
+    let state = createTraversal(geometry, { cells: 5, submissions: 3, activeTime: 10 });
+    durable.writeTraversal(state);
+    durable.transitionTraversal(s => reserveSubmission(admitNextCell(s), '0,0'));
+    durable.transitionTraversal(s => ({ ...s, attempts: s.attempts.map(a => ({ ...a, status: 'dispatched' })) }));
+    durable.transitionTraversal(s => ({ ...s, attempts: s.attempts.map(a => ({ ...a, status: 'observed', knownId: 'synthetic-job-1' })) }));
+    state = durable.readTraversal();
+    assert.equal(state.attempts[0].knownId, 'synthetic-job-1');
+    assert.equal(state.cells['0,0'].outcome, 'running');
+    durable.close();
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
 test('durable traversal transitions persist queue, observations, attempts and counters atomically', () => {
   const { dir, path } = temp();
   try {

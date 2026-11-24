@@ -28,6 +28,13 @@ Added a failure-injection test confirming a thrown reducer leaves the previous t
 - `mise exec -- npm run build && mise exec -- node --test test/durable-discovery.test.mjs` — passed (4 tests).
 - `mise exec -- npm run check` — passed (67 tests, typecheck and build).
 
+## Durable executor transition characterization
+
+Added focused persistence coverage that executes reservation, dispatch, known-ID recording, and inspects the resulting durable attempt and running cell. This test uses generic `transitionTraversal` reducers; it does not introduce a production executor API or prove that those transitions are coupled to an external send.
+
+- Build before focused tests; `mise exec -- npm run build && mise exec -- node --test test/durable-discovery.test.mjs` passed (5 focused tests).
+- `mise exec -- npm run check` passed (68 tests, typecheck and build).
+
 ## Acceptance still outstanding
 
 Slice A remains a full restartable discovery gate. Current work does not implement durable traversal serialization, atomic intents/ID/application markers, independent synthetic send ledger, fresh-process crash matrix, exactly-once application assertions, or uncertainty isolation scenarios. A0's generic checkpoint API does not yet persist traversal state. Therefore no durable recovery claim is made. No scope was reduced and no provider calls were made.
