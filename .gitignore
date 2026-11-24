@@ -1,4 +1,5 @@
 /.memory/
+/.worktrees/
 node_modules/
 dist/
 .env
