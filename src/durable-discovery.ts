@@ -8,6 +8,7 @@ function retryDelay(policy: DurableRetryPolicy | undefined, ordinal: number): nu
   const base = policy?.retryBaseDelayMs ?? 0;
   const cap = policy?.retryMaxDelayMs ?? base;
   if (!Number.isSafeInteger(base) || base < 0 || !Number.isSafeInteger(cap) || cap < 0) throw new Error('Invalid retry delay bounds');
+  if (base === 0 || cap === 0) return 0;
   return Math.min(cap, base * 2 ** Math.max(0, ordinal - 1));
 }
 function waitForRetry(policy: DurableRetryPolicy | undefined, delay: number): void {
