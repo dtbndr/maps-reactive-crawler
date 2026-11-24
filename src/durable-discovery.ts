@@ -125,7 +125,6 @@ function executeDurableDiscoveryImpl(state: DurableState, send: SyntheticSend, o
       state.transitionTraversal(value => markUncertain(value, running!, uncertaintyScope, id));
       throw error;
     }
-    let retries = 0;
     const storedCeiling = attempt.observationRetryCeiling ?? (attempt.submissionRetryOrdinal !== undefined && attempt.submissionRetryCeiling === undefined && attempt.retryCeiling !== undefined ? 0 : attempt.retryOrdinal === undefined ? retryPolicy.observationCeiling : 0);
     if ((state.readTraversal().attempts.find(item => item.id === attempt!.id)!.retryOrdinal ?? 0) >= storedCeiling) {
       state.transitionTraversal(value => markUncertain(value, running!, uncertaintyScope, id));
@@ -135,12 +134,11 @@ function executeDurableDiscoveryImpl(state: DurableState, send: SyntheticSend, o
       const ordinal = (state.readTraversal().attempts.find(item => item.id === attempt!.id)!.retryOrdinal ?? 0) + 1;
       const delay = retryDelay(retryPolicy, ordinal);
       state.transitionTraversal(value => { const next = retryKnownIdObservation(value, running!, storedCeiling); return { ...next, attempts: next.attempts.map(item => item.id === attempt!.id ? { ...item, observationRetryPendingDelayMs: delay } : item) }; });
-      retries++;
       waitForRetry(retryPolicy, delay);
       state.transitionTraversal(value => ({ ...value, attempts: value.attempts.map(item => { if (item.id !== attempt!.id) return item; const { observationRetryPendingDelayMs: _, ...rest } = item; return rest; }) }));
       try { response = observe(id); break; }
       catch (retryError) {
-        if (retries >= storedCeiling || !retryPolicy.knownSafeObservationError(retryError)) {
+        if ((state.readTraversal().attempts.find(item => item.id === attempt!.id)!.retryOrdinal ?? 0) >= storedCeiling || !retryPolicy.knownSafeObservationError(retryError)) {
           state.transitionTraversal(value => markUncertain(value, running!, uncertaintyScope, id));
           throw retryError;
         }
