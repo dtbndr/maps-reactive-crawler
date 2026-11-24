@@ -7,11 +7,10 @@ export type DurableRetryPolicy = { observationCeiling: number; knownSafeObservat
 function retryDelay(policy: DurableRetryPolicy | undefined, ordinal: number): number {
   const base = policy?.retryBaseDelayMs ?? 0;
   const cap = policy?.retryMaxDelayMs ?? base;
-  if (!Number.isFinite(base) || base < 0 || !Number.isFinite(cap) || cap < 0) throw new Error('Invalid retry delay bounds');
+  if (!Number.isSafeInteger(base) || base < 0 || !Number.isSafeInteger(cap) || cap < 0) throw new Error('Invalid retry delay bounds');
   return Math.min(cap, base * 2 ** Math.max(0, ordinal - 1));
 }
-function waitForRetry(policy: DurableRetryPolicy | undefined, ordinal: number): void {
-  const delay = retryDelay(policy, ordinal);
+function waitForRetry(policy: DurableRetryPolicy | undefined, delay: number): void {
   if (delay > 0) (policy?.wait ?? (milliseconds => { const end = Date.now() + milliseconds; while (Date.now() < end) {} }))(delay);
 }
 export type DurableDiscoveryBoundary = 'dequeued' | 'retry-authorized' | 'reserved' | 'dispatched' | 'sent' | 'id-persisted' | 'observing' | 'observed' | 'committed';
@@ -47,7 +46,7 @@ function executeDurableDiscoveryImpl(state: DurableState, send: SyntheticSend, o
   const latestForCell = current.attempts.findLast(item => item.cellKey === running);
   if (latestForCell?.status === 'uncertain' && !latestForCell.knownId && latestForCell.safeRetryAuthorization) {
     const auth = latestForCell.safeRetryAuthorization;
-    waitForRetry(retryPolicy, auth.ordinal);
+    waitForRetry(retryPolicy, auth.delayMs ?? 0);
     state.transitionTraversal(value => authorizeSafeRetryReservation(value, running!, auth.ordinal, auth.ceiling));
     return executeDurableDiscoveryImpl(state, send, observe, uncertaintyScope, retryPolicy, state.readTraversal().attempts.at(-1)!.id);
   }
@@ -95,10 +94,9 @@ function executeDurableDiscoveryImpl(state: DurableState, send: SyntheticSend, o
         const retryOrdinal = (attempt.submissionRetryOrdinal ?? 0) + 1;
         state.transitionTraversal(value => {
           const uncertain = { ...value, attempts: value.attempts.map(item => item.id === attempt!.id ? { ...item, status: 'uncertain' as const } : item), gaps: [...value.gaps, { cellKey: running!, cause: 'failed' as const, scope: 'isolated' as const, status: 'unresolved' as const }] };
-          return authorizeSafeRetry(uncertain, running!, retryOrdinal, submissionCeiling);
+          return authorizeSafeRetry(uncertain, running!, retryOrdinal, submissionCeiling, retryDelay(retryPolicy, retryOrdinal));
         });
         boundaryHook?.('retry-authorized');
-        waitForRetry(retryPolicy, retryOrdinal);
         return executeDurableDiscoveryImpl(state, send, observe, uncertaintyScope, retryPolicy, state.readTraversal().attempts.at(-1)!.id);
       }
       state.transitionTraversal(value => markUncertain(value, running!, uncertaintyScope));
@@ -116,6 +114,11 @@ function executeDurableDiscoveryImpl(state: DurableState, send: SyntheticSend, o
   let response: { result: DiscoveryResult; elapsed: number };
   state.transitionTraversal(value => ({ ...value, attempts: value.attempts.map(item => item.id === attempt!.id ? { ...item, status: 'observing' } : item) }));
   boundaryHook?.('observing');
+  const pending = state.readTraversal().attempts.find(item => item.id === attempt!.id)!.observationRetryPendingDelayMs;
+  if (pending !== undefined) {
+    waitForRetry(retryPolicy, pending);
+    state.transitionTraversal(value => ({ ...value, attempts: value.attempts.map(item => { if (item.id !== attempt!.id) return item; const { observationRetryPendingDelayMs: _, ...rest } = item; return rest; }) }));
+  }
   try { response = observe(id); }
   catch (error) {
     if (!retryPolicy?.knownSafeObservationError(error)) {
@@ -129,9 +132,12 @@ function executeDurableDiscoveryImpl(state: DurableState, send: SyntheticSend, o
       throw error;
     }
     while (true) {
-      state.transitionTraversal(value => retryKnownIdObservation(value, running!, storedCeiling));
+      const ordinal = (state.readTraversal().attempts.find(item => item.id === attempt!.id)!.retryOrdinal ?? 0) + 1;
+      const delay = retryDelay(retryPolicy, ordinal);
+      state.transitionTraversal(value => { const next = retryKnownIdObservation(value, running!, storedCeiling); return { ...next, attempts: next.attempts.map(item => item.id === attempt!.id ? { ...item, observationRetryPendingDelayMs: delay } : item) }; });
       retries++;
-      waitForRetry(retryPolicy, attempt.retryOrdinal === undefined ? retries : attempt.retryOrdinal + retries);
+      waitForRetry(retryPolicy, delay);
+      state.transitionTraversal(value => ({ ...value, attempts: value.attempts.map(item => { if (item.id !== attempt!.id) return item; const { observationRetryPendingDelayMs: _, ...rest } = item; return rest; }) }));
       try { response = observe(id); break; }
       catch (retryError) {
         if (retries >= storedCeiling || !retryPolicy.knownSafeObservationError(retryError)) {
