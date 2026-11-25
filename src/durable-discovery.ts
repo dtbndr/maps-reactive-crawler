@@ -163,6 +163,7 @@ export function executeDurableDiscovery(state: DurableState, send: SyntheticSend
 export function recoverDurableKnownId(state: DurableState, key: string, id: string, evidence: { source: string; evidence: string; timestamp: string }, observe: SyntheticObserve): TraversalState {
   state.transitionTraversal(value => {
     if (value.recoveryPending) throw new Error('Recovery accounting is unresolved');
+    if (value.cancelled || value.paused) throw new Error('Traversal is paused or cancelled');
     const recovered = recoverKnownId(value, key, id, evidence);
     const cells = { ...recovered.cells };
     cells[key] = { outcome: 'running' };
