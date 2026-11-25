@@ -1,7 +1,7 @@
 # Offline Operator Path Workstream Brief
 
 **Date**: 2026-11-25
-**Status**: Planned; revised after external review, pending confirmation. Implementation requires operator approval.
+**Status**: Approved; revised after external review, pending confirmation. Implementation requires operator approval.
 
 ## Why
 Connect the tested offline traversal and durable recovery into a reproducible operator path without implying live-provider readiness.
