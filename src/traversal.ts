@@ -7,7 +7,8 @@ export type Attempt = { id: string; workId: string; cellKey: string; status: 're
 export type TraversalReport = { stopReason: 'cancelled' | 'paused' | 'active_time' | 'submissions' | 'cells' | 'gaps' | 'failed' | 'unrecognized' | 'empty' | 'in_progress' | 'complete'; outcome: 'complete' | 'in_progress' | 'partial_empty_success' | 'partial_failed' | 'partial_unrecognized' | 'partial_limit' | 'partial_cancelled' | 'partial_gaps'; queue: string[]; blocked: string[]; gaps: TraversalState['gaps']; submissions: number; activeTime: number; cells: TraversalState['cells'] };
 export type DetailAttempt = { id: string; status: 'reserved' | 'dispatched' | 'uncertain' | 'completed' | 'skipped'; knownId?: string };
 export type DetailWork = { id: string; status: 'pending' | 'reserved' | 'dispatched' | 'uncertain' | 'completed' | 'skipped'; identity: string; observationIds: string[]; attempts: DetailAttempt[] };
-export type TraversalState = { detailWork?: DetailWork[]; timeUnit: 'milliseconds'; geometry: Geometry; limits: TraversalLimits; queue: string[]; admitted: string[]; cells: Record<string, { outcome: CellOutcome }>; candidates: CandidateObservation[]; gaps: { cellKey: string; cause: 'failed' | 'unrecognized' | 'uncertain'; scope?: 'isolated' | 'global'; status?: 'unresolved' | 'resolved' | 'skipped' }[]; paused: boolean; submissions: number; activeTime: number; blocked: string[]; attempts: Attempt[]; cancelled: boolean; activeInterval?: boolean; recoveryPending?: boolean; cleanPauseEvidence?: { evidence: string }; recoveryDebitEvidence?: { elapsed: number; evidence: string }; resendCeiling?: number; resendApprovalsConsumed?: number };
+export type DetailGap = { workId: string; identity: string; observationIds: string[]; status: 'unresolved' | 'resolved' | 'skipped' };
+export type TraversalState = { detailWork?: DetailWork[]; detailGaps?: DetailGap[]; timeUnit: 'milliseconds'; geometry: Geometry; limits: TraversalLimits; queue: string[]; admitted: string[]; cells: Record<string, { outcome: CellOutcome }>; candidates: CandidateObservation[]; gaps: { cellKey: string; cause: 'failed' | 'unrecognized' | 'uncertain'; scope?: 'isolated' | 'global'; status?: 'unresolved' | 'resolved' | 'skipped' }[]; paused: boolean; submissions: number; activeTime: number; blocked: string[]; attempts: Attempt[]; cancelled: boolean; activeInterval?: boolean; recoveryPending?: boolean; cleanPauseEvidence?: { evidence: string }; recoveryDebitEvidence?: { elapsed: number; evidence: string }; resendCeiling?: number; resendApprovalsConsumed?: number };
 export type DiscoveryResult = { status: 'success'; candidates: { id: string; coordinate?: { latitude: number; longitude: number } | null; verifiedCanonicalKey?: string }[] } | { status: 'empty' } | { status: 'failed'; cause?: string; scope: 'isolated' | 'global' } | { status: 'unrecognized' };
 
 export function createTraversal(geometry: Geometry, limits: TraversalLimits): TraversalState {
@@ -49,7 +50,10 @@ export function completeDetailWork(state: TraversalState, workId: string, id: st
   const work = state.detailWork?.find(item => item.id === workId);
   if (!work || !['dispatched', 'uncertain'].includes(work.status) || work.attempts.at(-1)?.knownId !== id) throw new Error('Detail result does not match durable ID');
   const detailWork = state.detailWork!.map(item => item.id === workId ? { ...item, status: 'completed' as const, attempts: item.attempts.map((attempt, index) => index === item.attempts.length - 1 ? { ...attempt, status: 'completed' as const } : attempt) } : item);
-  return { ...state, detailWork };
+  const detailGaps = state.detailGaps ?? [];
+  const matching = detailGaps.filter(gap => gap.identity === work.identity && gap.status === 'unresolved');
+  const reconciled = work.identity.startsWith('verified:') && work.identity.length > 'verified:'.length;
+  return { ...state, detailWork, detailGaps: detailGaps.map(gap => matching.includes(gap) && reconciled ? { ...gap, status: 'resolved' as const } : gap) };
 }
 export function dispatchDetailSubmission(state: TraversalState, workId: string): TraversalState {
   if (state.recoveryPending) throw new Error('Recovery accounting is unresolved');

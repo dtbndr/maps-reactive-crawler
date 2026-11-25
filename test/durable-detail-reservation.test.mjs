@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { validateGeometry, createTraversal, admitNextCell, reserveSubmission, observeKnownId, applyDiscoveryResult } from '../dist/index.js';
-import { reserveDetailSubmission, dispatchDetailSubmission } from '../dist/traversal.js';
+import { reserveDetailSubmission, dispatchDetailSubmission, recordDetailId, completeDetailWork } from '../dist/traversal.js';
 import { executeDurableDetail, cancelDurableDiscovery } from '../dist/durable-discovery.js';
 import { DurableState } from '../dist/durable-state.js';
 import { mkdtempSync, rmSync } from 'node:fs';
@@ -18,6 +18,22 @@ function discovered() {
   return applyDiscoveryResult(state, key, { status: 'success', candidates: [{ id: 'one' }, { id: 'two' }] });
 }
 function temp() { const dir = mkdtempSync(join(tmpdir(), 'detail-reservation-')); return { dir, path: join(dir, 'state.db') }; }
+
+test('verified detail completion resolves only matching unresolved detail gaps', () => {
+  const base = discovered();
+  const work = { ...base.detailWork[0], identity: 'verified:fixture-place' };
+  let state = { ...base, detailWork: [work, ...base.detailWork.slice(1)], detailGaps: [
+    { workId: work.id, identity: work.identity, observationIds: [...work.observationIds], status: 'unresolved' },
+    { workId: work.id, identity: work.identity, observationIds: [...work.observationIds], status: 'skipped' },
+    { workId: 'other', identity: 'verified:other', observationIds: [], status: 'unresolved' }
+  ] };
+  state = reserveDetailSubmission(state, work.id);
+  state = dispatchDetailSubmission(state, work.id);
+  state = recordDetailId(state, work.id, 'detail-id');
+  state = completeDetailWork(state, work.id, 'detail-id');
+  assert.deepEqual(state.detailGaps.map(gap => gap.status), ['resolved', 'skipped', 'unresolved']);
+  assert.deepEqual(state.gaps, base.gaps);
+});
 
 test('detail execution persists the known ID before observation and consumes shared submission accounting', () => {
   const { dir, path } = temp(); const d = DurableState.open(path); let sends = 0; let observedId;

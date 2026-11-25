@@ -65,6 +65,12 @@ function validateTraversal(value: unknown): asserts value is TraversalState {
       if (work.attempts.slice(0, -1).some((attempt: any) => attempt.status === 'reserved' || attempt.status === 'dispatched') || (work.status === 'reserved' && last !== 'reserved') || (work.status === 'dispatched' && last !== 'dispatched') || (work.status === 'uncertain' && last !== 'uncertain') || (work.status === 'completed' && last !== 'completed') || (work.status === 'skipped' && last !== 'skipped')) throw new Error('Corrupt traversal checkpoint');
     }
   }
+  if (s.detailGaps !== undefined) {
+    if (!Array.isArray(s.detailGaps) || !s.detailGaps.every((gap: any) => {
+      const work = s.detailWork?.find((item: any) => item.id === gap?.workId);
+      return !!work && gap.identity === work.identity && Array.isArray(gap.observationIds) && gap.observationIds.length > 0 && gap.observationIds.every((id: string) => work.observationIds.includes(id)) && ['unresolved', 'resolved', 'skipped'].includes(gap.status);
+    })) throw new Error('Corrupt traversal checkpoint');
+  }
   const validCellKey = (key: string): boolean => {
     const match = /^(-?(?:0|[1-9][0-9]*)),(-?(?:0|[1-9][0-9]*))$/.exec(key);
     if (!match) return false;
