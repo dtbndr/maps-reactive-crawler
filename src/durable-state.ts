@@ -62,7 +62,7 @@ function validateTraversal(value: unknown): asserts value is TraversalState {
       if (work.attempts.some((attempt: any, index: number) => attempt.id !== `${work.id}:attempt:${index + 1}` || attemptIds.has(attempt.id))) throw new Error('Corrupt traversal checkpoint');
       for (const attempt of work.attempts) attemptIds.add(attempt.id);
       const last = work.attempts.at(-1)?.status;
-      if ((work.status === 'reserved' && last !== 'reserved') || (work.status === 'dispatched' && last !== 'dispatched') || (work.status === 'uncertain' && last !== 'uncertain') || (work.status === 'completed' && last !== 'completed') || (work.status === 'skipped' && last !== 'skipped')) throw new Error('Corrupt traversal checkpoint');
+      if (work.attempts.slice(0, -1).some((attempt: any) => attempt.status === 'reserved' || attempt.status === 'dispatched') || (work.status === 'reserved' && last !== 'reserved') || (work.status === 'dispatched' && last !== 'dispatched') || (work.status === 'uncertain' && last !== 'uncertain') || (work.status === 'completed' && last !== 'completed') || (work.status === 'skipped' && last !== 'skipped')) throw new Error('Corrupt traversal checkpoint');
     }
   }
   const validCellKey = (key: string): boolean => {

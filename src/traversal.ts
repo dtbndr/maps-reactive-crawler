@@ -33,7 +33,7 @@ export function reserveDetailSubmission(state: TraversalState, workId: string): 
   if (state.recoveryPending || state.paused || state.cancelled || state.activeTime >= state.limits.activeTime) throw new Error('Detail submission stopped');
   if (state.submissions >= state.limits.submissions) throw new Error('Submission limit reached');
   const work = state.detailWork?.find(item => item.id === workId);
-  if (!work || work.status !== 'pending') throw new Error('Detail work is not pending');
+  if (!work || work.status !== 'pending' || work.attempts.length !== 0) throw new Error('Detail work is not pending');
   if (state.detailWork!.filter(item => item.id === workId).length !== 1) throw new Error('Duplicate detail work ID');
   const ordinal = work.attempts.length + 1;
   const detailWork = state.detailWork!.map(item => item.id === workId ? { ...item, status: 'reserved' as const, attempts: [...item.attempts, { id: `${workId}:attempt:${ordinal}`, status: 'reserved' as const }] } : item);
@@ -46,6 +46,8 @@ export function dispatchDetailSubmission(state: TraversalState, workId: string):
   const work = state.detailWork?.find(item => item.id === workId);
   if (!work || work.status !== 'reserved') throw new Error('Detail work is not reserved');
   if (state.detailWork!.filter(item => item.id === workId).length !== 1) throw new Error('Duplicate detail work ID');
+  const attempt = work.attempts.at(-1);
+  if (!attempt || attempt.id !== `${work.id}:attempt:${work.attempts.length}` || attempt.status !== 'reserved') throw new Error('Detail work has no valid reserved attempt');
   const detailWork = state.detailWork!.map(item => item.id === workId ? { ...item, status: 'dispatched' as const, attempts: item.attempts.map((attempt, i) => i === item.attempts.length - 1 ? { ...attempt, status: 'dispatched' as const } : attempt) } : item);
   return { ...state, detailWork };
 }
