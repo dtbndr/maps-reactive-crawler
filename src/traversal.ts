@@ -1,12 +1,13 @@
 import { classifyCandidate, cellKey, isCellEligible, neighbors, type CandidateClass, type Geometry } from './index.js';
 
 export type CellOutcome = 'queued' | 'running' | 'parked' | 'nonempty' | 'empty' | 'failed' | 'unrecognized';
-export type CandidateObservation = { id: string; coordinate?: { latitude: number; longitude: number } | null; classification: CandidateClass; sourceCell: string; observationId: string; attemptId: string; occurrence: number };
+export type CandidateObservation = { id: string; coordinate?: { latitude: number; longitude: number } | null; classification: CandidateClass; sourceCell: string; observationId: string; attemptId: string; occurrence: number; verifiedCanonicalKey?: string };
 export type TraversalLimits = { cells: number; submissions: number; activeTime: number };
 export type Attempt = { id: string; workId: string; cellKey: string; status: 'reserved' | 'dispatched' | 'uncertain' | 'observing' | 'observed' | 'skipped' | 'confirmed_no_send'; knownId?: string; retryOrdinal?: number; observationRetryCeiling?: number; retryCeiling?: number; submissionRetryOrdinal?: number; submissionRetryCeiling?: number; resendOrdinal?: number; resendCeiling?: number; approval?: { rationale: string }; recoveryEvidence?: { source: string; evidence: string; timestamp: string }; safeRetryAuthorization?: { ordinal: number; ceiling: number; delayMs?: number }; observationRetryPendingDelayMs?: number };
 export type TraversalReport = { stopReason: 'cancelled' | 'paused' | 'active_time' | 'submissions' | 'cells' | 'gaps' | 'failed' | 'unrecognized' | 'empty' | 'in_progress' | 'complete'; outcome: 'complete' | 'in_progress' | 'partial_empty_success' | 'partial_failed' | 'partial_unrecognized' | 'partial_limit' | 'partial_cancelled' | 'partial_gaps'; queue: string[]; blocked: string[]; gaps: TraversalState['gaps']; submissions: number; activeTime: number; cells: TraversalState['cells'] };
-export type TraversalState = { timeUnit: 'milliseconds'; geometry: Geometry; limits: TraversalLimits; queue: string[]; admitted: string[]; cells: Record<string, { outcome: CellOutcome }>; candidates: CandidateObservation[]; gaps: { cellKey: string; cause: 'failed' | 'unrecognized' | 'uncertain'; scope?: 'isolated' | 'global'; status?: 'unresolved' | 'resolved' | 'skipped' }[]; paused: boolean; submissions: number; activeTime: number; blocked: string[]; attempts: Attempt[]; cancelled: boolean; activeInterval?: boolean; recoveryPending?: boolean; cleanPauseEvidence?: { evidence: string }; recoveryDebitEvidence?: { elapsed: number; evidence: string }; resendCeiling?: number; resendApprovalsConsumed?: number };
-export type DiscoveryResult = { status: 'success'; candidates: { id: string; coordinate?: { latitude: number; longitude: number } | null }[] } | { status: 'empty' } | { status: 'failed'; cause?: string; scope: 'isolated' | 'global' } | { status: 'unrecognized' };
+export type DetailWork = { id: string; status: 'pending'; identity: string; observationIds: string[] };
+export type TraversalState = { detailWork?: DetailWork[]; timeUnit: 'milliseconds'; geometry: Geometry; limits: TraversalLimits; queue: string[]; admitted: string[]; cells: Record<string, { outcome: CellOutcome }>; candidates: CandidateObservation[]; gaps: { cellKey: string; cause: 'failed' | 'unrecognized' | 'uncertain'; scope?: 'isolated' | 'global'; status?: 'unresolved' | 'resolved' | 'skipped' }[]; paused: boolean; submissions: number; activeTime: number; blocked: string[]; attempts: Attempt[]; cancelled: boolean; activeInterval?: boolean; recoveryPending?: boolean; cleanPauseEvidence?: { evidence: string }; recoveryDebitEvidence?: { elapsed: number; evidence: string }; resendCeiling?: number; resendApprovalsConsumed?: number };
+export type DiscoveryResult = { status: 'success'; candidates: { id: string; coordinate?: { latitude: number; longitude: number } | null; verifiedCanonicalKey?: string }[] } | { status: 'empty' } | { status: 'failed'; cause?: string; scope: 'isolated' | 'global' } | { status: 'unrecognized' };
 
 export function createTraversal(geometry: Geometry, limits: TraversalLimits): TraversalState {
   if (!limits || ![limits.cells, limits.submissions, limits.activeTime].every(Number.isFinite) || !Number.isSafeInteger(limits.cells) || !Number.isSafeInteger(limits.submissions) || limits.cells < 1 || limits.submissions < 0 || limits.activeTime < 0) throw new Error('Invalid finite traversal limits');
@@ -159,6 +160,7 @@ export function applyDiscoveryResult(state: TraversalState, key: string, result:
   if (!latestAttempt || !['dispatched', 'observed'].includes(latestAttempt.status)) throw new Error('Result requires dispatched attempt');
   const cells = { ...state.cells };
   const candidates = [...state.candidates];
+  const detailWork = [...(state.detailWork ?? [])];
   const gaps = [...state.gaps];
   const queue = [...state.queue];
   const admitted = [...state.admitted];
@@ -166,7 +168,14 @@ export function applyDiscoveryResult(state: TraversalState, key: string, result:
   let paused = state.paused;
   if (result.status === 'success' && result.candidates.length > 0) {
     cells[key] = { outcome: 'nonempty' };
-    for (const [occurrence, candidate] of result.candidates.entries()) candidates.push({ ...candidate, classification: classifyCandidate(state.geometry, candidate.coordinate), sourceCell: key, observationId: `${latestAttempt.id}:observation:${occurrence + 1}`, attemptId: latestAttempt.id, occurrence: occurrence + 1 });
+    for (const [occurrence, candidate] of result.candidates.entries()) {
+      const observationId = `${latestAttempt.id}:observation:${occurrence + 1}`;
+      candidates.push({ ...candidate, classification: classifyCandidate(state.geometry, candidate.coordinate), sourceCell: key, observationId, attemptId: latestAttempt.id, occurrence: occurrence + 1 });
+      const identity = candidate.verifiedCanonicalKey ? `verified:${candidate.verifiedCanonicalKey}` : `observation:${observationId}`;
+      let work = detailWork.find(item => item.identity === identity);
+      if (!work) { work = { id: `detail:${identity}`, status: 'pending', identity, observationIds: [] }; detailWork.push(work); }
+      if (!work.observationIds.includes(observationId)) work.observationIds.push(observationId);
+    }
     const [column, row] = key.split(',').map(Number);
     for (const [c, r] of neighbors(state.geometry, column, row)) {
       const nextKey = cellKey(c, r);
@@ -187,5 +196,5 @@ export function applyDiscoveryResult(state: TraversalState, key: string, result:
       if (gaps[index].cellKey === key && gaps[index].cause === 'uncertain' && gaps[index].status !== 'skipped') gaps[index] = { ...gaps[index], status: 'resolved' };
     }
   }
-  return { ...state, queue, admitted, cells, candidates, gaps, blocked, paused };
+  return { ...state, queue, admitted, cells, candidates, detailWork, gaps, blocked, paused };
 }
