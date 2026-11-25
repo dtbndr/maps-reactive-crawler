@@ -7,8 +7,14 @@ export type SyntheticDetailSend = (workId: string) => { id: string };
 export type SyntheticDetailObserve = (id: string) => { elapsed: number };
 export type DurableDetailBoundary = 'reserved' | 'dispatched' | 'sent' | 'id-persisted' | 'retry-consumed';
 
-function validDetailObservation(observed: unknown): observed is { elapsed: number } {
-  return typeof observed === 'object' && observed !== null && 'elapsed' in observed && typeof observed.elapsed === 'number' && Number.isFinite(observed.elapsed) && observed.elapsed >= 0;
+function readDetailElapsed(observed: unknown): number | undefined {
+  try {
+    if (typeof observed !== 'object' || observed === null) return undefined;
+    const elapsed = (observed as { elapsed?: unknown }).elapsed;
+    return typeof elapsed === 'number' && Number.isFinite(elapsed) && elapsed >= 0 ? elapsed : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 function closeDetailObservation(state: DurableState, workId: string): void {
@@ -51,7 +57,8 @@ export function executeDurableDetail(state: DurableState, workId: string, send: 
       if (current.cancelled || current.paused) throw new Error('Detail execution is paused');
       let observed: { elapsed: number };
       try { observed = observe(attempt.knownId); } catch (error) { state.transitionTraversal(value => ({ ...markDetailUncertain(value, workId), detailWork: markDetailUncertain(value, workId).detailWork!.map(item => item.id === workId ? { ...item, attempts: item.attempts.map((entry, index) => index === item.attempts.length - 1 ? { ...entry, observationRetryDisposition: 'closed' as const } : entry) } : item) })); if (retryPolicy?.knownSafeObservationError?.(error)) { const ceiling = attempt.observationRetryCeiling ?? retryPolicy.observationCeiling; const ordinal = (attempt.observationRetryOrdinal ?? 0) + 1; const delay = retryDelay(retryPolicy, ordinal); state.transitionTraversal(value => authorizeDetailObservationRetry(value, workId, ceiling, delay)); continue; } throw error; }
-      if (!validDetailObservation(observed)) { closeDetailObservation(state, workId); throw new Error('Invalid detail observation time'); }
+      const elapsed = readDetailElapsed(observed);
+      if (elapsed === undefined) { closeDetailObservation(state, workId); throw new Error('Invalid detail observation time'); }
       settle(value => completeDetailWork(value, workId, attempt.knownId!));
       return state.readTraversal();
     }
@@ -76,7 +83,8 @@ export function executeDurableDetail(state: DurableState, workId: string, send: 
     settle();
     let observed: { elapsed: number };
     try { observed = observe(id); } catch (error) { state.transitionTraversal(value => ({ ...markDetailUncertain(value, workId), detailWork: markDetailUncertain(value, workId).detailWork!.map(item => item.id === workId ? { ...item, attempts: item.attempts.map((entry, index) => index === item.attempts.length - 1 ? { ...entry, observationRetryDisposition: 'closed' as const } : entry) } : item) })); if (retryPolicy?.knownSafeObservationError?.(error)) { const attempt = state.readTraversal().detailWork!.find(item => item.id === workId)!.attempts.at(-1)!; const ceiling = retryPolicy.observationCeiling; const ordinal = (attempt.observationRetryOrdinal ?? 0) + 1; const delay = retryDelay(retryPolicy, ordinal); state.transitionTraversal(value => authorizeDetailObservationRetry(value, workId, ceiling, delay)); continue; } throw error; }
-    if (!validDetailObservation(observed)) { closeDetailObservation(state, workId); throw new Error('Invalid detail observation time'); }
+    const elapsed = readDetailElapsed(observed);
+    if (elapsed === undefined) { closeDetailObservation(state, workId); throw new Error('Invalid detail observation time'); }
     settle(value => completeDetailWork(value, workId, id));
     return state.readTraversal();
     }
@@ -257,8 +265,13 @@ function executeDurableDiscoveryImpl(state: DurableState, send: SyntheticSend, o
       }
     }
   }
+  const elapsed = readDetailElapsed(response);
+  if (elapsed === undefined) {
+    state.transitionTraversal(value => markUncertain(value, running!, uncertaintyScope, id));
+    throw new Error('Invalid observation time');
+  }
   boundaryHook?.('observed');
-  settle!(value => applyDiscoveryResult(observeKnownId(value, running!, id, 0), running!, response.result));
+  settle!(value => applyDiscoveryResult(observeKnownId(value, running!, id, elapsed), running!, response.result));
   boundaryHook?.('committed');
   return state.readTraversal();
 }
