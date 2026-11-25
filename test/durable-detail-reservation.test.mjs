@@ -312,7 +312,18 @@ test('detail retry authorization without its persisted delay is rejected before 
     delete attempt.observationRetryPendingDelayMs;
     raw.prepare('UPDATE traversal SET payload=? WHERE id=1').run(JSON.stringify(payload)); raw.close();
     let sends = 0; let polls = 0;
-    assert.throws(() => DurableState.open(path), /Corrupt traversal checkpoint/);
+    let callbacks = 0;
+    let reopened;
+    try {
+      reopened = DurableState.open(path);
+      executeDurableDetail(reopened, base.detailWork[0].id, () => { callbacks++; return { id: 'bad' }; }, () => { callbacks++; return { elapsed: 0 }; }, { monotonicNow: () => 0 });
+    } catch (error) {
+      assert.match(error.message, /Corrupt traversal checkpoint/);
+    } finally { reopened?.close(); }
+    assert.equal(callbacks, 0);
+    const unchanged = new DatabaseSync(path);
+    assert.equal(unchanged.prepare('SELECT payload FROM traversal WHERE id=1').get().payload, JSON.stringify(payload));
+    unchanged.close();
     assert.equal(sends, 0); assert.equal(polls, 0);
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
