@@ -8,6 +8,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
+import { spawnSync } from 'node:child_process';
 
 const geometry = validateGeometry({ seed: { latitude: 0, longitude: 0 }, spacing: 100, area: { type: 'bbox', south: -1, north: 1, west: -1, east: 1 } });
 function discovered() {
@@ -293,5 +294,25 @@ test('detail observation failure disposition persists across reopen and ignores 
     assert.throws(() => executeDurableDetail(db, base.detailWork[0].id, () => { sends++; return { id: 'bad' }; }, () => { polls++; return { elapsed: 0 }; }, { monotonicNow: () => 0 }, { observationCeiling: 4, knownSafeObservationError: () => true }));
     assert.equal(sends, 1); assert.equal(polls, 1);
     assert.equal(db.readTraversal().detailWork[0].attempts[0].observationRetryDisposition, 'closed'); db.close();
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('detail retry authorization without its persisted delay is rejected before callbacks', () => {
+  const { dir, path } = temp();
+  try {
+    const base = discovered();
+    const child = `import {DurableState} from './dist/durable-state.js';import {executeDurableDetail} from './dist/durable-discovery.js';const d=DurableState.open(${JSON.stringify(path)});d.writeTraversal(${JSON.stringify(base)});executeDurableDetail(d,${JSON.stringify(base.detailWork[0].id)},()=>({id:'detail-id'}),()=>{throw Error('safe')},{monotonicNow:()=>0},{observationCeiling:1,knownSafeObservationError:()=>true,retryBaseDelayMs:7,wait:()=>process.exit(42)});`;
+    const interrupted = spawnSync(process.execPath, ['--input-type=module', '-e', child], { encoding: 'utf8' });
+    assert.equal(interrupted.status, 42, interrupted.stderr);
+    const raw = new DatabaseSync(path);
+    const payload = JSON.parse(raw.prepare('SELECT payload FROM traversal WHERE id=1').get().payload);
+    const attempt = payload.detailWork[0].attempts[0];
+    assert.equal(attempt.observationRetryDisposition, 'authorized');
+    assert.equal(attempt.observationRetryPendingDelayMs, 7);
+    delete attempt.observationRetryPendingDelayMs;
+    raw.prepare('UPDATE traversal SET payload=? WHERE id=1').run(JSON.stringify(payload)); raw.close();
+    let sends = 0; let polls = 0;
+    assert.throws(() => DurableState.open(path), /Corrupt traversal checkpoint/);
+    assert.equal(sends, 0); assert.equal(polls, 0);
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
