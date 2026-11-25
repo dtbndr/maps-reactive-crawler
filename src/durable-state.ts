@@ -137,19 +137,27 @@ export class DurableState {
     } catch (error) { this.db.exec('ROLLBACK'); throw error; }
   }
   writeTraversal(state: TraversalState): void {
-    validateTraversal(state);
-    if (state.timeUnit !== 'milliseconds') throw new Error('Durable traversal time unit is unmarked; explicit migration required');
-    const existing = this.db.prepare('SELECT payload FROM traversal WHERE id=1').get();
-    if (existing && JSON.parse(String(existing.payload)).timeUnit !== 'milliseconds') throw new Error('Durable traversal time unit is unmarked; explicit migration required');
-    this.db.prepare('INSERT INTO traversal(id,payload) VALUES(1,?) ON CONFLICT(id) DO UPDATE SET payload=excluded.payload').run(JSON.stringify(state));
+    const payload = JSON.stringify(state);
+    const serialized = JSON.parse(payload);
+    validateTraversal(serialized);
+    if (serialized.timeUnit !== 'milliseconds') throw new Error('Durable traversal time unit is unmarked; explicit migration required');
+    this.db.exec('BEGIN IMMEDIATE');
+    try {
+      const existing = this.db.prepare('SELECT payload FROM traversal WHERE id=1').get();
+      if (existing && JSON.parse(String(existing.payload)).timeUnit !== 'milliseconds') throw new Error('Durable traversal time unit is unmarked; explicit migration required');
+      this.db.prepare('INSERT INTO traversal(id,payload) VALUES(1,?) ON CONFLICT(id) DO UPDATE SET payload=excluded.payload').run(payload);
+      this.db.exec('COMMIT');
+    } catch (error) { this.db.exec('ROLLBACK'); throw error; }
   }
   transitionTraversal(change: (state: TraversalState) => TraversalState): void {
     this.db.exec('BEGIN IMMEDIATE');
     try {
       const next = change(this.readTraversal());
-      validateTraversal(next);
-      if (next.timeUnit !== 'milliseconds') throw new Error('Durable traversal time unit is unmarked; explicit migration required');
-      this.db.prepare('UPDATE traversal SET payload=? WHERE id=1').run(JSON.stringify(next));
+      const payload = JSON.stringify(next);
+      const serialized = JSON.parse(payload);
+      validateTraversal(serialized);
+      if (serialized.timeUnit !== 'milliseconds') throw new Error('Durable traversal time unit is unmarked; explicit migration required');
+      this.db.prepare('UPDATE traversal SET payload=? WHERE id=1').run(payload);
       afterTraversalWriteForTest?.();
       this.db.exec('COMMIT');
     } catch (error) { this.db.exec('ROLLBACK'); throw error; }
