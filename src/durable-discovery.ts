@@ -1,5 +1,5 @@
 import type { DurableState } from './durable-state.js';
-import { admitNextCell, applyDiscoveryResult, authorizeSafeRetry, authorizeSafeRetryReservation, dispatchSubmission, confirmNoSend, markUncertain, observeKnownId, reserveSubmission, retryKnownIdObservation, recoverKnownId, skipAttempt, authorizeResend, cancelTraversal, reserveDetailSubmission, dispatchDetailSubmission, recordDetailId, completeDetailWork, type DiscoveryResult, type TraversalState } from './traversal.js';
+import { admitNextCell, applyDiscoveryResult, authorizeSafeRetry, authorizeSafeRetryReservation, dispatchSubmission, confirmNoSend, markUncertain, observeKnownId, reserveSubmission, retryKnownIdObservation, recoverKnownId, skipAttempt, authorizeResend, cancelTraversal, reserveDetailSubmission, dispatchDetailSubmission, recordDetailId, completeDetailWork, markDetailUncertain, type DiscoveryResult, type TraversalState } from './traversal.js';
 
 export type SyntheticSend = (workId: string) => { id: string };
 export type SyntheticObserve = (id: string) => { result: DiscoveryResult; elapsed: number };
@@ -14,21 +14,22 @@ export function executeDurableDetail(state: DurableState, workId: string, send: 
     let work = current.detailWork?.find(item => item.id === workId);
     if (!work) throw new Error('Unknown detail work');
     if (work.status === 'reserved') {
-      state.transitionTraversal(value => ({ ...value, detailWork: value.detailWork!.map(item => item.id === workId ? { ...item, status: 'uncertain' as const, attempts: item.attempts.map((a, i) => i === item.attempts.length - 1 ? { ...a, status: 'uncertain' as const } : a) } : item) }));
+      state.transitionTraversal(value => markDetailUncertain(value, workId));
       throw new Error('Persisted detail reservation has unknown outcome; refusing send');
     }
     if (work.status === 'dispatched' || work.status === 'uncertain') {
       const attempt = work.attempts.at(-1);
       if (!attempt?.knownId) {
-        state.transitionTraversal(value => ({ ...value, detailWork: value.detailWork!.map(item => item.id === workId ? { ...item, status: 'uncertain' as const, attempts: item.attempts.map((a, i) => i === item.attempts.length - 1 ? { ...a, status: 'uncertain' as const } : a) } : item) }));
+        state.transitionTraversal(value => markDetailUncertain(value, workId));
         throw new Error('Detail dispatch outcome uncertain; refusing resend');
       }
       settle();
       current = state.readTraversal();
       if (current.cancelled || current.paused) throw new Error('Detail execution is paused');
       if (current.activeTime >= current.limits.activeTime) throw new Error('Active-time limit reached before detail observation');
-      const observed = observe(attempt.knownId);
-      if (!Number.isFinite(observed.elapsed) || observed.elapsed < 0) throw new Error('Invalid detail observation time');
+      let observed: { elapsed: number };
+      try { observed = observe(attempt.knownId); } catch (error) { state.transitionTraversal(value => markDetailUncertain(value, workId)); throw error; }
+      if (!Number.isFinite(observed.elapsed) || observed.elapsed < 0) { state.transitionTraversal(value => markDetailUncertain(value, workId)); throw new Error('Invalid detail observation time'); }
       settle(value => completeDetailWork(value, workId, attempt.knownId!));
       return state.readTraversal();
     }
@@ -44,8 +45,9 @@ export function executeDurableDetail(state: DurableState, workId: string, send: 
     if (current.cancelled || current.paused) throw new Error('Detail execution is paused');
     settle();
     if (state.readTraversal().activeTime >= state.readTraversal().limits.activeTime) throw new Error('Active-time limit reached before detail observation');
-    const observed = observe(id);
-    if (!Number.isFinite(observed.elapsed) || observed.elapsed < 0) throw new Error('Invalid detail observation time');
+    let observed: { elapsed: number };
+    try { observed = observe(id); } catch (error) { state.transitionTraversal(value => markDetailUncertain(value, workId)); throw error; }
+    if (!Number.isFinite(observed.elapsed) || observed.elapsed < 0) { state.transitionTraversal(value => markDetailUncertain(value, workId)); throw new Error('Invalid detail observation time'); }
     settle(value => completeDetailWork(value, workId, id));
     return state.readTraversal();
   }, clock);

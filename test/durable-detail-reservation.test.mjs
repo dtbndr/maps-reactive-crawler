@@ -15,14 +15,14 @@ function discovered() {
   const key = state.queue[0]; state = reserveSubmission(admitNextCell(state), key);
   state = { ...state, attempts: state.attempts.map(a => ({ ...a, status: 'dispatched', knownId: 'raw' })) };
   state = observeKnownId(state, key, 'raw', 0);
-  return applyDiscoveryResult(state, key, { status: 'success', candidates: [{ id: 'one' }, { id: 'two' }] });
+  return applyDiscoveryResult(state, key, { status: 'success', candidates: [{ id: 'one', verifiedCanonicalKey: 'fixture-place' }, { id: 'two', verifiedCanonicalKey: 'fixture-place-two' }] });
 }
 function temp() { const dir = mkdtempSync(join(tmpdir(), 'detail-reservation-')); return { dir, path: join(dir, 'state.db') }; }
 
 test('verified detail completion resolves only matching unresolved detail gaps', () => {
   const base = discovered();
-  const work = { ...base.detailWork[0], identity: 'verified:fixture-place' };
-  let state = { ...base, detailWork: [work, ...base.detailWork.slice(1)], detailGaps: [
+  const work = base.detailWork[0];
+  let state = { ...base, detailGaps: [
     { workId: work.id, identity: work.identity, observationIds: [...work.observationIds], status: 'unresolved' },
     { workId: work.id, identity: work.identity, observationIds: [...work.observationIds], status: 'skipped' },
     { workId: 'other', identity: 'verified:other', observationIds: [], status: 'unresolved' }
@@ -141,6 +141,8 @@ test('corrupt detail checkpoint variants reject without changing stored payload'
     ['unresolved earlier reservation', { ...reserved, submissions: reserved.submissions + 1, detailWork: reserved.detailWork.map((w, i) => i ? w : { ...w, status: 'dispatched', attempts: [{ id: `${w.id}:attempt:1`, status: 'reserved' }, { id: `${w.id}:attempt:2`, status: 'dispatched' }] }) }],
     ['malformed attempt ID', { ...reserved, detailWork: reserved.detailWork.map((w, i) => i ? w : { ...w, attempts: [{ ...w.attempts[0], id: '' }] }) }],
     ['duplicate work IDs', { ...base, detailWork: [base.detailWork[0], { ...base.detailWork[1], id: base.detailWork[0].id }] }],
+    ['duplicate candidate observation IDs', { ...base, candidates: [...base.candidates, { ...base.candidates[0] }] }],
+    ['resolved unverified detail gap', { ...base, detailGaps: [{ workId: base.detailWork[0].id, identity: base.detailWork[0].identity, observationIds: [...base.detailWork[0].observationIds], status: 'resolved' }] }],
   ];
   for (const [name, payload] of variants) await t.test(name, () => {
     const { dir, path } = temp(); let d = DurableState.open(path);
@@ -198,6 +200,22 @@ test('detail-only execution accounts active time and recovered reservation is un
     assert.throws(() => executeDurableDetail(d, workId, () => { sends++; return { id: 'unsafe' }; }, () => ({ elapsed: 0 }), { monotonicNow: () => now }), /persisted|refusing/i);
     assert.equal(sends, 0); assert.equal(d.readTraversal().submissions, 2);
     assert.equal(d.readTraversal().detailWork[0].status, 'uncertain');
+  } finally { d.close(); rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('detail observation failure records linked unresolved gap and recovery never resends', () => {
+  const { dir, path } = temp(); const d = DurableState.open(path); let sends = 0;
+  try {
+    const base = discovered(); const workId = base.detailWork[0].id;
+    const state = { ...base, queue: [], cells: Object.fromEntries(Object.entries(base.cells).map(([key]) => [key, { outcome: 'empty' }])) };
+    d.writeTraversal(state);
+    assert.throws(() => executeDurableDetail(d, workId, () => { sends++; return { id: 'known-id' }; }, () => { throw new Error('observation failed'); }, { monotonicNow: () => 0 }), /observation failed/);
+    const uncertain = d.readTraversal();
+    assert.equal(uncertain.detailWork[0].status, 'uncertain');
+    assert.deepEqual(uncertain.detailGaps[0], { workId, identity: uncertain.detailWork[0].identity, observationIds: uncertain.detailWork[0].observationIds, status: 'unresolved' });
+    const recovered = executeDurableDetail(d, workId, () => { sends++; return { id: 'duplicate' }; }, () => ({ elapsed: 0 }), { monotonicNow: () => 0 });
+    assert.equal(recovered.detailWork[0].status, 'completed');
+    assert.equal(sends, 1);
   } finally { d.close(); rmSync(dir, { recursive: true, force: true }); }
 });
 

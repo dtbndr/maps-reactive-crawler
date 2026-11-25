@@ -46,13 +46,21 @@ export function recordDetailId(state: TraversalState, workId: string, id: string
   if (!work || work.status !== 'dispatched' || work.attempts.at(-1)?.status !== 'dispatched') throw new Error('Detail attempt is not dispatched');
   return { ...state, detailWork: state.detailWork!.map(item => item.id === workId ? { ...item, attempts: item.attempts.map((attempt, index) => index === item.attempts.length - 1 ? { ...attempt, knownId: id } : attempt) } : item) };
 }
+export function markDetailUncertain(state: TraversalState, workId: string): TraversalState {
+  const work = state.detailWork?.find(item => item.id === workId);
+  if (!work || !['reserved', 'dispatched', 'uncertain'].includes(work.status)) throw new Error('Detail work cannot become uncertain');
+  const detailWork = state.detailWork!.map(item => item.id === workId ? { ...item, status: 'uncertain' as const, attempts: item.attempts.map((attempt, index) => index === item.attempts.length - 1 ? { ...attempt, status: 'uncertain' as const } : attempt) } : item);
+  const gaps = state.detailGaps ?? [];
+  const existing = gaps.some(gap => gap.workId === workId && gap.status === 'unresolved');
+  return { ...state, detailWork, detailGaps: existing ? gaps : [...gaps, { workId, identity: work.identity, observationIds: [...work.observationIds], status: 'unresolved' }] };
+}
 export function completeDetailWork(state: TraversalState, workId: string, id: string): TraversalState {
   const work = state.detailWork?.find(item => item.id === workId);
   if (!work || !['dispatched', 'uncertain'].includes(work.status) || work.attempts.at(-1)?.knownId !== id) throw new Error('Detail result does not match durable ID');
   const detailWork = state.detailWork!.map(item => item.id === workId ? { ...item, status: 'completed' as const, attempts: item.attempts.map((attempt, index) => index === item.attempts.length - 1 ? { ...attempt, status: 'completed' as const } : attempt) } : item);
   const detailGaps = state.detailGaps ?? [];
   const matching = detailGaps.filter(gap => gap.identity === work.identity && gap.status === 'unresolved');
-  const reconciled = work.identity.startsWith('verified:') && work.identity.length > 'verified:'.length;
+  const reconciled = work.identity.startsWith('verified:') && work.identity.length > 'verified:'.length && work.observationIds.every(observationId => state.candidates.some(candidate => candidate.observationId === observationId && candidate.verifiedCanonicalKey === work.identity.slice('verified:'.length)));
   return { ...state, detailWork, detailGaps: detailGaps.map(gap => matching.includes(gap) && reconciled ? { ...gap, status: 'resolved' as const } : gap) };
 }
 export function dispatchDetailSubmission(state: TraversalState, workId: string): TraversalState {

@@ -37,6 +37,7 @@ function validateTraversal(value: unknown): asserts value is TraversalState {
   if (!s.gaps.every((g: any) => g && typeof g.cellKey === 'string' && Object.hasOwn(s.cells, g.cellKey)) || !s.candidates.every((c: any) => c && Object.hasOwn(s.cells, c.sourceCell) && s.attempts.some((a: any) => a.id === c.attemptId && a.cellKey === c.sourceCell))) throw new Error('Corrupt traversal checkpoint');
   if (s.detailWork !== undefined) {
     const observationById = new Map(s.candidates.map((c: any) => [c.observationId, c]));
+    if (observationById.size !== s.candidates.length) throw new Error('Corrupt traversal checkpoint');
     const workIds = new Set<string>();
     const linkedObservations = new Set<string>();
     if (!Array.isArray(s.detailWork) || !s.detailWork.every((work: any) => {
@@ -68,7 +69,10 @@ function validateTraversal(value: unknown): asserts value is TraversalState {
   if (s.detailGaps !== undefined) {
     if (!Array.isArray(s.detailGaps) || !s.detailGaps.every((gap: any) => {
       const work = s.detailWork?.find((item: any) => item.id === gap?.workId);
-      return !!work && gap.identity === work.identity && Array.isArray(gap.observationIds) && gap.observationIds.length > 0 && gap.observationIds.every((id: string) => work.observationIds.includes(id)) && ['unresolved', 'resolved', 'skipped'].includes(gap.status);
+      if (!work || gap.identity !== work.identity || !Array.isArray(gap.observationIds) || gap.observationIds.length === 0 || new Set(gap.observationIds).size !== gap.observationIds.length || !gap.observationIds.every((id: string) => work.observationIds.includes(id)) || !['unresolved', 'resolved', 'skipped'].includes(gap.status)) return false;
+      if (gap.status !== 'resolved') return true;
+      const key = work.identity.startsWith('verified:') ? work.identity.slice('verified:'.length) : '';
+      return !!key && gap.observationIds.every((id: string) => s.candidates.some((candidate: any) => candidate.observationId === id && candidate.verifiedCanonicalKey === key)) && work.attempts.some((attempt: any) => attempt.status === 'completed' && typeof attempt.knownId === 'string' && attempt.knownId.trim().length > 0);
     })) throw new Error('Corrupt traversal checkpoint');
   }
   const validCellKey = (key: string): boolean => {
