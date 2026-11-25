@@ -6,7 +6,8 @@ const geo=validateGeometry({seed:{latitude:0,longitude:0},spacing:10,area:{type:
 test('initial timed admission commits elapsed debit before stopping at active-time cap',()=>{
  const dir=mkdtempSync(join(tmpdir(),'admission-cap-'));const db=DurableState.open(join(dir,'state.db'));let sends=0;const samples=[0,11,11];
  try {db.writeTraversal(createTraversal(geo,{cells:1,submissions:1,activeTime:10}));
-  assert.throws(()=>executeDurableDiscovery(db,()=>{sends++;return{id:'unexpected'}},()=>({result:{status:'empty'},elapsed:1}),'isolated',undefined,{monotonicNow:()=>samples.shift()}),/Active-time limit reached before cell admission/);
+  let clockIndex=0; const deterministicClock=()=>samples[clockIndex++];
+  assert.throws(()=>executeDurableDiscovery(db,()=>{sends++;return{id:'unexpected'}},()=>({result:{status:'empty'},elapsed:1}),'isolated',undefined,{monotonicNow:deterministicClock}),/Active-time limit reached before cell admission/);
   const state=db.readTraversal();assert.equal(sends,0);assert.equal(state.activeTime,11);assert.equal(state.submissions,0);assert.equal(state.attempts.length,0);assert.deepEqual(state.cells['0,0'],{outcome:'queued'});assert.deepEqual(state.queue,['0,0']);assert.equal(state.activeInterval,false);
  } finally {db.close();rmSync(dir,{recursive:true,force:true})}
 });

@@ -4,7 +4,7 @@ import { validateGeometry, createTraversal, admitNextCell, reserveSubmission, ob
 import { reserveDetailSubmission, dispatchDetailSubmission, recordDetailId, completeDetailWork } from '../dist/traversal.js';
 import { executeDurableDetail, executeDurableDiscovery, cancelDurableDiscovery, resolveDurableRecoveryDebit } from '../dist/durable-discovery.js';
 import { DurableState } from '../dist/durable-state.js';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
@@ -308,6 +308,38 @@ test('classified detail retry exhaustion remains closed across reopen with a lar
     assert.throws(() => executeDurableDetail(db, base.detailWork[0].id, () => { sends++; return { id: 'wrong' }; }, () => { polls++; throw Error('should not poll'); }, { monotonicNow: () => 0 }, { observationCeiling: 8, knownSafeObservationError: () => true }), /closed|ceiling/i);
     assert.equal(sends, 1); assert.equal(polls, 2);
   } finally { db?.close(); rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('fresh-process detail retry wait crash resumes stored delay and charges wait time without resending', () => {
+  const { dir, path } = temp();
+  const durableUrl = new URL('../dist/durable-state.js', import.meta.url).href;
+  const executorUrl = new URL('../dist/durable-discovery.js', import.meta.url).href;
+  const ledgerPath = join(dir, 'independent-ledger.json');
+  try {
+    const initial = DurableState.open(path); initial.writeTraversal(discovered()); initial.close();
+    writeFileSync(ledgerPath, JSON.stringify({ sends: 0, observations: [], waits: [] }));
+    const workId = discovered().detailWork[0].id;
+    const crash = `import * as fs from 'node:fs';import {DurableState} from ${JSON.stringify(durableUrl)};import {executeDurableDetail} from ${JSON.stringify(executorUrl)};const d=DurableState.open(${JSON.stringify(path)});const p=${JSON.stringify(ledgerPath)};executeDurableDetail(d,${JSON.stringify(workId)},()=>{const l=JSON.parse(fs.readFileSync(p));l.sends++;fs.writeFileSync(p,JSON.stringify(l));return{id:'detail-known'}},id=>{const l=JSON.parse(fs.readFileSync(p));l.observations.push(id);fs.writeFileSync(p,JSON.stringify(l));throw Error('transient')},{monotonicNow:()=>0},{observationCeiling:1,knownSafeObservationError:()=>true,retryBaseDelayMs:7,wait:ms=>{const l=JSON.parse(fs.readFileSync(p));l.waits.push(ms);fs.writeFileSync(p,JSON.stringify(l));process.exit(42)}});`;
+    const interrupted = spawnSync(process.execPath, ['--input-type=module', '-e', crash], { encoding: 'utf8' });
+    assert.equal(interrupted.status, 42, interrupted.stderr);
+    const raw = new DatabaseSync(path, { readOnly: true });
+    const before = JSON.parse(raw.prepare('SELECT payload FROM traversal WHERE id=1').get().payload); raw.close();
+    const attempt = before.detailWork[0].attempts[0];
+    assert.equal(attempt.status, 'uncertain'); assert.equal(attempt.knownId, 'detail-known');
+    assert.equal(attempt.observationRetryDisposition, 'authorized'); assert.equal(attempt.observationRetryPendingDelayMs, 7);
+    const recovery = `import * as fs from 'node:fs';import {DurableState} from ${JSON.stringify(durableUrl)};import {resolveDurableRecoveryDebit} from ${JSON.stringify(executorUrl)};import {executeDurableDetail} from ${JSON.stringify(executorUrl)};const d=DurableState.open(${JSON.stringify(path)});resolveDurableRecoveryDebit(d,1,'synthetic crash interval');const p=${JSON.stringify(ledgerPath)};let now=0;executeDurableDetail(d,${JSON.stringify(workId)},()=>{throw Error('must not send')},id=>{if(id!=='detail-known')throw Error('wrong ID');const l=JSON.parse(fs.readFileSync(p));l.observations.push(id);fs.writeFileSync(p,JSON.stringify(l));return{elapsed:2}},{monotonicNow:()=>now},{observationCeiling:9,knownSafeObservationError:()=>true,retryBaseDelayMs:99,wait:ms=>{if(ms!==7)throw Error('changed delay');now+=ms}});d.close();`;
+    const resumed = spawnSync(process.execPath, ['--input-type=module', '-e', recovery], { encoding: 'utf8' });
+    assert.equal(resumed.status, 0, resumed.stderr);
+    const afterDb = DurableState.open(path); const after = afterDb.readTraversal(); afterDb.close();
+    assert.deepEqual(JSON.parse(readFileSync(ledgerPath, 'utf8')), { sends: 1, observations: ['detail-known', 'detail-known'], waits: [7] });
+    assert.equal(after.submissions, before.submissions); assert.equal(after.activeTime, before.activeTime + 8);
+    assert.equal(after.detailWork[0].status, 'completed');
+    assert.equal(after.detailWork[0].attempts[0].observationRetryOrdinal, 1);
+    assert.equal(after.detailWork[0].attempts[0].observationRetryCeiling, 1);
+    assert.equal(after.detailWork[0].attempts[0].observationRetryDisposition, 'consumed');
+    assert.equal(after.recoveryPending, false);
+    assert.equal(after.detailWork[0].attempts[0].observationRetryPendingDelayMs, undefined);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
 test('detail retry authorization without its persisted delay is rejected before callbacks', () => {
