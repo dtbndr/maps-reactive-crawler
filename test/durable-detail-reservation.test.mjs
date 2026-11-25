@@ -250,6 +250,21 @@ test('invalid persisted detail reservation checkpoint fails closed', () => {
   } finally { try { d.close(); } catch {} rmSync(dir, { recursive: true, force: true }); }
 });
 
+test('invalid detail observation time closes retry path across reopen without repolling', () => {
+  const { dir, path } = temp(); const d = DurableState.open(path); let sends = 0; let polls = 0;
+  try {
+    const base = discovered(); const workId = base.detailWork[0].id; d.writeTraversal(base);
+    assert.throws(() => executeDurableDetail(d, workId, () => { sends++; return { id: 'kept-id' }; }, () => { polls++; return { elapsed: -1 }; }, { monotonicNow: () => 0, observationCeiling: 0 }), /Invalid detail observation time/);
+  } finally { d.close(); }
+  const reopened = DurableState.open(path);
+  try {
+    assert.equal(reopened.readTraversal().detailWork[0].attempts[0].knownId, 'kept-id');
+    assert.throws(() => executeDurableDetail(reopened, reopened.readTraversal().detailWork[0].id, () => { sends++; return { id: 'other' }; }, () => { polls++; return { elapsed: 0 }; }, { monotonicNow: () => 0, observationCeiling: 0 }), /closed/);
+    assert.equal(sends, 1); assert.equal(polls, 1);
+    assert.equal(reopened.readTraversal().detailGaps[0].status, 'unresolved');
+  } finally { reopened.close(); rmSync(dir, { recursive: true, force: true }); }
+});
+
 test('known-ID detail-only recovery settles moving time before active-time gate and never resends', () => {
   const { dir, path } = temp(); const d = DurableState.open(path); let sends = 0; let polls = 0; let samples = 0;
   try {
