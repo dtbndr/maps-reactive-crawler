@@ -1,0 +1,89 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { validateGeometry, createTraversal, admitNextCell, reserveSubmission, observeKnownId, applyDiscoveryResult } from '../dist/index.js';
+import { reserveDetailSubmission, dispatchDetailSubmission } from '../dist/traversal.js';
+import { DurableState } from '../dist/durable-state.js';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
+
+const geometry = validateGeometry({ seed: { latitude: 0, longitude: 0 }, spacing: 100, area: { type: 'bbox', south: -1, north: 1, west: -1, east: 1 } });
+function discovered() {
+  let state = createTraversal(geometry, { cells: 5, submissions: 3, activeTime: 100 });
+  const key = state.queue[0]; state = reserveSubmission(admitNextCell(state), key);
+  state = { ...state, attempts: state.attempts.map(a => ({ ...a, status: 'dispatched', knownId: 'raw' })) };
+  state = observeKnownId(state, key, 'raw', 0);
+  return applyDiscoveryResult(state, key, { status: 'success', candidates: [{ id: 'one' }, { id: 'two' }] });
+}
+function temp() { const dir = mkdtempSync(join(tmpdir(), 'detail-reservation-')); return { dir, path: join(dir, 'state.db') }; }
+
+test('detail reservation uses shared cap, refuses duplicates, and dispatch does not send', () => {
+  const { dir, path } = temp(); const d = DurableState.open(path); let sends = 0;
+  try {
+    let s = discovered(); const work = s.detailWork;
+    s = reserveDetailSubmission(s, work[0].id);
+    assert.equal(s.submissions, 2);
+    assert.throws(() => reserveDetailSubmission(s, work[0].id), /pending/i);
+    s = dispatchDetailSubmission(s, work[0].id);
+    assert.equal(s.detailWork[0].status, 'dispatched');
+    assert.equal(sends, 0);
+    s = reserveDetailSubmission(s, work[1].id);
+    assert.equal(s.submissions, 3);
+    assert.notEqual(s.detailWork[0].attempts[0].id, s.detailWork[1].attempts[0].id);
+    assert.throws(() => reserveDetailSubmission(s, 'missing'), /Submission limit reached/);
+    d.writeTraversal(s); assert.deepEqual(d.readTraversal(), s);
+  } finally { d.close(); rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('detail dispatch is blocked by paused, cancelled, recovery, and time limits', () => {
+  const base = reserveDetailSubmission(discovered(), discovered().detailWork[0].id);
+  for (const patch of [{ paused: true }, { cancelled: true }, { recoveryPending: true }, { activeTime: 100 }]) {
+    assert.throws(() => dispatchDetailSubmission({ ...base, ...patch }, base.detailWork[0].id), /stopped|unresolved/i);
+  }
+  assert.throws(() => dispatchDetailSubmission({ ...base, submissions: 4 }, base.detailWork[0].id), /limit/i);
+  assert.doesNotThrow(() => dispatchDetailSubmission(base, base.detailWork[0].id));
+});
+
+test('corrupt detail checkpoint variants reject without changing stored payload', async (t) => {
+  const base = discovered();
+  const reserved = reserveDetailSubmission(base, base.detailWork[0].id);
+  const variants = [
+    ['pending work with attempts', { ...base, detailWork: base.detailWork.map((w, i) => i ? w : { ...w, attempts: [{ id: `${w.id}:attempt:1`, status: 'reserved' }] }) }],
+    ['reserved work without attempts', { ...reserved, detailWork: reserved.detailWork.map((w, i) => i ? w : { ...w, attempts: [] }) }],
+    ['duplicate attempt IDs', { ...reserved, detailWork: reserved.detailWork.map(w => ({ ...w, attempts: [{ id: 'duplicate', status: 'reserved' }] })) }],
+    ['cross-owner attempt ID', { ...reserved, detailWork: reserved.detailWork.map((w, i) => i ? { ...w, status: 'reserved', attempts: [{ id: reserved.detailWork[0].attempts[0].id, status: 'reserved' }] } : w) }],
+    ['malformed ordinal', { ...reserved, detailWork: reserved.detailWork.map((w, i) => i ? w : { ...w, attempts: [{ ...w.attempts[0], id: `${w.id}:attempt:2` }] }) }],
+    ['malformed attempt ID', { ...reserved, detailWork: reserved.detailWork.map((w, i) => i ? w : { ...w, attempts: [{ ...w.attempts[0], id: '' }] }) }],
+    ['duplicate work IDs', { ...base, detailWork: [base.detailWork[0], { ...base.detailWork[1], id: base.detailWork[0].id }] }],
+  ];
+  for (const [name, payload] of variants) await t.test(name, () => {
+    const { dir, path } = temp(); let d = DurableState.open(path);
+    try {
+      d.writeTraversal(base); d.close(); d = undefined;
+      const db = new DatabaseSync(path); const raw = JSON.stringify(payload);
+      db.prepare('UPDATE traversal SET payload=?').run(raw); db.close();
+      assert.throws(() => DurableState.open(path), /Corrupt traversal checkpoint/);
+      const check = new DatabaseSync(path);
+      assert.equal(check.prepare('SELECT payload FROM traversal').get().payload, raw); check.close();
+    } finally { try { d?.close(); } catch {} rmSync(dir, { recursive: true, force: true }); }
+  });
+});
+
+test('reducer rejects duplicate detail work IDs', () => {
+  const state = discovered();
+  const work = { ...state.detailWork[0], identity: 'verified:same', id: 'detail:verified:same' };
+  const duplicate = { ...state, detailWork: [work, { ...work, observationIds: [...work.observationIds] }] };
+  assert.throws(() => reserveDetailSubmission(duplicate, work.id), /duplicate|identity/i);
+});
+
+test('invalid persisted detail reservation checkpoint fails closed', () => {
+  const { dir, path } = temp(); const d = DurableState.open(path);
+  try {
+    const s = discovered(); d.writeTraversal(s);
+    const db = new DatabaseSync(path);
+    db.prepare('UPDATE traversal SET payload=?').run(JSON.stringify({ ...s, detailWork: [{ ...s.detailWork[0], status: 'bogus' }, s.detailWork[1]] })); db.close();
+    d.close();
+    assert.throws(() => DurableState.open(path), /Corrupt traversal checkpoint/);
+  } finally { try { d.close(); } catch {} rmSync(dir, { recursive: true, force: true }); }
+});
