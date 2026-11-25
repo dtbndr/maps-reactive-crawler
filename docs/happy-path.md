@@ -1,6 +1,6 @@
 # First-release happy path
 
-Status: **target, not implemented**. Exact CLI flags, provider contracts, result fields, boundary semantics and geocoding provider remain to be specified.
+Status: **target, not implemented end to end**. The offline bounded traversal core and synthetic durable-recovery/result-identity behavior are implemented and tested; the CLI, live provider and geocoder integrations are not. Exact CLI flags, provider contracts, result fields, boundary semantics and geocoding provider remain to be specified.
 
 1. The operator installs the tool and configures their own Bright Data API key securely.
 2. The operator supplies a search keyword, country as required by the verified provider, and either a latitude/longitude pair or a human-readable location. A human-readable location is resolved and displayed; ambiguity must not be silently guessed.
@@ -10,7 +10,7 @@ Status: **target, not implemented**. Exact CLI flags, provider contracts, result
 
 ## Acceptance boundaries
 
-- Offline tests demonstrate the entire flow with synthetic provider responses, including expansion, deduplication, bounds, limits and restart.
+- Offline tests exercise the bounded traversal and synthetic durable state/recovery behavior, including restart and fixture-declared verified identity. They do not demonstrate an end-to-end crawler or live provider semantics.
 - Specify and test whether boundaries constrain cell centers, returned places, or both; do not claim strict place boundaries without reliable coordinates and filtering.
 - Clearly explain that spatial expansion can miss disconnected areas and provider results may be incomplete; it is not exhaustive coverage.
 - A real bounded end-to-end run is separately approved by the operator and may incur charges. No paid calls are part of default tests.

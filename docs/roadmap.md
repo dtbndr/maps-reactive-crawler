@@ -1,6 +1,6 @@
 # First-release roadmap
 
-Status: **provisional; offline core implemented, vertical slice in progress**. Use [SDLC priorities](sdlc-priorities.md) to keep work tied to the [happy path](happy-path.md). Milestone labels indicate order, not priority grade or authorization. A milestone may span multiple Solopowers workstreams; a workstream is a separately scoped execution unit.
+Status: **provisional; offline traversal and durable recovery/identity work implemented, vertical slice in progress**. Use [SDLC priorities](sdlc-priorities.md) to keep work tied to the [happy path](happy-path.md). Milestone labels indicate order, not priority grade or authorization. A milestone may span multiple Solopowers workstreams; a workstream is a separately scoped execution unit.
 
 ## Milestones
 
@@ -13,4 +13,4 @@ Status: **provisional; offline core implemented, vertical slice in progress**. U
 
 See the [legacy reactive-crawl research handoff](research/legacy-reactive-crawl.md) for source-checked legacy behavior, its disconnected batch/reactive paths, and first-release design cautions. The [Bright Data MCP research](research/bright-data-mcp.md) surveys agentic tools, Maps scraper discovery, and outstanding contract questions.
 
-Milestone 1 research workstreams and the bounded reactive core in Milestone 2 are complete. The core is in-memory and fixture-tested; the end-to-end crawler, CLI, SQLite integration, geocoder and Bright Data integration are not yet implemented. Milestone 2's durable recovery and offline operator path remain ahead, subject to their own scope and approval. Milestone plans are not permission for paid calls.
+Milestone 1 research workstreams and the bounded reactive core in Milestone 2 are complete. Durable offline state and recovery, including synthetic fixture-verified result identity, are implemented and tested with SQLite and fresh-process restart coverage. The end-to-end crawler, CLI/export, geocoder and Bright Data integration are not yet implemented. Tests establish offline synthetic behavior only—not real-provider identity, lookup, retry/idempotency, billing, cancellation, or exhaustive coverage. Legacy untagged blockers remain fail-closed. Milestone plans are not permission for paid calls.
