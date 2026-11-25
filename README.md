@@ -1,6 +1,6 @@
 # Maps Reactive Crawler
 
-An early-stage operator-run, open-source Google Maps spatial crawler. The offline bounded reactive traversal core is implemented and tested with synthetic fixtures; **the end-to-end crawler and CLI are not implemented yet.** The intended first release starts from one location and expands to neighboring cells based on results, within explicit geographic and work limits.
+An early-stage operator-run, open-source Google Maps spatial crawler. The offline bounded reactive traversal core and synthetic SQLite durable recovery/result-identity behavior are implemented and tested with fixtures; **the end-to-end crawler, CLI, and live-provider integration are not implemented yet.** Synthetic identity tests do not establish live-provider identity or behavior. The intended first release starts from one location and expands to neighboring cells based on results, within explicit geographic and work limits.
 
 ## First-release direction
 
