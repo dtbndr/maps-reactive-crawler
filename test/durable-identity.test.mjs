@@ -53,12 +53,29 @@ test('applying results migrates legacy observations to deterministic detail fano
   assert.deepEqual(empty.detailWork.map(work => [work.id, work.observationIds]), [
     ['detail:verified:place:legacy', ['legacy:1', 'legacy:2']], ['detail:observation:legacy:3', ['legacy:3']],
   ]);
-  const nonemptyInput = { ...legacy, cells: { ...legacy.cells, [key]: { outcome: 'running' } } };
+  let nonemptyInput = admitNextCell(legacy);
+  const newKey = nonemptyInput.queue[0];
+  nonemptyInput = reserveSubmission(nonemptyInput, newKey);
+  const newAttemptId = nonemptyInput.attempts.at(-1).id;
+  nonemptyInput = { ...nonemptyInput, attempts: nonemptyInput.attempts.map(attempt => attempt.id === newAttemptId ? { ...attempt, status: 'dispatched', knownId: 'new-results' } : attempt), cells: { ...nonemptyInput.cells, [newKey]: { outcome: 'running' } } };
+  nonemptyInput = observeKnownId(nonemptyInput, newKey, 'new-results', 0);
   const nonemptyBefore = structuredClone(nonemptyInput);
-  const nonempty = applyDiscoveryResult(nonemptyInput, key, { status: 'success', candidates: [{ id: 'new' }] });
+  const nonempty = applyDiscoveryResult(nonemptyInput, newKey, { status: 'success', candidates: [{ id: 'new' }] });
   assert.deepEqual(nonemptyInput, nonemptyBefore);
-  assert.equal(nonempty.detailWork.length, 4);
-  assert.ok(nonempty.detailWork.some(work => work.identity === `observation:${nonempty.candidates.at(-1).observationId}`));
+  assert.equal(nonempty.detailWork.length, 3);
+  assert.deepEqual(nonempty.detailWork.map(work => [work.id, work.observationIds]), [
+    ['detail:verified:place:legacy', ['legacy:1', 'legacy:2']],
+    ['detail:observation:legacy:3', ['legacy:3']],
+    [`detail:observation:${newAttemptId}:observation:1`, [`${newAttemptId}:observation:1`]],
+  ]);
+  assert.equal(nonempty.candidates.at(-1).sourceCell, newKey);
+  const dir = mkdtempSync(join(tmpdir(), 'durable-identity-'));
+  try {
+    const durable = DurableState.open(join(dir, 'state.db'));
+    durable.writeTraversal(nonempty);
+    assert.deepEqual(durable.readTraversal(), nonempty);
+    durable.close();
+  } finally { rmSync(dir, { recursive: true, force: true }); }
   assert.deepEqual(current, prior);
 });
 
