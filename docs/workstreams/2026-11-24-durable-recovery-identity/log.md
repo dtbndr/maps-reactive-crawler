@@ -15,3 +15,11 @@ Operator approved splitting the discovery gate into A0 foundation and A integrat
 - Retrospective comparisons (oracle `a350e10d`): current known-ID rejection test fails against `3ab29d9`; terminal-state rejection test fails against `c17f68d`; multi-work approval test fails against `772c464`. These are not pre-implementation RED records.
 - Retrospective allowance probe (oracle `5dc10e70`): after two uncertain synthetic sends and a raised global cap, `aba59b2` allowed a third send. At `6a92a46`, the wrapper ignored the higher ceiling and rejected at its default, but the direct reducer committed a third reservation with the raised ceiling; no third send was observed. At `eda8034`, both wrapper and reducer rejected widening without changing state or the two-send ledger.
 - Operator accepted the documented retrospective comparisons as an explicit exception to missing pre-implementation RED timing. The final fresh full-check requirement is not waived; A3 remains subject to independent gate review.
+
+## Slice C independent full gate — reviewer `7f91efa6`
+
+- Gate commit: `80460e4`.
+- Independent full gate: PASS; fresh build followed by full check passed 222/222 tests.
+- Evidence boundary: tests use synthetic fixtures and establish offline durable behavior only. They do not verify real provider identity mapping, retry/idempotency, billing, lookup, or cancellation contracts; no live provider calls were made.
+- Fail-closed boundary: origin legacy untagged blockers remain fail-closed; no assumption that legacy untagged data is trusted or safely recoverable.
+- Remaining sequence from `slices.md`: Slice C is complete. Next workstream is Workstream 3/provider integration, requiring verified current provider contracts and operator approval before any paid calls. Remaining first-release work also includes the CLI/export and release readiness; provider and location integrations are not established by this offline gate.
