@@ -1,6 +1,6 @@
 import test from 'node:test'; import assert from 'node:assert/strict';
 import { mkdtempSync, rmSync } from 'node:fs'; import { DatabaseSync } from 'node:sqlite'; import { tmpdir } from 'node:os'; import { join } from 'node:path'; import { spawnSync } from 'node:child_process';
-import { validateGeometry, createTraversal } from '../dist/index.js'; import { DurableState } from '../dist/durable-state.js'; import { executeDurableDiscovery, resolveDurableRecoveryDebit, recordDurableCleanPause } from '../dist/durable-discovery.js';
+import { validateGeometry, createTraversal } from '../dist/index.js'; import { DurableState, setAfterTraversalWriteForTest } from '../dist/durable-state.js'; import { executeDurableDiscovery, resolveDurableRecoveryDebit, recordDurableCleanPause, setDurableDiscoveryBoundaryHookForTest } from '../dist/durable-discovery.js';
 const geo=validateGeometry({seed:{latitude:0,longitude:0},spacing:10,area:{type:'bbox',south:-1,north:1,west:-1,east:1}});
 test('fresh process fails closed after crash; finite debit resolves; invalid and posthoc clean pause reject',()=>{
  const dir=mkdtempSync(join(tmpdir(),'recovery-time-'));const path=join(dir,'state.db');
@@ -12,6 +12,39 @@ test('fresh process fails closed after crash; finite debit resolves; invalid and
   assert.throws(()=>resolveDurableRecoveryDebit(state,-1,'bad'));assert.throws(()=>recordDurableCleanPause(state,'after crash'));
   resolveDurableRecoveryDebit(state,2,'bounded conservative interval');assert.equal(state.readTraversal().activeTime,2);assert.equal(state.readTraversal().recoveryPending,false);state.close();
  } finally {rmSync(dir,{recursive:true,force:true})}
+});
+test('orderly close preserves active interval evidence for explicit debit before queued work',()=>{
+ const dir=mkdtempSync(join(tmpdir(),'orderly-active-interval-'));const path=join(dir,'state.db');
+ try {
+  const first=DurableState.open(path);first.writeTraversal({...createTraversal(geo,{cells:1,submissions:1,activeTime:10}),activeInterval:true});first.close();
+  const reopened=DurableState.open(path);assert.equal(reopened.readTraversal().recoveryPending,true);let sends=0;
+  assert.throws(()=>executeDurableDiscovery(reopened,()=>{sends++;return{id:'x'}},()=>({result:{status:'empty'},elapsed:1})),/Recovery accounting is unresolved/);assert.equal(sends,0);
+  resolveDurableRecoveryDebit(reopened,2,'bounded interval debit');assert.equal(reopened.readTraversal().activeTime,2);
+  executeDurableDiscovery(reopened,()=>{sends++;return{id:'x'}},()=>({result:{status:'empty'},elapsed:1}), 'global', undefined,{monotonicNow:()=>1});assert.equal(sends,1);reopened.close();
+ } finally {rmSync(dir,{recursive:true,force:true})}
+});
+for (const status of ['reserved', 'dispatched']) {
+ test(`${status} attempt survives settlement confirmation failure, close, and recovery debit without resend`,()=>{
+  const dir=mkdtempSync(join(tmpdir(),`settlement-${status}-`));const path=join(dir,'state.db');let writes=0,sends=0;
+  try {
+   const state=DurableState.open(path);state.writeTraversal(createTraversal(geo,{cells:1,submissions:1,activeTime:10}));
+   let clock=0, armed=false;
+   setDurableDiscoveryBoundaryHookForTest(boundary=>{if(boundary===status){clock=10;armed=true}});
+   setAfterTraversalWriteForTest(()=>{if(armed && ++writes===2)throw Error('injected persistence failure')});
+   assert.throws(()=>executeDurableDiscovery(state,()=>{sends++;return{id:'provider-id'}},()=>({result:{status:'empty'},elapsed:1}), 'global', undefined,{monotonicNow:()=>clock}),/injected persistence failure/);
+   setDurableDiscoveryBoundaryHookForTest(undefined);
+   setAfterTraversalWriteForTest(undefined);assert.equal(sends,0);
+   const persisted=state.readTraversal().attempts.at(-1);assert.equal(persisted.status,status);state.close();
+   const reopened=DurableState.open(path);assert.equal(reopened.readTraversal().recoveryPending,true);assert.equal(reopened.readTraversal().attempts.at(-1).status,status);
+   assert.throws(()=>executeDurableDiscovery(reopened,()=>{sends++;return{id:'duplicate'}},()=>({result:{status:'empty'},elapsed:1})),/Recovery accounting is unresolved/);assert.equal(sends,0);
+   resolveDurableRecoveryDebit(reopened,1,'bounded interval debit');assert.equal(reopened.readTraversal().activeTime,11);assert.equal(reopened.readTraversal().recoveryPending,false);
+   assert.throws(()=>executeDurableDiscovery(reopened,()=>{sends++;return{id:'duplicate'}},()=>({result:{status:'empty'},elapsed:1})));assert.equal(sends,0);reopened.close();
+  } finally {setDurableDiscoveryBoundaryHookForTest(undefined);setAfterTraversalWriteForTest(undefined);rmSync(dir,{recursive:true,force:true})}
+ });
+}
+test('invalid initial clock sample leaves marker recoverable after reopen',()=>{
+ const dir=mkdtempSync(join(tmpdir(),'bad-initial-clock-'));const path=join(dir,'state.db');let sends=0;
+ try {const state=DurableState.open(path);state.writeTraversal(createTraversal(geo,{cells:1,submissions:1,activeTime:10}));assert.throws(()=>executeDurableDiscovery(state,()=>{sends++;return{id:'x'}},()=>({result:{status:'empty'},elapsed:1}),'global',undefined,{monotonicNow:()=>NaN}),/Invalid monotonic clock sample/);assert.equal(sends,0);state.close();const reopened=DurableState.open(path);assert.equal(reopened.readTraversal().recoveryPending,true);resolveDurableRecoveryDebit(reopened,1,'bad-clock conservative debit');assert.equal(reopened.readTraversal().recoveryPending,false);reopened.close();} finally {rmSync(dir,{recursive:true,force:true})}
 });
 test('malformed clean-pause marker after abrupt death fails closed without sending',()=>{
  const dir=mkdtempSync(join(tmpdir(),'malformed-clean-pause-'));const path=join(dir,'state.db');

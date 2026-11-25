@@ -24,8 +24,8 @@ function validateTraversal(value: unknown): asserts value is TraversalState {
   const s = value as any;
   if (!s || typeof s !== 'object' || (s.activeInterval !== undefined && typeof s.activeInterval !== 'boolean') || (s.timeUnit !== undefined && s.timeUnit !== 'milliseconds') || typeof s.recoveryPending !== 'undefined' && typeof s.recoveryPending !== 'boolean' || !s.geometry || !s.limits || ![s.limits.cells, s.limits.submissions, s.limits.activeTime].every(Number.isFinite) || !Number.isSafeInteger(s.limits.cells) || !Number.isSafeInteger(s.limits.submissions) || !Number.isSafeInteger(s.limits.cells) || !Number.isSafeInteger(s.limits.submissions) || s.limits.cells < 1 || s.limits.submissions < 0 || s.limits.activeTime < 0 || !Array.isArray(s.queue) || !s.queue.every((x: unknown) => typeof x === 'string') || !Array.isArray(s.admitted) || !s.cells || typeof s.cells !== 'object' || !Array.isArray(s.candidates) || !Array.isArray(s.gaps) || !Array.isArray(s.blocked) || !Array.isArray(s.attempts) || ![s.submissions, s.activeTime].every(Number.isFinite) || s.submissions < 0 || s.activeTime < 0 || typeof s.paused !== 'boolean' || typeof s.cancelled !== 'boolean') throw new Error('Corrupt traversal checkpoint');
   try { validateGeometry(s.geometry); } catch { throw new Error('Corrupt traversal checkpoint'); }
-  if (!Number.isSafeInteger(s.submissions) || s.submissions !== s.attempts.length || !s.attempts.every((a: any) => a && typeof a.id === 'string' && a.id.length > 0 && typeof a.cellKey === 'string' && a.workId === `work:${a.cellKey}` && s.cells[a.cellKey] && ['reserved', 'dispatched', 'uncertain', 'observing', 'observed', 'skipped'].includes(a.status)) || new Set(s.attempts.map((a: any) => a.id)).size !== s.attempts.length) throw new Error('Corrupt traversal checkpoint');
-  if (!s.attempts.every((a: any) => a.knownId === undefined || (typeof a.knownId === 'string' && a.knownId.trim().length > 0)) || !s.attempts.every((a: any) => !['observing', 'observed'].includes(a.status) || (typeof a.knownId === 'string' && a.knownId.trim().length > 0))) throw new Error('Corrupt traversal checkpoint');
+  if (!Number.isSafeInteger(s.submissions) || s.submissions !== s.attempts.length || !s.attempts.every((a: any) => a && typeof a.id === 'string' && a.id.length > 0 && typeof a.cellKey === 'string' && a.workId === `work:${a.cellKey}` && s.cells[a.cellKey] && ['reserved', 'dispatched', 'uncertain', 'observing', 'observed', 'skipped', 'confirmed_no_send'].includes(a.status)) || new Set(s.attempts.map((a: any) => a.id)).size !== s.attempts.length) throw new Error('Corrupt traversal checkpoint');
+  if (!s.attempts.every((a: any) => a.knownId === undefined || (typeof a.knownId === 'string' && a.knownId.trim().length > 0)) || !s.attempts.every((a: any) => !['observing', 'observed'].includes(a.status) || (typeof a.knownId === 'string' && a.knownId.trim().length > 0)) || !s.attempts.every((a: any) => a.status !== 'confirmed_no_send' || (a.knownId === undefined && a.retryOrdinal === undefined && a.observationRetryCeiling === undefined && a.observationRetryPendingDelayMs === undefined && a.recoveryEvidence === undefined && a.safeRetryAuthorization === undefined && s.cells[a.cellKey]?.outcome === 'failed' && s.gaps.some((g: any) => g.cellKey === a.cellKey && g.cause === 'failed' && g.scope === 'isolated' && g.status === 'unresolved')))) throw new Error('Corrupt traversal checkpoint');
   if (s.cleanPauseEvidence !== undefined && (!s.cleanPauseEvidence || typeof s.cleanPauseEvidence !== 'object' || typeof s.cleanPauseEvidence.evidence !== 'string' || !s.cleanPauseEvidence.evidence.trim() || s.paused !== true || s.recoveryPending === true || s.activeInterval === true)) throw new Error('Corrupt traversal checkpoint');
   if (s.resendApprovalsConsumed !== undefined && (!Number.isSafeInteger(s.resendApprovalsConsumed) || s.resendApprovalsConsumed < 0) || s.resendCeiling !== undefined && (!Number.isSafeInteger(s.resendCeiling) || s.resendCeiling < 1) || !s.attempts.every((a: any) => a.resendOrdinal === undefined || a.resendCeiling === s.resendCeiling) || !s.attempts.every((a: any) => ['submissionRetryOrdinal', 'retryOrdinal', 'retryCeiling', 'observationRetryCeiling', 'submissionRetryCeiling', 'resendOrdinal', 'resendCeiling'].every(key => a[key] === undefined || (Number.isSafeInteger(a[key]) && a[key] >= 0)) && (a.retryCeiling === undefined || a.retryOrdinal === undefined || a.retryOrdinal <= a.retryCeiling) && (a.observationRetryCeiling === undefined || a.retryOrdinal === undefined || a.retryOrdinal <= a.observationRetryCeiling) && !(a.observationRetryCeiling !== undefined && a.retryCeiling !== undefined) && (a.resendOrdinal === undefined ? a.resendCeiling === undefined && a.approval === undefined : Number.isSafeInteger(a.resendCeiling) && a.resendOrdinal > 0 && a.resendOrdinal <= a.resendCeiling && a.approval && typeof a.approval.rationale === 'string' && !!a.approval.rationale.trim()) && (a.submissionRetryCeiling === undefined || (a.submissionRetryOrdinal ?? 0) <= a.submissionRetryCeiling) && !(a.submissionRetryOrdinal !== undefined && a.submissionRetryCeiling === undefined && a.retryCeiling !== undefined && a.submissionRetryOrdinal > a.retryCeiling) && !(a.submissionRetryOrdinal !== undefined && a.submissionRetryCeiling === undefined && a.retryOrdinal !== undefined && a.retryCeiling !== undefined))) throw new Error('Corrupt traversal checkpoint');
   const resendAttempts = s.attempts.filter((a: any) => a.resendOrdinal !== undefined);
@@ -89,13 +89,16 @@ export class DurableState {
         if (isAlive(pid)) throw new Error('Database is already owned');
         recoveredPreviousOwner = true;
       }
-      if (recoveredPreviousOwner) {
-        const traversalRow = db.prepare('SELECT payload FROM traversal WHERE id=1').get();
-        if (traversalRow) {
-          const traversal = JSON.parse(String(traversalRow.payload));
-          validateTraversal(traversal);
-          if (!traversal.cleanPauseEvidence || traversal.activeInterval === true) db.prepare('UPDATE traversal SET payload=? WHERE id=1').run(JSON.stringify({ ...traversal, recoveryPending: true, activeInterval: false }));
-          else db.prepare('UPDATE traversal SET payload=? WHERE id=1').run(JSON.stringify({ ...traversal, recoveryPending: false }));
+      const traversalRow = db.prepare('SELECT payload FROM traversal WHERE id=1').get();
+      if (traversalRow) {
+        const traversal = JSON.parse(String(traversalRow.payload));
+        validateTraversal(traversal);
+        // The durable interval marker survives orderly close; ownership alone cannot
+        // determine whether active accounting was interrupted.
+        if (traversal.activeInterval === true || (recoveredPreviousOwner && !traversal.cleanPauseEvidence)) {
+          db.prepare('UPDATE traversal SET payload=? WHERE id=1').run(JSON.stringify({ ...traversal, recoveryPending: true, activeInterval: false }));
+        } else if (recoveredPreviousOwner) {
+          db.prepare('UPDATE traversal SET payload=? WHERE id=1').run(JSON.stringify({ ...traversal, recoveryPending: false }));
         }
       }
       db.prepare('INSERT OR REPLACE INTO owner(id,pid) VALUES(1,?)').run(process.pid);
@@ -144,7 +147,9 @@ export class DurableState {
     this.db.exec('BEGIN IMMEDIATE');
     try {
       const existing = this.db.prepare('SELECT payload FROM traversal WHERE id=1').get();
-      if (existing && JSON.parse(String(existing.payload)).timeUnit !== 'milliseconds') throw new Error('Durable traversal time unit is unmarked; explicit migration required');
+      const previous = existing ? JSON.parse(String(existing.payload)) : undefined;
+      if (previous && previous.timeUnit !== 'milliseconds') throw new Error('Durable traversal time unit is unmarked; explicit migration required');
+      if (previous?.activeInterval === true && serialized.cancelled !== previous.cancelled) throw new Error('Cannot control traversal during an active interval');
       this.db.prepare('INSERT INTO traversal(id,payload) VALUES(1,?) ON CONFLICT(id) DO UPDATE SET payload=excluded.payload').run(payload);
       this.db.exec('COMMIT');
     } catch (error) { this.db.exec('ROLLBACK'); throw error; }
@@ -172,11 +177,15 @@ export class DurableState {
   transitionTraversal(change: (state: TraversalState) => TraversalState): void {
     this.db.exec('BEGIN IMMEDIATE');
     try {
-      const next = change(this.readTraversal());
+      const previous = this.readTraversal();
+      const wasActive = previous.activeInterval === true;
+      const wasCancelled = previous.cancelled;
+      const next = change(previous);
       const payload = JSON.stringify(next);
       const serialized = JSON.parse(payload);
       validateTraversal(serialized);
       if (serialized.timeUnit !== 'milliseconds') throw new Error('Durable traversal time unit is unmarked; explicit migration required');
+      if (wasActive && serialized.cancelled !== wasCancelled) throw new Error('Cannot control traversal during an active interval');
       this.db.prepare('UPDATE traversal SET payload=? WHERE id=1').run(payload);
       afterTraversalWriteForTest?.();
       this.db.exec('COMMIT');

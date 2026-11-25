@@ -1,5 +1,5 @@
 import type { DurableState } from './durable-state.js';
-import { admitNextCell, applyDiscoveryResult, authorizeSafeRetry, authorizeSafeRetryReservation, dispatchSubmission, markUncertain, observeKnownId, reserveSubmission, retryKnownIdObservation, recoverKnownId, skipAttempt, authorizeResend, cancelTraversal, type DiscoveryResult, type TraversalState } from './traversal.js';
+import { admitNextCell, applyDiscoveryResult, authorizeSafeRetry, authorizeSafeRetryReservation, dispatchSubmission, confirmNoSend, markUncertain, observeKnownId, reserveSubmission, retryKnownIdObservation, recoverKnownId, skipAttempt, authorizeResend, cancelTraversal, type DiscoveryResult, type TraversalState } from './traversal.js';
 
 export type SyntheticSend = (workId: string) => { id: string };
 export type SyntheticObserve = (id: string) => { result: DiscoveryResult; elapsed: number };
@@ -20,7 +20,7 @@ let boundaryHook: ((boundary: DurableDiscoveryBoundary) => void) | undefined;
 export function setDurableDiscoveryBoundaryHookForTest(hook: ((boundary: DurableDiscoveryBoundary) => void) | undefined): void { boundaryHook = hook; }
 
 /** Reserve before send; known IDs are re-observed on restart without another submission. */
-function executeDurableDiscoveryImpl(state: DurableState, send: SyntheticSend, observe: SyntheticObserve, uncertaintyScope: 'isolated' | 'global', retryPolicy: DurableRetryPolicy | undefined, reservedRetryId?: string, targetKey?: string): TraversalState {
+function executeDurableDiscoveryImpl(state: DurableState, send: SyntheticSend, observe: SyntheticObserve, uncertaintyScope: 'isolated' | 'global', retryPolicy: DurableRetryPolicy | undefined, reservedRetryId?: string, targetKey?: string, settle?: (change?: (value: TraversalState) => TraversalState) => void): TraversalState {
   let current = state.readTraversal();
   if (current.recoveryPending) throw new Error('Recovery accounting is unresolved');
   if (current.paused || current.cancelled) throw new Error(current.paused ? 'Traversal is paused' : 'Traversal is cancelled');
@@ -39,17 +39,24 @@ function executeDurableDiscoveryImpl(state: DurableState, send: SyntheticSend, o
     throw new Error('No recoverable discovery work');
   }
   if (!running) {
+    settle?.();
+    current = state.readTraversal();
+    if (current.activeTime >= current.limits.activeTime) throw new Error('Active-time limit reached before cell admission');
     state.transitionTraversal(value => admitNextCell(value));
     boundaryHook?.('dequeued');
+    settle?.();
     current = state.readTraversal();
+    if (current.activeTime >= current.limits.activeTime) throw new Error('Active-time limit reached after cell dequeue');
     running = Object.entries(current.cells).find(([, cell]) => cell.outcome === 'running')![0];
   }
   const latestForCell = current.attempts.findLast(item => item.cellKey === running);
   if (latestForCell?.status === 'uncertain' && !latestForCell.knownId && latestForCell.safeRetryAuthorization) {
     const auth = latestForCell.safeRetryAuthorization;
     waitForRetry(retryPolicy, auth.delayMs ?? 0);
+    settle?.();
+    if (state.readTraversal().activeTime >= state.readTraversal().limits.activeTime) throw new Error('Active-time limit reached before retry reservation');
     state.transitionTraversal(value => authorizeSafeRetryReservation(value, running!, auth.ordinal, auth.ceiling));
-    return executeDurableDiscoveryImpl(state, send, observe, uncertaintyScope, retryPolicy, state.readTraversal().attempts.at(-1)!.id);
+    return executeDurableDiscoveryImpl(state, send, observe, uncertaintyScope, retryPolicy, state.readTraversal().attempts.at(-1)!.id, undefined, settle);
   }
   if (latestForCell?.status === 'uncertain' && !latestForCell.knownId) {
     throw new Error('Dispatched attempt has unknown outcome; refusing resend');
@@ -61,6 +68,8 @@ function executeDurableDiscoveryImpl(state: DurableState, send: SyntheticSend, o
   }
   let reservedThisInvocation = false;
   if (!current.attempts.some(item => item.cellKey === running && ['reserved', 'dispatched', 'observing', 'observed', 'uncertain'].includes(item.status))) {
+    settle?.();
+    if (state.readTraversal().activeTime >= state.readTraversal().limits.activeTime) throw new Error('Active-time limit reached before reservation');
     state.transitionTraversal(value => reserveSubmission(value, running!));
     reservedThisInvocation = true;
     boundaryHook?.('reserved');
@@ -75,9 +84,24 @@ function executeDurableDiscoveryImpl(state: DurableState, send: SyntheticSend, o
     throw new Error('Persisted reservation has unknown outcome; refusing send');
   }
   if (freshlyReserved) {
+    settle?.();
+    if (state.readTraversal().activeTime >= state.readTraversal().limits.activeTime) {
+      settle?.(value => confirmNoSend(value, running!));
+      throw new Error('Active-time limit reached before dispatch');
+    }
     state.transitionTraversal(value => dispatchSubmission(value, running!));
     boundaryHook?.('dispatched');
-    attempt = state.readTraversal().attempts.findLast(item => item.cellKey === running)!;
+    settle?.();
+    current = state.readTraversal();
+    if (current.cancelled) {
+      settle?.(value => confirmNoSend(value, running!));
+      throw new Error('Traversal is cancelled');
+    }
+    if (current.activeTime >= current.limits.activeTime) {
+      settle?.(value => confirmNoSend(value, running!));
+      throw new Error('Active-time limit reached after dispatch');
+    }
+    attempt = current.attempts.findLast(item => item.cellKey === running)!;
   }
   if (!attempt.knownId && attempt.status === 'dispatched' && !freshlyReserved) {
     state.transitionTraversal(value => markUncertain(value, running!, uncertaintyScope));
@@ -98,12 +122,13 @@ function executeDurableDiscoveryImpl(state: DurableState, send: SyntheticSend, o
           return authorizeSafeRetry(uncertain, running!, retryOrdinal, submissionCeiling, retryDelay(retryPolicy, retryOrdinal));
         });
         boundaryHook?.('retry-authorized');
-        return executeDurableDiscoveryImpl(state, send, observe, uncertaintyScope, retryPolicy, state.readTraversal().attempts.at(-1)!.id);
+        return executeDurableDiscoveryImpl(state, send, observe, uncertaintyScope, retryPolicy, state.readTraversal().attempts.at(-1)!.id, undefined, settle);
       }
       state.transitionTraversal(value => markUncertain(value, running!, uncertaintyScope));
       throw error;
     }
-    boundaryHook?.('sent');
+      boundaryHook?.('sent');
+    settle?.();
     if (!response.id) {
       state.transitionTraversal(value => markUncertain(value, running!, uncertaintyScope));
       throw new Error('Synthetic send returned no durable ID');
@@ -140,6 +165,7 @@ function executeDurableDiscoveryImpl(state: DurableState, send: SyntheticSend, o
       const delay = retryDelay(retryPolicy, ordinal);
       state.transitionTraversal(value => { const next = retryKnownIdObservation(value, running!, storedCeiling); return { ...next, attempts: next.attempts.map(item => item.id === attempt!.id ? { ...item, observationRetryPendingDelayMs: delay } : item) }; });
       waitForRetry(retryPolicy, delay);
+      settle?.();
       state.transitionTraversal(value => ({ ...value, attempts: value.attempts.map(item => { if (item.id !== attempt!.id) return item; const { observationRetryPendingDelayMs: _, ...rest } = item; return rest; }) }));
       try { response = observe(id); break; }
       catch (retryError) {
@@ -151,17 +177,65 @@ function executeDurableDiscoveryImpl(state: DurableState, send: SyntheticSend, o
     }
   }
   boundaryHook?.('observed');
-  state.transitionTraversal(value => applyDiscoveryResult(observeKnownId(value, running!, id, response.elapsed), running!, response.result));
+  settle!(value => applyDiscoveryResult(observeKnownId(value, running!, id, 0), running!, response.result));
   boundaryHook?.('committed');
   return state.readTraversal();
 }
 
-export function executeDurableDiscovery(state: DurableState, send: SyntheticSend, observe: SyntheticObserve, uncertaintyScope: 'isolated' | 'global' = 'global', retryPolicy?: DurableRetryPolicy): TraversalState {
-  return executeDurableDiscoveryImpl(state, send, observe, uncertaintyScope, retryPolicy);
+function executeTimed(state: DurableState, operation: (settle: (change?: (value: TraversalState) => TraversalState) => void) => TraversalState, clock: { monotonicNow: () => number }): TraversalState {
+  const current = state.readTraversal();
+  if (current.recoveryPending) throw new Error('Recovery accounting is unresolved');
+  const hasRecoverableKnownId = current.attempts.some(item => ['uncertain', 'dispatched', 'observing'].includes(item.status) && item.knownId);
+  if (current.paused || current.cancelled || (!current.queue.length && !Object.values(current.cells).some(cell => cell.outcome === 'running') && !hasRecoverableKnownId)) return operation(() => {});
+  state.beginActiveInterval();
+  let last = clock.monotonicNow();
+  if (!Number.isFinite(last)) throw new Error('Invalid monotonic clock sample');
+  let settlementFailed = false;
+  const settle = (change?: (value: TraversalState) => TraversalState): void => {
+    try {
+      const now = clock.monotonicNow();
+      if (!Number.isFinite(now) || now < last) throw new Error('Invalid monotonic clock sample');
+      state.transitionTraversal(value => {
+        if (value.activeInterval !== true) throw new Error('No active interval to settle');
+        const total = value.activeTime + (now - last);
+        if (!Number.isFinite(total)) throw new Error('Active time exceeds finite accounting range');
+        const updated = { ...value, activeTime: total };
+        return change ? change(updated) : updated;
+      });
+      last = now;
+    } catch (error) {
+      settlementFailed = true;
+      throw error;
+    }
+  };
+  try {
+    operation(settle);
+    settle();
+    state.endActiveInterval();
+    return state.readTraversal();
+  } catch (error) {
+    // A failed settlement leaves the interval marker for explicit recovery; do not
+    // sample again or classify the accounting failure as a provider failure.
+    if (settlementFailed) throw error;
+    // A returned provider exception is a live-process exit, not a crash; account for
+    // elapsed work and close the interval so a later invocation can resume traversal.
+    settle();
+    state.endActiveInterval();
+    throw error;
+  }
 }
 
-export function recoverDurableKnownId(state: DurableState, key: string, id: string, evidence: { source: string; evidence: string; timestamp: string }, observe: SyntheticObserve): TraversalState {
+export function executeDurableDiscovery(state: DurableState, send: SyntheticSend, observe: SyntheticObserve, uncertaintyScope: 'isolated' | 'global' = 'global', retryPolicy?: DurableRetryPolicy, clock: { monotonicNow: () => number } = { monotonicNow: () => Number(process.hrtime.bigint()) / 1_000_000 }): TraversalState {
+  const current = state.readTraversal();
+  if (current.recoveryPending) throw new Error('Recovery accounting is unresolved');
+  const hasRecoverableKnownId = current.attempts.some(item => ['uncertain', 'dispatched', 'observing'].includes(item.status) && item.knownId);
+  if (current.paused || current.cancelled || (!current.queue.length && !Object.values(current.cells).some(cell => cell.outcome === 'running') && !hasRecoverableKnownId)) return executeDurableDiscoveryImpl(state, send, observe, uncertaintyScope, retryPolicy);
+  return executeTimed(state, settle => executeDurableDiscoveryImpl(state, send, observe, uncertaintyScope, retryPolicy, undefined, undefined, settle), clock);
+}
+
+export function recoverDurableKnownId(state: DurableState, key: string, id: string, evidence: { source: string; evidence: string; timestamp: string }, observe: SyntheticObserve, clock: { monotonicNow: () => number } = { monotonicNow: () => Number(process.hrtime.bigint()) / 1_000_000 }): TraversalState {
   state.transitionTraversal(value => {
+    if (value.activeInterval === true) throw new Error('Cannot control traversal during an active interval');
     if (value.recoveryPending) throw new Error('Recovery accounting is unresolved');
     if (value.cancelled || value.paused) throw new Error('Traversal is paused or cancelled');
     const recovered = recoverKnownId(value, key, id, evidence);
@@ -170,19 +244,20 @@ export function recoverDurableKnownId(state: DurableState, key: string, id: stri
     return { ...recovered, cells, queue: recovered.queue.filter(item => item !== key) };
   });
   // Resume only the specifically recovered ID; the general scheduler may select another queued cell.
-  return executeDurableDiscoveryImpl(state, () => { throw new Error('Recovered ID must not be resubmitted'); }, observe, 'isolated', undefined, undefined, key);
+  return executeTimed(state, settle => executeDurableDiscoveryImpl(state, () => { throw new Error('Recovered ID must not be resubmitted'); }, observe, 'isolated', undefined, undefined, key, settle), clock);
 }
 export function skipDurableAttempt(state: DurableState, key: string): TraversalState {
   state.transitionTraversal(value => skipAttempt(value, key));
   return state.readTraversal();
 }
-export function approveDurableResend(state: DurableState, key: string, rationale: string, send: SyntheticSend, observe: SyntheticObserve, ceiling = 1): TraversalState {
+export function approveDurableResend(state: DurableState, key: string, rationale: string, send: SyntheticSend, observe: SyntheticObserve, ceiling = 1, clock: { monotonicNow: () => number } = { monotonicNow: () => Number(process.hrtime.bigint()) / 1_000_000 }): TraversalState {
   state.transitionTraversal(value => {
+    if (value.activeInterval === true) throw new Error('Cannot control traversal during an active interval');
     if (value.recoveryPending) throw new Error('Recovery accounting is unresolved');
     return authorizeResend(value, key, rationale, ceiling);
   });
   boundaryHook?.('resend-approved');
-  return executeDurableDiscoveryImpl(state, send, observe, 'isolated', undefined, state.readTraversal().attempts.at(-1)!.id, key);
+  return executeTimed(state, settle => executeDurableDiscoveryImpl(state, send, observe, 'isolated', undefined, state.readTraversal().attempts.at(-1)!.id, key, settle), clock);
 }
 export function recordDurableCleanPause(state: DurableState, evidence: string): TraversalState {
   if (typeof evidence !== 'string' || !evidence.trim()) throw new Error('Clean-pause evidence is required');
@@ -203,6 +278,9 @@ export function resolveDurableRecoveryDebit(state: DurableState, elapsed: number
   return state.readTraversal();
 }
 export function cancelDurableDiscovery(state: DurableState): TraversalState {
-  state.transitionTraversal(cancelTraversal);
+  state.transitionTraversal(value => {
+    if (value.activeInterval === true) throw new Error('Cannot control traversal during an active interval');
+    return cancelTraversal(value);
+  });
   return state.readTraversal();
 }

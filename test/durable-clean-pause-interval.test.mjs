@@ -26,7 +26,7 @@ test('clean pause evidence and active intervals cannot coexist', () => {
     const raw = DurableState.open(join(dir, 'state.db'));
     try {
       assert.throws(() => raw.transitionTraversal(value => ({ ...value, paused: true, cleanPauseEvidence: { evidence: 'bad' } })), /Corrupt traversal checkpoint/);
-      assert.deepEqual(raw.readTraversal(), active);
+      assert.deepEqual(raw.readTraversal(), { ...active, activeInterval: false, recoveryPending: true });
     } finally { raw.close(); }
   } finally { try { state.close(); } catch {} rmSync(dir, { recursive: true, force: true }); }
 });
