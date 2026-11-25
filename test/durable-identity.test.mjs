@@ -39,6 +39,29 @@ test('discovery preserves each occurrence, explicit verified identity, and expan
   assert.deepEqual(state, beforeReplay);
 });
 
+test('applying results migrates legacy observations to deterministic detail fanout without mutating input', () => {
+  const { state: current, key } = discovered([{ id: 'next' }]);
+  const prior = structuredClone(current);
+  const legacy = { ...current, detailWork: undefined, candidates: [
+    { ...current.candidates[0], observationId: 'legacy:1', attemptId: current.attempts[0].id, verifiedCanonicalKey: 'place:legacy' },
+    { ...current.candidates[0], observationId: 'legacy:2', attemptId: current.attempts[0].id, verifiedCanonicalKey: 'place:legacy' },
+    { ...current.candidates[0], observationId: 'legacy:3', attemptId: current.attempts[0].id, verifiedCanonicalKey: undefined },
+  ], cells: { ...current.cells, [key]: { outcome: 'running' } } };
+  const original = structuredClone(legacy);
+  const empty = applyDiscoveryResult(legacy, key, { status: 'empty' });
+  assert.deepEqual(legacy, original);
+  assert.deepEqual(empty.detailWork.map(work => [work.id, work.observationIds]), [
+    ['detail:verified:place:legacy', ['legacy:1', 'legacy:2']], ['detail:observation:legacy:3', ['legacy:3']],
+  ]);
+  const nonemptyInput = { ...legacy, cells: { ...legacy.cells, [key]: { outcome: 'running' } } };
+  const nonemptyBefore = structuredClone(nonemptyInput);
+  const nonempty = applyDiscoveryResult(nonemptyInput, key, { status: 'success', candidates: [{ id: 'new' }] });
+  assert.deepEqual(nonemptyInput, nonemptyBefore);
+  assert.equal(nonempty.detailWork.length, 4);
+  assert.ok(nonempty.detailWork.some(work => work.identity === `observation:${nonempty.candidates.at(-1).observationId}`));
+  assert.deepEqual(current, prior);
+});
+
 test('durable checkpoint rejects observation links to unknown attempts or source cells', () => {
   const dir = mkdtempSync(join(tmpdir(), 'durable-identity-'));
   try {

@@ -160,7 +160,22 @@ export function applyDiscoveryResult(state: TraversalState, key: string, result:
   if (!latestAttempt || !['dispatched', 'observed'].includes(latestAttempt.status)) throw new Error('Result requires dispatched attempt');
   const cells = { ...state.cells };
   const candidates = [...state.candidates];
-  const detailWork = [...(state.detailWork ?? [])];
+  // Upgrade legacy snapshots atomically when a result is applied; observations
+  // without explicit verified identity remain independent work items.
+  const detailWork = state.detailWork ? state.detailWork.map(work => ({ ...work, observationIds: [...work.observationIds] })) : [];
+  if (state.detailWork === undefined) {
+    for (const candidate of state.candidates) {
+      const identity = candidate.verifiedCanonicalKey ? `verified:${candidate.verifiedCanonicalKey}` : `observation:${candidate.observationId}`;
+      let work = detailWork.find(item => item.identity === identity);
+      if (!work) { work = { id: `detail:${identity}`, status: 'pending', identity, observationIds: [] }; detailWork.push(work); }
+      work.observationIds.push(candidate.observationId);
+    }
+  }
+  const byVerifiedIdentity = new Map<string, string>();
+  for (const work of detailWork) if (work.identity.startsWith('verified:')) {
+    if (work.id !== `detail:${work.identity}` || byVerifiedIdentity.has(work.identity)) throw new Error('Invalid detail work identity');
+    byVerifiedIdentity.set(work.identity, work.id);
+  }
   const gaps = [...state.gaps];
   const queue = [...state.queue];
   const admitted = [...state.admitted];
@@ -173,6 +188,7 @@ export function applyDiscoveryResult(state: TraversalState, key: string, result:
       candidates.push({ ...candidate, classification: classifyCandidate(state.geometry, candidate.coordinate), sourceCell: key, observationId, attemptId: latestAttempt.id, occurrence: occurrence + 1 });
       const identity = candidate.verifiedCanonicalKey ? `verified:${candidate.verifiedCanonicalKey}` : `observation:${observationId}`;
       let work = detailWork.find(item => item.identity === identity);
+      if (work && work.id !== `detail:${identity}`) throw new Error('Invalid detail work identity');
       if (!work) { work = { id: `detail:${identity}`, status: 'pending', identity, observationIds: [] }; detailWork.push(work); }
       if (!work.observationIds.includes(observationId)) work.observationIds.push(observationId);
     }
