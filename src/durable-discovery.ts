@@ -47,7 +47,10 @@ export function executeDurableDetail(state: DurableState, workId: string, send: 
     let id: string;
     try { id = send(workId).id; } catch (error) { state.transitionTraversal(value => markDetailUncertain(value, workId)); throw error; }
     detailBoundaryHook?.('sent');
-    if (!id) throw new Error('Synthetic detail send returned no ID');
+    if (!id) {
+      state.transitionTraversal(value => markDetailUncertain(value, workId));
+      throw new Error('Synthetic detail send returned no ID');
+    }
     state.transitionTraversal(value => recordDetailId(value, workId, id));
     detailBoundaryHook?.('id-persisted');
     current = state.readTraversal();
@@ -82,7 +85,7 @@ function executeDurableDiscoveryImpl(state: DurableState, send: SyntheticSend, o
   let current = state.readTraversal();
   if (current.recoveryPending) throw new Error('Recovery accounting is unresolved');
   if (current.paused || current.cancelled) throw new Error(current.paused ? 'Traversal is paused' : 'Traversal is cancelled');
-  if (current.gaps.some(gap => gap.scope === 'global' && gap.status !== 'resolved' && gap.status !== 'skipped') || current.detailGaps?.some(gap => gap.status === 'unresolved')) throw new Error('Global uncertainty blocks new discovery work');
+  if (current.gaps.some(gap => gap.scope === 'global' && gap.status !== 'resolved' && gap.status !== 'skipped') || current.detailGaps?.some(gap => gap.status === 'unresolved') || current.detailWork?.some(work => ['reserved', 'dispatched', 'uncertain'].includes(work.status) && !work.attempts.at(-1)?.knownId)) throw new Error('Global uncertainty blocks new discovery work');
   let running = targetKey ?? Object.entries(current.cells).find(([, cell]) => cell.outcome === 'running')?.[0];
   const latestAttempt = current.attempts.at(-1);
   const latestUncertain = latestAttempt?.status === 'uncertain' ? latestAttempt : undefined;

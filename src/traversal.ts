@@ -65,12 +65,7 @@ export function completeDetailWork(state: TraversalState, workId: string, id: st
   const detailGaps = state.detailGaps ?? [];
   const matching = detailGaps.filter(gap => gap.identity === work.identity && gap.status === 'unresolved');
   const reconciled = work.identity.startsWith('verified:') && work.identity.length > 'verified:'.length && work.observationIds.every(observationId => state.candidates.some(candidate => candidate.observationId === observationId && candidate.verifiedCanonicalKey === work.identity.slice('verified:'.length)));
-  const resolvedObservationIds = work.observationIds;
-  const gaps = state.gaps.map(gap => {
-    const belongsToWork = resolvedObservationIds.some(observationId => state.candidates.some(candidate => candidate.observationId === observationId && candidate.sourceCell === gap.cellKey));
-    return belongsToWork && gap.cause === 'uncertain' && gap.scope === 'global' && reconciled ? { ...gap, status: 'resolved' as const } : gap;
-  });
-  return { ...state, gaps, detailWork, detailGaps: detailGaps.map(gap => matching.includes(gap) && reconciled ? { ...gap, status: 'resolved' as const } : gap) };
+  return { ...state, detailWork, detailGaps: detailGaps.map(gap => matching.includes(gap) && reconciled ? { ...gap, status: 'resolved' as const } : gap) };
 }
 export function dispatchDetailSubmission(state: TraversalState, workId: string): TraversalState {
   if (state.recoveryPending) throw new Error('Recovery accounting is unresolved');
