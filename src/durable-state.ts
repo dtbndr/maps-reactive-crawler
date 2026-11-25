@@ -22,7 +22,7 @@ function validate(value: unknown): asserts value is Snapshot {
 }
 function validateTraversal(value: unknown): asserts value is TraversalState {
   const s = value as any;
-  if (!s || typeof s !== 'object' || (s.timeUnit !== undefined && s.timeUnit !== 'milliseconds') || typeof s.recoveryPending !== 'undefined' && typeof s.recoveryPending !== 'boolean' || !s.geometry || !s.limits || ![s.limits.cells, s.limits.submissions, s.limits.activeTime].every(Number.isFinite) || !Number.isSafeInteger(s.limits.cells) || !Number.isSafeInteger(s.limits.submissions) || !Number.isSafeInteger(s.limits.cells) || !Number.isSafeInteger(s.limits.submissions) || s.limits.cells < 1 || s.limits.submissions < 0 || s.limits.activeTime < 0 || !Array.isArray(s.queue) || !s.queue.every((x: unknown) => typeof x === 'string') || !Array.isArray(s.admitted) || !s.cells || typeof s.cells !== 'object' || !Array.isArray(s.candidates) || !Array.isArray(s.gaps) || !Array.isArray(s.blocked) || !Array.isArray(s.attempts) || ![s.submissions, s.activeTime].every(Number.isFinite) || s.submissions < 0 || s.activeTime < 0 || typeof s.paused !== 'boolean' || typeof s.cancelled !== 'boolean') throw new Error('Corrupt traversal checkpoint');
+  if (!s || typeof s !== 'object' || (s.activeInterval !== undefined && typeof s.activeInterval !== 'boolean') || (s.timeUnit !== undefined && s.timeUnit !== 'milliseconds') || typeof s.recoveryPending !== 'undefined' && typeof s.recoveryPending !== 'boolean' || !s.geometry || !s.limits || ![s.limits.cells, s.limits.submissions, s.limits.activeTime].every(Number.isFinite) || !Number.isSafeInteger(s.limits.cells) || !Number.isSafeInteger(s.limits.submissions) || !Number.isSafeInteger(s.limits.cells) || !Number.isSafeInteger(s.limits.submissions) || s.limits.cells < 1 || s.limits.submissions < 0 || s.limits.activeTime < 0 || !Array.isArray(s.queue) || !s.queue.every((x: unknown) => typeof x === 'string') || !Array.isArray(s.admitted) || !s.cells || typeof s.cells !== 'object' || !Array.isArray(s.candidates) || !Array.isArray(s.gaps) || !Array.isArray(s.blocked) || !Array.isArray(s.attempts) || ![s.submissions, s.activeTime].every(Number.isFinite) || s.submissions < 0 || s.activeTime < 0 || typeof s.paused !== 'boolean' || typeof s.cancelled !== 'boolean') throw new Error('Corrupt traversal checkpoint');
   try { validateGeometry(s.geometry); } catch { throw new Error('Corrupt traversal checkpoint'); }
   if (!Number.isSafeInteger(s.submissions) || s.submissions !== s.attempts.length || !s.attempts.every((a: any) => a && typeof a.id === 'string' && a.id.length > 0 && typeof a.cellKey === 'string' && a.workId === `work:${a.cellKey}` && s.cells[a.cellKey] && ['reserved', 'dispatched', 'uncertain', 'observing', 'observed', 'skipped'].includes(a.status)) || new Set(s.attempts.map((a: any) => a.id)).size !== s.attempts.length) throw new Error('Corrupt traversal checkpoint');
   if (!s.attempts.every((a: any) => a.knownId === undefined || (typeof a.knownId === 'string' && a.knownId.trim().length > 0)) || !s.attempts.every((a: any) => !['observing', 'observed'].includes(a.status) || (typeof a.knownId === 'string' && a.knownId.trim().length > 0))) throw new Error('Corrupt traversal checkpoint');
@@ -94,7 +94,7 @@ export class DurableState {
         if (traversalRow) {
           const traversal = JSON.parse(String(traversalRow.payload));
           validateTraversal(traversal);
-          if (!traversal.cleanPauseEvidence) db.prepare('UPDATE traversal SET payload=? WHERE id=1').run(JSON.stringify({ ...traversal, recoveryPending: true }));
+          if (!traversal.cleanPauseEvidence || traversal.activeInterval === true) db.prepare('UPDATE traversal SET payload=? WHERE id=1').run(JSON.stringify({ ...traversal, recoveryPending: true, activeInterval: false }));
           else db.prepare('UPDATE traversal SET payload=? WHERE id=1').run(JSON.stringify({ ...traversal, recoveryPending: false }));
         }
       }
@@ -148,6 +148,26 @@ export class DurableState {
       this.db.prepare('INSERT INTO traversal(id,payload) VALUES(1,?) ON CONFLICT(id) DO UPDATE SET payload=excluded.payload').run(payload);
       this.db.exec('COMMIT');
     } catch (error) { this.db.exec('ROLLBACK'); throw error; }
+  }
+  beginActiveInterval(): void {
+    this.transitionTraversal(value => {
+      if (value.recoveryPending || value.activeInterval === true) throw new Error('Active interval cannot begin');
+      return { ...value, activeInterval: true };
+    });
+  }
+  settleActiveInterval(elapsed: number): void {
+    if (!Number.isFinite(elapsed) || elapsed < 0) throw new Error('Invalid elapsed time');
+    this.transitionTraversal(value => {
+      if (value.activeInterval !== true) throw new Error('No active interval to settle');
+      if (!Number.isFinite(value.activeTime + elapsed)) throw new Error('Elapsed time exceeds finite accounting range');
+      return { ...value, activeTime: value.activeTime + elapsed };
+    });
+  }
+  endActiveInterval(): void {
+    this.transitionTraversal(value => {
+      if (value.activeInterval !== true) throw new Error('No active interval to end');
+      return { ...value, activeInterval: false };
+    });
   }
   transitionTraversal(change: (state: TraversalState) => TraversalState): void {
     this.db.exec('BEGIN IMMEDIATE');
