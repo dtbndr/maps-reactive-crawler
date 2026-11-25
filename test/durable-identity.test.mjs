@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { validateGeometry, createTraversal, admitNextCell, reserveSubmission, observeKnownId, applyDiscoveryResult } from '../dist/index.js';
+import { completeDetailWork } from '../dist/traversal.js';
 import { DurableState } from '../dist/durable-state.js';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -17,6 +18,18 @@ function discovered(candidates) {
   state = observeKnownId(state, key, 'raw-results', 0);
   return { state: applyDiscoveryResult(state, key, { status: 'success', candidates }), key, attemptId };
 }
+
+test('verified detail completion without an origin blocker preserves untagged discovery gaps', () => {
+  const { state: discoveredState, key } = discovered([{ id: 'one', verifiedCanonicalKey: 'place:one' }]);
+  const work = discoveredState.detailWork[0];
+  const state = {
+    ...discoveredState,
+    detailWork: [{ ...work, status: 'dispatched', attempts: [{ id: `${work.id}:attempt:1`, status: 'dispatched', knownId: 'detail-id' }] }],
+    gaps: [{ cellKey: key, cause: 'uncertain', scope: 'global', status: 'unresolved' }],
+  };
+  const completed = completeDetailWork(state, work.id, 'detail-id');
+  assert.deepEqual(completed.gaps, state.gaps);
+});
 
 test('discovery preserves each occurrence, explicit verified identity, and expands duplicate-only results', () => {
   const {state,key,attemptId} = discovered([
@@ -40,7 +53,7 @@ test('discovery preserves each occurrence, explicit verified identity, and expan
 });
 
 test('applying results migrates legacy observations to deterministic detail fanout without mutating input', () => {
-  const { state: current, key } = discovered([{ id: 'next' }]);
+  const { state: current } = discovered([{ id: 'next' }]);
   const prior = structuredClone(current);
   const legacy = { ...current, detailWork: undefined, candidates: [
     { ...current.candidates[0], observationId: 'legacy:1', attemptId: current.attempts[0].id, verifiedCanonicalKey: 'place:legacy' },

@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { validateGeometry, createTraversal, admitNextCell, reserveSubmission, observeKnownId, applyDiscoveryResult } from '../dist/index.js';
-import { reserveDetailSubmission, dispatchDetailSubmission, recordDetailId, completeDetailWork } from '../dist/traversal.js';
+import { reserveDetailSubmission, dispatchDetailSubmission, recordDetailId, completeDetailWork, markDetailUncertain } from '../dist/traversal.js';
 import { executeDurableDetail, executeDurableDiscovery, cancelDurableDiscovery, resolveDurableRecoveryDebit } from '../dist/durable-discovery.js';
 import { DurableState } from '../dist/durable-state.js';
 import { mkdtempSync, rmSync, readFileSync, writeFileSync } from 'node:fs';
@@ -63,21 +63,56 @@ test('detail executor enforces active-time cap before reserving and accounts cal
   } finally { d.close(); rmSync(dir, { recursive: true, force: true }); }
 });
 
-test('detail retry uses one timed execution interval for classified observation failures', () => {
+test('reopened detail retry completes after classified observation failure and resolves its origin gap', () => {
   const { dir, path } = temp(); const d = DurableState.open(path);
   try {
-    const base = discovered(); d.writeTraversal(base);
-    let sends = 0; const observedIds = [];
-    const result = executeDurableDetail(d, base.detailWork[0].id, () => { sends++; return { id: 'retry-id' }; }, id => {
-      observedIds.push(id); if (observedIds.length === 1) throw new Error('transient'); return { elapsed: 0 };
-    }, { monotonicNow: () => 0 }, { observationCeiling: 1, knownSafeObservationError: () => true });
-    assert.equal(sends, 1);
-    assert.deepEqual(observedIds, ['retry-id', 'retry-id']);
-    assert.equal(result.detailWork[0].status, 'completed');
-    assert.equal(result.detailWork[0].attempts.at(-1).knownId, 'retry-id');
-    assert.equal(result.detailWork[0].attempts.at(-1).observationRetryOrdinal, 1);
-    assert.equal(result.detailWork[0].attempts.at(-1).observationRetryCeiling, 1);
-    assert.equal(result.detailWork[0].attempts.at(-1).observationRetryPendingDelayMs, undefined);
+    const base = discovered(); const workId = base.detailWork[0].id; d.writeTraversal(base);
+    let sends = 0, polls = 0;
+    assert.throws(() => executeDurableDetail(d, workId, () => { sends++; return { id: 'detail-a' }; }, () => { polls++; throw Error('classified'); }, { monotonicNow: () => 0 }, { observationCeiling: 2, knownSafeObservationError: () => true, retryBaseDelayMs: 7, wait: ms => { assert.equal(ms, 7); throw Error('stop after persisted authorization'); } }), /stop after persisted authorization/);
+    assert.equal(sends, 1); assert.equal(polls, 1);
+    const failed = d.readTraversal();
+    // Add a real discovery-origin uncertainty through its store transition; the
+    // detail interruption below must not resolve this independent blocker.
+    d.transitionTraversal(state => ({ ...state, gaps: [...state.gaps, { cellKey: '0,0', cause: 'uncertain', scope: 'global', status: 'unresolved' }] }));
+    assert.equal(d.readTraversal().gaps.length, 2);
+    assert.deepEqual(failed.detailGaps.map(g => g.status), ['unresolved']);
+    assert.equal(failed.submissions, 2); assert.equal(failed.activeTime, 0);
+    d.close();
+    const reopened = DurableState.open(path);
+    const result = executeDurableDetail(reopened, workId, () => { sends++; throw Error('must not resend'); }, id => { polls++; assert.equal(id, 'detail-a'); return { elapsed: 0 }; }, { monotonicNow: () => 0 });
+    assert.equal(sends, 1); assert.equal(polls, 2);
+    assert.deepEqual(result.gaps, [
+      { id: `detail-origin:${workId}`, cellKey: '0,0', cause: 'uncertain', scope: 'global', status: 'resolved' },
+      { cellKey: '0,0', cause: 'uncertain', scope: 'global', status: 'unresolved' }
+    ]);
+    assert.deepEqual(result.detailGaps.map(g => g.status), ['resolved']);
+    assert.equal(result.gaps.some(g => g.cause === 'uncertain' && g.status === 'unresolved'), true);
+    assert.throws(() => executeDurableDiscovery(reopened, () => { throw Error('must remain globally blocked'); }, () => ({ elapsed: 0, result: { status: 'empty' } })), /uncertainty/i);
+    assert.deepEqual(result.detailOriginBlockers.map(b => b.status), ['resolved']);
+    assert.equal(result.submissions, 2); assert.equal(result.activeTime, 0);
+    reopened.close();
+  } finally { try { d.close(); } catch {} rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('reopened known-ID retry completes A then executes discovery-created B without resending A', () => {
+  const { dir, path } = temp(); let d = DurableState.open(path);
+  try {
+    const base = discovered(); const [a, b] = base.detailWork; d.writeTraversal(base);
+    const callbacks = [];
+    assert.throws(() => executeDurableDetail(d, a.id, () => { callbacks.push('send:A'); return { id: 'detail-a' }; }, id => {
+      callbacks.push(`observe:${id}`); throw new Error('transient');
+    }, { monotonicNow: () => 0 }, { observationCeiling: 1, knownSafeObservationError: () => true, retryBaseDelayMs: 7, wait: ms => { assert.equal(ms, 7); throw Error('persisted retry authorization'); } }), /persisted retry authorization/);
+    assert.deepEqual(callbacks, ['send:A', 'observe:detail-a']);
+    d.close(); d = DurableState.open(path);
+    executeDurableDetail(d, a.id, () => { callbacks.push('send:A-again'); throw Error('must not resend A'); }, id => { callbacks.push(`observe:${id}`); assert.equal(id, 'detail-a'); return { elapsed: 0 }; }, { monotonicNow: () => 0 });
+    const result = executeDurableDetail(d, b.id, () => { callbacks.push('send:B'); return { id: 'detail-b' }; }, id => { callbacks.push(`observe:${id}`); assert.equal(id, 'detail-b'); return { elapsed: 0 }; }, { monotonicNow: () => 0 });
+    assert.deepEqual(callbacks, ['send:A', 'observe:detail-a', 'observe:detail-a', 'send:B', 'observe:detail-b']);
+    assert.deepEqual(result.detailWork.map(work => work.status), ['completed', 'completed']);
+    assert.deepEqual(result.detailWork.map(work => work.attempts.at(-1).knownId), ['detail-a', 'detail-b']);
+    assert.deepEqual(result.detailGaps.map(gap => gap.status), ['resolved']);
+    assert.equal(result.submissions, 3);
+    assert.equal(result.activeTime, 0);
+    assert.deepEqual(result.gaps, [{ id: `detail-origin:${a.id}`, cellKey: '0,0', cause: 'uncertain', scope: 'global', status: 'resolved' }]);
   } finally { d.close(); rmSync(dir, { recursive: true, force: true }); }
 });
 
@@ -340,6 +375,38 @@ test('fresh-process detail retry wait crash resumes stored delay and charges wai
     assert.equal(after.recoveryPending, false);
     assert.equal(after.detailWork[0].attempts[0].observationRetryPendingDelayMs, undefined);
   } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('origin provenance rejects missing blockers and redirected blockers in raw SQLite and migration preserves corrupt payload', () => {
+  for (const corruption of ['missing', 'redirected', 'redirected-and-removed-origin']) {
+    const { dir, path } = temp(); const d = DurableState.open(path);
+    try {
+      let state = discovered();
+      const workId = state.detailWork[0].id;
+      state = reserveDetailSubmission(state, workId); state = dispatchDetailSubmission(state, workId); state = recordDetailId(state, workId, 'known'); state = markDetailUncertain(state, workId);
+      state = { ...state, gaps: [
+        { id: `detail-origin:${workId}`, cellKey: '0,0', cause: 'uncertain', scope: 'global', status: 'unresolved' },
+        { id: 'other-genuine-gap', cellKey: '0,0', cause: 'uncertain', scope: 'global', status: 'unresolved' }
+      , ...state.gaps.slice(1)], detailOriginBlockers: state.detailOriginBlockers };
+      d.writeTraversal(state); d.close();
+      const raw = new DatabaseSync(path);
+      const payload = JSON.parse(raw.prepare('SELECT payload FROM traversal WHERE id=1').get().payload);
+      if (corruption === 'missing') payload.detailOriginBlockers = [];
+      else {
+        payload.detailOriginBlockers[0].gapId = 'other-genuine-gap';
+        if (corruption === 'redirected-and-removed-origin') payload.gaps = payload.gaps.filter(gap => gap.id !== `detail-origin:${workId}`);
+      }
+      delete payload.timeUnit;
+      const bad = JSON.stringify(payload); raw.prepare('UPDATE traversal SET payload=? WHERE id=1').run(bad); raw.close();
+      assert.throws(() => DurableState.open(path), /Corrupt traversal checkpoint/);
+      const migrationDb = new DatabaseSync(path);
+      const migration = Object.create(DurableState.prototype);
+      migration.db = migrationDb;
+      assert.throws(() => migration.migrateDurableTimeUnits(1, 100, 'test'), /Corrupt traversal checkpoint/);
+      assert.equal(migrationDb.prepare('SELECT payload FROM traversal WHERE id=1').get().payload, bad);
+      migrationDb.close();
+    } finally { try { d.close(); } catch {} rmSync(dir, { recursive: true, force: true }); }
+  }
 });
 
 test('detail retry authorization without its persisted delay is rejected before callbacks', () => {

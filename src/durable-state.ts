@@ -75,6 +75,25 @@ function validateTraversal(value: unknown): asserts value is TraversalState {
       if (work.attempts.slice(0, -1).some((attempt: any) => attempt.status === 'reserved' || attempt.status === 'dispatched') || (work.status === 'reserved' && last !== 'reserved') || (work.status === 'dispatched' && last !== 'dispatched') || (work.status === 'uncertain' && last !== 'uncertain') || (work.status === 'completed' && last !== 'completed') || (work.status === 'skipped' && last !== 'skipped')) throw new Error('Corrupt traversal checkpoint');
     }
   }
+  const originBlockers = s.detailOriginBlockers;
+  const hasTaggedOriginGap = s.gaps.some((gap: any) => typeof gap?.id === 'string' && gap.id.startsWith('detail-origin:'));
+  if (originBlockers === null || (originBlockers === undefined && hasTaggedOriginGap)) throw new Error('Corrupt traversal checkpoint');
+  const effectiveOriginBlockers = originBlockers ?? [];
+  if (!Array.isArray(effectiveOriginBlockers) || !effectiveOriginBlockers.every((blocker: any) => blocker && typeof blocker.workId === 'string' && typeof blocker.cellKey === 'string' && ['unresolved', 'resolved'].includes(blocker.status))) throw new Error('Corrupt traversal checkpoint');
+  const originKeys = new Set<string>();
+  const originWorkIds = new Set<string>();
+  const originGapIds = new Set<string>();
+  for (const blocker of effectiveOriginBlockers) {
+    const key = `${blocker.workId}\\0${blocker.gapId}`;
+    const work = s.detailWork?.find((item: any) => item.id === blocker.workId);
+    const cellGaps = s.gaps.filter((gap: any) => gap.cellKey === blocker.cellKey && gap.cause === 'uncertain' && gap.scope === 'global');
+    const resolved = blocker.status === 'resolved';
+    if (blocker === null || blocker.gapId !== `detail-origin:${blocker.workId}` || originKeys.has(key) || originWorkIds.has(blocker.workId) || originGapIds.has(blocker.gapId) || cellGaps.filter((gap: any) => gap.id === blocker.gapId).length !== 1 || cellGaps.find((gap: any) => gap.id === blocker.gapId)?.status !== (resolved ? 'resolved' : 'unresolved') || !work || !['uncertain', 'completed'].includes(work.status) || !work.observationIds.some((id: string) => s.candidates.some((candidate: any) => candidate.observationId === id && candidate.sourceCell === blocker.cellKey)) || !s.detailGaps?.some((gap: any) => gap.workId === blocker.workId && gap.status === (resolved ? 'resolved' : 'unresolved'))) throw new Error('Corrupt traversal checkpoint');
+    originKeys.add(key);
+    originWorkIds.add(blocker.workId);
+    originGapIds.add(blocker.gapId);
+  }
+  if (s.gaps.some((gap: any) => Object.hasOwn(gap, 'detailOriginWorkId')) || s.gaps.some((gap: any) => typeof gap?.id === 'string' && gap.id.startsWith('detail-origin:') && effectiveOriginBlockers.filter((blocker: any) => blocker?.gapId === gap.id && blocker.cellKey === gap.cellKey && blocker.status === gap.status).length !== 1)) throw new Error('Corrupt traversal checkpoint');
   if (s.detailGaps !== undefined) {
     const detailGapWorkIds = new Set<string>();
     if (!Array.isArray(s.detailGaps) || !s.detailGaps.every((gap: any) => {

@@ -8,7 +8,7 @@ export type TraversalReport = { stopReason: 'cancelled' | 'paused' | 'active_tim
 export type DetailAttempt = { id: string; status: 'reserved' | 'dispatched' | 'uncertain' | 'completed' | 'skipped'; knownId?: string; observationRetryOrdinal?: number; observationRetryCeiling?: number; observationRetryPendingDelayMs?: number; observationRetryDisposition?: 'initial' | 'authorized' | 'closed' };
 export type DetailWork = { id: string; status: 'pending' | 'reserved' | 'dispatched' | 'uncertain' | 'completed' | 'skipped'; identity: string; observationIds: string[]; attempts: DetailAttempt[] };
 export type DetailGap = { workId: string; identity: string; observationIds: string[]; status: 'unresolved' | 'resolved' | 'skipped' };
-export type TraversalState = { detailWork?: DetailWork[]; detailGaps?: DetailGap[]; timeUnit: 'milliseconds'; geometry: Geometry; limits: TraversalLimits; queue: string[]; admitted: string[]; cells: Record<string, { outcome: CellOutcome }>; candidates: CandidateObservation[]; gaps: { cellKey: string; cause: 'failed' | 'unrecognized' | 'uncertain'; scope?: 'isolated' | 'global'; status?: 'unresolved' | 'resolved' | 'skipped' }[]; paused: boolean; submissions: number; activeTime: number; blocked: string[]; attempts: Attempt[]; cancelled: boolean; activeInterval?: boolean; recoveryPending?: boolean; cleanPauseEvidence?: { evidence: string }; recoveryDebitEvidence?: { elapsed: number; evidence: string }; resendCeiling?: number; resendApprovalsConsumed?: number };
+export type TraversalState = { detailWork?: DetailWork[]; detailGaps?: DetailGap[]; detailOriginBlockers?: { workId: string; gapId: string; cellKey: string; status: 'unresolved' | 'resolved' }[]; timeUnit: 'milliseconds'; geometry: Geometry; limits: TraversalLimits; queue: string[]; admitted: string[]; cells: Record<string, { outcome: CellOutcome }>; candidates: CandidateObservation[]; gaps: { cellKey: string; cause: 'failed' | 'unrecognized' | 'uncertain'; scope?: 'isolated' | 'global'; status?: 'unresolved' | 'resolved' | 'skipped'; id?: string }[]; paused: boolean; submissions: number; activeTime: number; blocked: string[]; attempts: Attempt[]; cancelled: boolean; activeInterval?: boolean; recoveryPending?: boolean; cleanPauseEvidence?: { evidence: string }; recoveryDebitEvidence?: { elapsed: number; evidence: string }; resendCeiling?: number; resendApprovalsConsumed?: number };
 export type DiscoveryResult = { status: 'success'; candidates: { id: string; coordinate?: { latitude: number; longitude: number } | null; verifiedCanonicalKey?: string }[] } | { status: 'empty' } | { status: 'failed'; cause?: string; scope: 'isolated' | 'global' } | { status: 'unrecognized' };
 
 export function createTraversal(geometry: Geometry, limits: TraversalLimits): TraversalState {
@@ -53,10 +53,13 @@ export function markDetailUncertain(state: TraversalState, workId: string): Trav
   const gaps = state.detailGaps ?? [];
   const existing = gaps.some(gap => gap.workId === workId && gap.status === 'unresolved');
   const globalGap = work.observationIds.map(id => state.candidates.find(candidate => candidate.observationId === id)?.sourceCell).find((key): key is string => Boolean(key));
-  const traversalGaps = globalGap && !state.gaps.some(gap => gap.cellKey === globalGap && gap.cause === 'uncertain' && gap.scope === 'global' && gap.status !== 'resolved' && gap.status !== 'skipped')
-    ? [...state.gaps, { cellKey: globalGap, cause: 'uncertain' as const, scope: 'global' as const, status: 'unresolved' as const }]
+  const origin = state.detailOriginBlockers?.find(blocker => blocker.workId === workId);
+  const gapId = origin?.gapId ?? `detail-origin:${workId}`;
+  const traversalGaps = globalGap && !origin
+    ? [...state.gaps, { id: gapId, cellKey: globalGap, cause: 'uncertain' as const, scope: 'global' as const, status: 'unresolved' as const }]
     : state.gaps;
-  return { ...state, gaps: traversalGaps, detailWork, detailGaps: existing ? gaps : [...gaps, { workId, identity: work.identity, observationIds: [...work.observationIds], status: 'unresolved' }] };
+  const detailOriginBlockers = globalGap && !origin ? [...(state.detailOriginBlockers ?? []), { workId, gapId, cellKey: globalGap, status: 'unresolved' as const }] : state.detailOriginBlockers ?? [];
+  return { ...state, detailOriginBlockers, gaps: traversalGaps, detailWork, detailGaps: existing ? gaps : [...gaps, { workId, identity: work.identity, observationIds: [...work.observationIds], status: 'unresolved' }] };
 }
 export function authorizeDetailObservationRetry(state: TraversalState, workId: string, ceiling: number, delayMs: number): TraversalState {
   if (!Number.isSafeInteger(ceiling) || ceiling < 0 || !Number.isSafeInteger(delayMs) || delayMs < 0) throw new Error('Invalid finite detail retry policy');
@@ -76,7 +79,10 @@ export function completeDetailWork(state: TraversalState, workId: string, id: st
   const detailGaps = state.detailGaps ?? [];
   const matching = detailGaps.filter(gap => gap.identity === work.identity && gap.status === 'unresolved');
   const reconciled = work.identity.startsWith('verified:') && work.identity.length > 'verified:'.length && work.observationIds.every(observationId => state.candidates.some(candidate => candidate.observationId === observationId && candidate.verifiedCanonicalKey === work.identity.slice('verified:'.length)));
-  return { ...state, detailWork, detailGaps: detailGaps.map(gap => matching.includes(gap) && reconciled ? { ...gap, status: 'resolved' as const } : gap) };
+  const detailOriginBlockers = reconciled ? (state.detailOriginBlockers ?? []).map(blocker => blocker.workId === workId && blocker.status === 'unresolved' ? { ...blocker, status: 'resolved' as const } : blocker) : state.detailOriginBlockers;
+  const originBlocker = reconciled ? state.detailOriginBlockers?.find(blocker => blocker.workId === workId && blocker.status === 'unresolved') : undefined;
+  const gaps = originBlocker ? state.gaps.map(gap => gap.id === originBlocker.gapId ? { ...gap, status: 'resolved' as const } : gap) : state.gaps;
+  return { ...state, gaps, detailOriginBlockers, detailWork, detailGaps: detailGaps.map(gap => matching.includes(gap) && reconciled ? { ...gap, status: 'resolved' as const } : gap) };
 }
 export function dispatchDetailSubmission(state: TraversalState, workId: string): TraversalState {
   if (state.recoveryPending) throw new Error('Recovery accounting is unresolved');
