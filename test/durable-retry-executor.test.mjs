@@ -46,9 +46,9 @@ test('fresh process resumes authorized retry and records fresh submission deltas
  } finally {rmSync(dir,{recursive:true,force:true})}
 });
 test('known-safe submission transient reserves a fresh durable slot and retries within ceiling',()=>{
- const dir=mkdtempSync(join(tmpdir(),'submission-retry-'));const db=DurableState.open(join(dir,'state.db'));let calls=0;const waits=[];
+ const dir=mkdtempSync(join(tmpdir(),'submission-retry-'));const db=DurableState.open(join(dir,'state.db'));let calls=0,clock=0;const waits=[];
  try {db.writeTraversal(createTraversal(geo,{cells:1,submissions:2,activeTime:10}));
- executeDurableDiscovery(db,()=>{calls++;if(calls===1)throw Object.assign(Error('transient'),{safe:true});return{id:'synthetic'}},()=>({result:{status:'empty'},elapsed:1}),'isolated',{submissionCeiling:1,knownSafeSubmissionError:e=>e.safe,retryBaseDelayMs:10,retryMaxDelayMs:15,wait:ms=>waits.push(ms)});
+ executeDurableDiscovery(db,()=>{calls++;if(calls===1)throw Object.assign(Error('transient'),{safe:true});return{id:'synthetic'}},()=>({result:{status:'empty'},elapsed:1}),'isolated',{submissionCeiling:1,knownSafeSubmissionError:e=>e.safe,retryBaseDelayMs:10,retryMaxDelayMs:15,wait:ms=>waits.push(ms)},{monotonicNow:()=>clock++});
  assert.deepEqual(waits,[10]);assert.equal(calls,2);assert.equal(db.readTraversal().submissions,2);assert.deepEqual(db.readTraversal().attempts.map(a=>a.submissionRetryOrdinal),[0,1]);
  } finally {db.close();rmSync(dir,{recursive:true,force:true})}
 });

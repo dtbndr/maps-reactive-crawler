@@ -327,16 +327,16 @@ test('fresh-process detail retry wait crash resumes stored delay and charges wai
     const attempt = before.detailWork[0].attempts[0];
     assert.equal(attempt.status, 'uncertain'); assert.equal(attempt.knownId, 'detail-known');
     assert.equal(attempt.observationRetryDisposition, 'authorized'); assert.equal(attempt.observationRetryPendingDelayMs, 7);
-    const recovery = `import * as fs from 'node:fs';import {DurableState} from ${JSON.stringify(durableUrl)};import {resolveDurableRecoveryDebit} from ${JSON.stringify(executorUrl)};import {executeDurableDetail} from ${JSON.stringify(executorUrl)};const d=DurableState.open(${JSON.stringify(path)});resolveDurableRecoveryDebit(d,1,'synthetic crash interval');const p=${JSON.stringify(ledgerPath)};let now=0;executeDurableDetail(d,${JSON.stringify(workId)},()=>{throw Error('must not send')},id=>{if(id!=='detail-known')throw Error('wrong ID');const l=JSON.parse(fs.readFileSync(p));l.observations.push(id);fs.writeFileSync(p,JSON.stringify(l));return{elapsed:2}},{monotonicNow:()=>now},{observationCeiling:9,knownSafeObservationError:()=>true,retryBaseDelayMs:99,wait:ms=>{if(ms!==7)throw Error('changed delay');now+=ms}});d.close();`;
+    const recovery = `import * as fs from 'node:fs';import {DurableState} from ${JSON.stringify(durableUrl)};import {resolveDurableRecoveryDebit} from ${JSON.stringify(executorUrl)};import {executeDurableDetail} from ${JSON.stringify(executorUrl)};const d=DurableState.open(${JSON.stringify(path)});resolveDurableRecoveryDebit(d,1,'synthetic crash interval');const p=${JSON.stringify(ledgerPath)};let now=0;try{executeDurableDetail(d,${JSON.stringify(workId)},()=>{throw Error('must not send')},id=>{if(id!=='detail-known')throw Error('wrong ID');const l=JSON.parse(fs.readFileSync(p));l.observations.push(id);fs.writeFileSync(p,JSON.stringify(l));throw Error('transient')},{monotonicNow:()=>now},{observationCeiling:1,knownSafeObservationError:()=>true,retryBaseDelayMs:7,wait:ms=>{const l=JSON.parse(fs.readFileSync(p));l.waits.push(ms);fs.writeFileSync(p,JSON.stringify(l));now+=ms}})}catch(e){if(!/ceiling exhausted/i.test(e.message))throw e}d.close();`;
     const resumed = spawnSync(process.execPath, ['--input-type=module', '-e', recovery], { encoding: 'utf8' });
     assert.equal(resumed.status, 0, resumed.stderr);
     const afterDb = DurableState.open(path); const after = afterDb.readTraversal(); afterDb.close();
-    assert.deepEqual(JSON.parse(readFileSync(ledgerPath, 'utf8')), { sends: 1, observations: ['detail-known', 'detail-known'], waits: [7] });
+    assert.deepEqual(JSON.parse(readFileSync(ledgerPath, 'utf8')), { sends: 1, observations: ['detail-known', 'detail-known'], waits: [7, 7] });
     assert.equal(after.submissions, before.submissions); assert.equal(after.activeTime, before.activeTime + 8);
-    assert.equal(after.detailWork[0].status, 'completed');
+    assert.equal(after.detailWork[0].status, 'uncertain');
     assert.equal(after.detailWork[0].attempts[0].observationRetryOrdinal, 1);
     assert.equal(after.detailWork[0].attempts[0].observationRetryCeiling, 1);
-    assert.equal(after.detailWork[0].attempts[0].observationRetryDisposition, 'consumed');
+    assert.equal(after.detailWork[0].attempts[0].observationRetryDisposition, 'closed');
     assert.equal(after.recoveryPending, false);
     assert.equal(after.detailWork[0].attempts[0].observationRetryPendingDelayMs, undefined);
   } finally { rmSync(dir, { recursive: true, force: true }); }
