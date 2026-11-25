@@ -14,7 +14,7 @@ function retryDelay(policy: DurableRetryPolicy | undefined, ordinal: number): nu
 function waitForRetry(policy: DurableRetryPolicy | undefined, delay: number): void {
   if (delay > 0) (policy?.wait ?? (milliseconds => { const end = Date.now() + milliseconds; while (Date.now() < end) {} }))(delay);
 }
-export type DurableDiscoveryBoundary = 'dequeued' | 'retry-authorized' | 'reserved' | 'dispatched' | 'sent' | 'id-persisted' | 'observing' | 'observed' | 'committed';
+export type DurableDiscoveryBoundary = 'dequeued' | 'retry-authorized' | 'resend-approved' | 'reserved' | 'dispatched' | 'sent' | 'id-persisted' | 'observing' | 'observed' | 'committed';
 let boundaryHook: ((boundary: DurableDiscoveryBoundary) => void) | undefined;
 /** Test-only crash injection seam; unset during normal crawler execution. */
 export function setDurableDiscoveryBoundaryHookForTest(hook: ((boundary: DurableDiscoveryBoundary) => void) | undefined): void { boundaryHook = hook; }
@@ -180,6 +180,7 @@ export function approveDurableResend(state: DurableState, key: string, rationale
     if (value.recoveryPending) throw new Error('Recovery accounting is unresolved');
     return authorizeResend(value, key, rationale, ceiling);
   });
+  boundaryHook?.('resend-approved');
   return executeDurableDiscoveryImpl(state, send, observe, 'isolated', undefined, state.readTraversal().attempts.at(-1)!.id, key);
 }
 export function recordDurableCleanPause(state: DurableState, evidence: string): TraversalState {
