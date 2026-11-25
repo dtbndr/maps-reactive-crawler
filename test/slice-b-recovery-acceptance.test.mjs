@@ -47,6 +47,8 @@ test('Slice C: discovery fans out A/B/C; detail recovery refuses unknown B and b
     assert.deepEqual(JSON.parse(readFileSync(ledger)), firstLedger);
     assert.deepEqual(firstLedger, ['work:0,0', 'detail:verified:place:A', 'detail:verified:place:B']);
     assert.deepEqual(snapshot.detailWork.map(x => x.status), ['completed', 'uncertain', 'pending']);
+    assert.equal(snapshot.attempts[0].knownId, 'discovery-id');
+    assert.deepEqual(snapshot.detailWork.map(item => item.attempts.map(attempt => attempt.knownId ?? null)), [['detail-A'], [null], []]);
     assert.equal(snapshot.submissions, 3); assert.equal(snapshot.activeTime, 1); assert.equal(snapshot.recoveryPending, false);
     assert.deepEqual(snapshot.detailWork.map(item => [item.id, item.attempts.map(attempt => attempt.id)]), [
       ['detail:verified:place:A', ['detail:verified:place:A:attempt:1']],
