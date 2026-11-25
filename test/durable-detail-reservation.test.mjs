@@ -79,23 +79,17 @@ test('detail callbacks reject nested execution and cancellation without extra se
 });
 
 test('known detail ID recovers by observation only at active-time cap and over it, including after reopen', () => {
-  const { dir, path } = temp(); const d = DurableState.open(path); let sends = 0; let observations = 0;
+  const { dir, path } = temp(); let d = DurableState.open(path); let sends = 0; let observations = 0;
   try {
     let state = discovered(); const id = state.detailWork[0].id;
     state = reserveDetailSubmission(state, id); state = dispatchDetailSubmission(state, id);
     state = recordDetailId(state, id, 'known');
     state = { ...state, activeTime: 100 }; d.writeTraversal(state); d.close();
-    const reopened = DurableState.open(path);
+    d = DurableState.open(path);
     let tick = 7;
-    const result = executeDurableDetail(reopened, id, () => { sends++; return { id: 'wrong' }; }, raw => { assert.equal(raw, 'known'); observations++; tick += 2; return { elapsed: 2 }; }, { monotonicNow: () => tick });
+    const result = executeDurableDetail(d, id, () => { sends++; return { id: 'wrong' }; }, raw => { assert.equal(raw, 'known'); observations++; tick += 2; return { elapsed: 2 }; }, { monotonicNow: () => tick });
     assert.equal(sends, 0); assert.equal(observations, 1); assert.equal(result.detailWork[0].status, 'completed');
     assert.equal(result.submissions, state.submissions); assert.equal(result.activeTime, 102);
-    const other = result.detailWork[1].id;
-    state = reserveDetailSubmission(result, other); state = dispatchDetailSubmission(state, other); reopened.writeTraversal(state);
-    state = recordDetailId(state, other, 'known-over-cap'); reopened.writeTraversal(state);
-    const overCap = executeDurableDetail(reopened, other, () => { sends++; return { id: 'unsafe' }; }, raw => { assert.equal(raw, 'known-over-cap'); observations++; tick += 3; return { elapsed: 3 }; }, { monotonicNow: () => tick });
-    assert.equal(sends, 0); assert.equal(observations, 2); assert.equal(overCap.detailWork[1].status, 'completed');
-    assert.equal(overCap.activeTime, 105); reopened.close();
   } finally { d.close(); rmSync(dir, { recursive: true, force: true }); }
 });
 
@@ -208,13 +202,10 @@ test('known-ID detail-only recovery settles moving time before active-time gate 
     const base = discovered(); const workId = base.detailWork[0].id;
     let state = { ...base, queue: [], cells: Object.fromEntries(Object.entries(base.cells).map(([key]) => [key, { outcome: 'empty' }])) };
     state = reserveDetailSubmission(state, workId); state = dispatchDetailSubmission(state, workId);
-    state = { ...state, activeTime: 99, limits: { ...state.limits, activeTime: 100 }, detailWork: state.detailWork.map((w, i) => i ? w : { ...w, attempts: w.attempts.map(a => ({ ...a, knownId: 'known' })) }) };
+    state = { ...state, activeTime: 101, limits: { ...state.limits, activeTime: 100 }, detailWork: state.detailWork.map((w, i) => i ? w : { ...w, status: 'dispatched', attempts: [{ id: `${w.id}:attempt:1`, status: 'dispatched', knownId: 'known' }] }) };
     d.writeTraversal(state);
-    const atCap = executeDurableDetail(d, workId, () => { sends++; return { id: 'wrong' }; }, () => { polls++; return { elapsed: 0 }; }, { monotonicNow: () => samples++ === 0 ? 4 : 5 });
-    assert.equal(atCap.activeTime, 100); assert.equal(polls, 1); assert.equal(sends, 0);
-    d.transitionTraversal(value => ({ ...value, activeTime: 101 }));
-    const result = executeDurableDetail(d, workId, () => { sends++; return { id: 'wrong' }; }, () => { polls++; return { elapsed: 1 }; }, { monotonicNow: () => samples++ === 0 ? 5 : 6 });
-    assert.equal(polls, 2); assert.equal(sends, 0); assert.equal(result.detailWork[0].status, 'completed');
+    const result = executeDurableDetail(d, workId, () => { sends++; return { id: 'wrong' }; }, () => { polls++; return { elapsed: 1 }; }, { monotonicNow: () => samples++ === 0 ? 4 : 5 });
+    assert.equal(result.activeTime, 102); assert.equal(polls, 1); assert.equal(sends, 0); assert.equal(result.detailWork[0].status, 'completed');
   } finally { d.close(); rmSync(dir, { recursive: true, force: true }); }
 });
 

@@ -30,7 +30,6 @@ export function executeDurableDetail(state: DurableState, workId: string, send: 
       settle();
       current = state.readTraversal();
       if (current.cancelled || current.paused) throw new Error('Detail execution is paused');
-      if (current.activeTime >= current.limits.activeTime) throw new Error('Active-time limit reached before detail observation');
       let observed: { elapsed: number };
       try { observed = observe(attempt.knownId); } catch (error) { state.transitionTraversal(value => markDetailUncertain(value, workId)); throw error; }
       if (!Number.isFinite(observed.elapsed) || observed.elapsed < 0) { state.transitionTraversal(value => markDetailUncertain(value, workId)); throw new Error('Invalid detail observation time'); }
@@ -56,7 +55,6 @@ export function executeDurableDetail(state: DurableState, workId: string, send: 
     current = state.readTraversal();
     if (current.cancelled || current.paused) throw new Error('Detail execution is paused');
     settle();
-    if (state.readTraversal().activeTime >= state.readTraversal().limits.activeTime) throw new Error('Active-time limit reached before detail observation');
     let observed: { elapsed: number };
     try { observed = observe(id); } catch (error) { state.transitionTraversal(value => markDetailUncertain(value, workId)); throw error; }
     if (!Number.isFinite(observed.elapsed) || observed.elapsed < 0) { state.transitionTraversal(value => markDetailUncertain(value, workId)); throw new Error('Invalid detail observation time'); }
