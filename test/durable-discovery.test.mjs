@@ -629,6 +629,70 @@ test('durable executor commits dispatch, known ID and discovery application', ()
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
+test('fresh-process known-ID recovery at exhausted active time commits detail fan-out and keeps neighbors blocked until cap increase', async () => {
+  const { dir, path } = temp();
+  try {
+    const ledgerPath = join(dir, 'recovery-send-ledger.json');
+    const tracePath = join(dir, 'shared-trace.json');
+    writeFileSync(ledgerPath, JSON.stringify([]));
+    writeFileSync(tracePath, JSON.stringify([]));
+    let durable = DurableState.open(path);
+    durable.writeTraversal(createTraversal(geometry, { cells: 5, submissions: 5, activeTime: 5 }));
+    durable.close();
+    const durableUrl = new URL('../dist/durable-state.js', import.meta.url).href;
+    const executorUrl = new URL('../dist/durable-discovery.js', import.meta.url).href;
+    const crash = `import * as fs from 'node:fs'; import {DurableState} from ${JSON.stringify(durableUrl)}; import {executeDurableDiscovery,setDurableDiscoveryBoundaryHookForTest} from ${JSON.stringify(executorUrl)}; const d=DurableState.open(${JSON.stringify(path)}); const p=${JSON.stringify(ledgerPath)}; const t=${JSON.stringify(tracePath)}; const append=e=>{const l=JSON.parse(fs.readFileSync(p));l.push(e);fs.writeFileSync(p,JSON.stringify(l))}; setDurableDiscoveryBoundaryHookForTest(x=>{if(x==='observing') process.exit(42)}); executeDurableDiscovery(d,w=>{append(['crash-submit',w]); return {id:'known-place'}},id=>{append(['crash-observe',id]);return {elapsed:0,result:{status:'success',candidates:[{id:'raw-place',verifiedCanonicalKey:'place:fixture',coordinate:{latitude:0,longitude:0}}]}}},'isolated',undefined,{monotonicNow:()=>0});`;
+    const crashed = spawnSync(process.execPath, ['--input-type=module', '-e', crash], { encoding: 'utf8' });
+    assert.equal(crashed.status, 42, crashed.stderr);
+    durable = DurableState.open(path);
+    assert.equal(durable.readTraversal().activeTime, 0);
+    assert.equal(durable.readTraversal().recoveryPending, true);
+    assert.deepEqual(durable.readTraversal().attempts.map(a => [a.id, a.knownId, a.status]), [['work:0,0:attempt:1', 'known-place', 'observing']]);
+    durable.close();
+    const recovery = `import * as fs from 'node:fs'; import {DurableState} from ${JSON.stringify(durableUrl)}; import {executeDurableDiscovery,resolveDurableRecoveryDebit} from ${JSON.stringify(executorUrl)}; const d=DurableState.open(${JSON.stringify(path)}); const p=${JSON.stringify(ledgerPath)}; const append=e=>{const l=JSON.parse(fs.readFileSync(p));l.push(e);fs.writeFileSync(p,JSON.stringify(l))}; resolveDurableRecoveryDebit(d,5,'bounded child interruption'); const s=executeDurableDiscovery(d,w=>{append(['recovery-submit',w]);throw Error('resent')},id=>{append(['recovery-observe',id]);if(id!=='known-place') throw Error('wrong ID'); return {elapsed:0,result:{status:'success',candidates:[{id:'raw-place',verifiedCanonicalKey:'place:fixture',coordinate:{latitude:0,longitude:0}}]}}},'isolated',undefined,{monotonicNow:()=>0}); const x=d.readTraversal(); if(s.activeTime!==5||s.limits.activeTime!==5||s.cells['0,0'].outcome!=='nonempty'||JSON.stringify(s.candidates)!==JSON.stringify([{id:'raw-place',verifiedCanonicalKey:'place:fixture',coordinate:{latitude:0,longitude:0},classification:'inside',sourceCell:'0,0',observationId:'work:0,0:attempt:1:observation:1',attemptId:'work:0,0:attempt:1',occurrence:1}])||JSON.stringify(s.detailWork.map(w=>[w.id,w.observationIds,w.status]))!==JSON.stringify([['detail:verified:place:fixture',['work:0,0:attempt:1:observation:1'],'pending']])||JSON.stringify(s.queue)!=='[]'||JSON.stringify(s.blocked)!==JSON.stringify(['0,1','0,-1','1,0','-1,0'])||s.submissions!==1||s.attempts.length!==1||s.attempts[0].knownId!=='known-place'||s.attempts[0].status!=='observed'||x.recoveryPending) throw Error('incorrect recovered state '+JSON.stringify(s)); d.close();`;
+    const recovered = spawnSync(process.execPath, ['--input-type=module', '-e', recovery], { encoding: 'utf8' });
+    assert.equal(recovered.status, 0, recovered.stderr);
+    assert.deepEqual(JSON.parse(readFileSync(ledgerPath, 'utf8')), [['crash-submit', 'work:0,0'], ['recovery-observe', 'known-place']]);
+    durable = DurableState.open(path);
+    const pending = durable.readTraversal();
+    assert.equal(pending.activeTime, pending.limits.activeTime);
+    assert.deepEqual(pending.detailWork.map(w => [w.id, w.observationIds, w.status]), [['detail:verified:place:fixture', ['work:0,0:attempt:1:observation:1'], 'pending']]);
+    assert.deepEqual(pending.blocked, ['0,1', '0,-1', '1,0', '-1,0']);
+    const { executeDurableDetail } = await import('../dist/durable-discovery.js');
+    const cappedBeforeDetail = durable.readTraversal();
+    assert.throws(() => executeDurableDetail(durable, 'detail:verified:place:fixture', workId => {
+      const ledger = JSON.parse(readFileSync(ledgerPath, 'utf8')); ledger.push(['detail-submit', workId]); writeFileSync(ledgerPath, JSON.stringify(ledger)); return { id: 'detail-job' };
+    }, id => {
+      const ledger = JSON.parse(readFileSync(ledgerPath, 'utf8')); ledger.push(['detail-observe', id]); writeFileSync(ledgerPath, JSON.stringify(ledger)); return { elapsed: 0 };
+    }, { monotonicNow: () => 0 }), /Active-time limit reached before detail reservation/i);
+    assert.equal(durable.readTraversal().submissions, cappedBeforeDetail.submissions);
+    assert.equal(durable.readTraversal().attempts.length, cappedBeforeDetail.attempts.length);
+    assert.deepEqual(JSON.parse(readFileSync(ledgerPath, 'utf8')), [['crash-submit', 'work:0,0'], ['recovery-observe', 'known-place']]);
+    durable.transitionTraversal(s => ({ ...s, limits: { ...s.limits, activeTime: 10 } }));
+    durable.close();
+    durable = DurableState.open(path);
+    const later = durable.readTraversal();
+    assert.equal(later.limits.activeTime, 10);
+    assert.equal(later.activeTime, 5);
+    assert.equal(later.detailWork[0].status, 'pending');
+    assert.deepEqual(later.blocked, ['0,1', '0,-1', '1,0', '-1,0']);
+    assert.deepEqual(later.queue, []);
+    const beforeCandidates = structuredClone(later.candidates);
+    const beforeAttempts = later.attempts.length;
+    executeDurableDetail(durable, 'detail:verified:place:fixture', workId => {
+      const ledger = JSON.parse(readFileSync(ledgerPath, 'utf8')); ledger.push(['detail-submit', workId]); writeFileSync(ledgerPath, JSON.stringify(ledger)); return { id: 'detail-job' };
+    }, id => { const ledger = JSON.parse(readFileSync(ledgerPath, 'utf8')); ledger.push(['detail-observe', id]); writeFileSync(ledgerPath, JSON.stringify(ledger)); assert.equal(id, 'detail-job'); return { elapsed: 0 }; }, { monotonicNow: () => 0 });
+    const detailed = durable.readTraversal();
+    assert.deepEqual(JSON.parse(readFileSync(ledgerPath, 'utf8')), [['crash-submit', 'work:0,0'], ['recovery-observe', 'known-place'], ['detail-submit', 'detail:verified:place:fixture'], ['detail-observe', 'detail-job']]);
+    assert.deepEqual(detailed.candidates, beforeCandidates);
+    assert.equal(detailed.attempts.length, beforeAttempts);
+    assert.equal(detailed.detailWork[0].status, 'completed');
+    assert.deepEqual(detailed.blocked, ['0,1', '0,-1', '1,0', '-1,0']);
+    assert.equal(detailed.submissions, 2);
+    durable.close();
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
 test('reopened database re-observes persisted known ID without resending or duplicating observations', () => {
   const { dir, path } = temp();
   try {
