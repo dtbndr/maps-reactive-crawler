@@ -15,7 +15,7 @@ Connect the tested offline traversal and durable recovery into a reproducible op
 ## Key decisions
 - Thin shared library and CLI — one operator contract avoids divergent execution paths.
 - Atomically bind fixture identity to each checkpoint — restart cannot silently switch synthetic evidence.
-- Read-only consistent status and export — inspection must not acquire a writer lease or modify recovery state.
+- Read-only consistent status and export — inspection must not acquire a writer lease or modify recovery state; the exclusive cooperating lock returns busy while a writer or publisher is active.
 - Serial durable execution and cooperative cancellation — preserve existing recovery and accounting without promising interruption of synchronous callbacks.
 - Report blocked frontier and all concurrent conditions independently — a cap edit does not promote blocked cells and a headline alone can mislead.
 
