@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { validateGeometry, createTraversal, admitNextCell, reserveSubmission, observeKnownId, applyDiscoveryResult } from '../dist/index.js';
 import { reserveDetailSubmission, dispatchDetailSubmission, recordDetailId, completeDetailWork } from '../dist/traversal.js';
-import { executeDurableDetail, cancelDurableDiscovery } from '../dist/durable-discovery.js';
+import { executeDurableDetail, executeDurableDiscovery, cancelDurableDiscovery } from '../dist/durable-discovery.js';
 import { DurableState } from '../dist/durable-state.js';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -203,16 +203,19 @@ test('detail-only execution accounts active time and recovered reservation is un
   } finally { d.close(); rmSync(dir, { recursive: true, force: true }); }
 });
 
-test('detail observation failure records linked unresolved gap and recovery never resends', () => {
+test('detail observation failure globally blocks detail and discovery sends but permits known-ID observation', () => {
   const { dir, path } = temp(); const d = DurableState.open(path); let sends = 0;
   try {
-    const base = discovered(); const workId = base.detailWork[0].id;
+    const base = discovered(); const workId = base.detailWork[0].id; const secondId = base.detailWork[1].id;
     const state = { ...base, queue: [], cells: Object.fromEntries(Object.entries(base.cells).map(([key]) => [key, { outcome: 'empty' }])) };
     d.writeTraversal(state);
     assert.throws(() => executeDurableDetail(d, workId, () => { sends++; return { id: 'known-id' }; }, () => { throw new Error('observation failed'); }, { monotonicNow: () => 0 }), /observation failed/);
     const uncertain = d.readTraversal();
     assert.equal(uncertain.detailWork[0].status, 'uncertain');
     assert.deepEqual(uncertain.detailGaps[0], { workId, identity: uncertain.detailWork[0].identity, observationIds: uncertain.detailWork[0].observationIds, status: 'unresolved' });
+    assert.throws(() => executeDurableDetail(d, secondId, () => { sends++; return { id: 'second-id' }; }, () => ({ elapsed: 0 }), { monotonicNow: () => 0 }), /global uncertainty/i);
+    assert.throws(() => executeDurableDiscovery(d, () => { sends++; return { id: 'discovery-id' }; }, () => ({ result: { status: 'empty' }, elapsed: 0 })), /global uncertainty/i);
+    assert.equal(sends, 1);
     const recovered = executeDurableDetail(d, workId, () => { sends++; return { id: 'duplicate' }; }, () => ({ elapsed: 0 }), { monotonicNow: () => 0 });
     assert.equal(recovered.detailWork[0].status, 'completed');
     assert.equal(sends, 1);

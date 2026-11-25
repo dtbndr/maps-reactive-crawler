@@ -15,7 +15,6 @@ export function executeDurableDetail(state: DurableState, workId: string, send: 
   return executeTimed(state, settle => {
     let current = state.readTraversal();
     if (current.recoveryPending || current.paused || current.cancelled) throw new Error('Detail execution is paused');
-    if (current.gaps.some(gap => gap.scope === 'global' && gap.status !== 'resolved' && gap.status !== 'skipped')) throw new Error('Global uncertainty blocks new detail work');
     let work = current.detailWork?.find(item => item.id === workId);
     if (!work) throw new Error('Unknown detail work');
     if (work.status === 'reserved') {
@@ -38,6 +37,7 @@ export function executeDurableDetail(state: DurableState, workId: string, send: 
       settle(value => completeDetailWork(value, workId, attempt.knownId!));
       return state.readTraversal();
     }
+    if (current.gaps.some(gap => gap.scope === 'global' && gap.status !== 'resolved' && gap.status !== 'skipped') || current.detailGaps?.some(gap => gap.status === 'unresolved')) throw new Error('Global uncertainty blocks new detail work');
     settle();
     if (state.readTraversal().activeTime >= state.readTraversal().limits.activeTime) throw new Error('Active-time limit reached before detail reservation');
     state.transitionTraversal(value => reserveDetailSubmission(value, workId));
@@ -82,7 +82,7 @@ function executeDurableDiscoveryImpl(state: DurableState, send: SyntheticSend, o
   let current = state.readTraversal();
   if (current.recoveryPending) throw new Error('Recovery accounting is unresolved');
   if (current.paused || current.cancelled) throw new Error(current.paused ? 'Traversal is paused' : 'Traversal is cancelled');
-  if (current.gaps.some(gap => gap.scope === 'global' && gap.status !== 'resolved' && gap.status !== 'skipped')) throw new Error('Global uncertainty blocks new discovery work');
+  if (current.gaps.some(gap => gap.scope === 'global' && gap.status !== 'resolved' && gap.status !== 'skipped') || current.detailGaps?.some(gap => gap.status === 'unresolved')) throw new Error('Global uncertainty blocks new discovery work');
   let running = targetKey ?? Object.entries(current.cells).find(([, cell]) => cell.outcome === 'running')?.[0];
   const latestAttempt = current.attempts.at(-1);
   const latestUncertain = latestAttempt?.status === 'uncertain' ? latestAttempt : undefined;
