@@ -1,7 +1,7 @@
 # Offline Operator Path Workstream Brief
 
 **Date**: 2026-11-25
-**Status**: Planned
+**Status**: Planned; revised after external review, pending confirmation. Implementation requires operator approval.
 
 ## Why
 Connect the tested offline traversal and durable recovery into a reproducible operator path without implying live-provider readiness.
@@ -18,6 +18,9 @@ Connect the tested offline traversal and durable recovery into a reproducible op
 - Read-only consistent status and export — inspection must not acquire a writer lease or modify recovery state; the exclusive cooperating lock returns busy while a writer or publisher is active.
 - Serial durable execution and cooperative cancellation — preserve existing recovery and accounting without promising interruption of synchronous callbacks.
 - Report blocked frontier and all concurrent conditions independently — a cap edit does not promote blocked cells and a headline alone can mislead.
+
+## Sizing
+This plan has 12 slices (A1–A3, B1–B7, C and D), rescaled from the milestone's provisional 3–4 to cover coordination, binding and operator-contract safeguards.
 
 ## Open questions
 - None.
