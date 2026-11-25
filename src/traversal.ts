@@ -5,7 +5,8 @@ export type CandidateObservation = { id: string; coordinate?: { latitude: number
 export type TraversalLimits = { cells: number; submissions: number; activeTime: number };
 export type Attempt = { id: string; workId: string; cellKey: string; status: 'reserved' | 'dispatched' | 'uncertain' | 'observing' | 'observed' | 'skipped' | 'confirmed_no_send'; knownId?: string; retryOrdinal?: number; observationRetryCeiling?: number; retryCeiling?: number; submissionRetryOrdinal?: number; submissionRetryCeiling?: number; resendOrdinal?: number; resendCeiling?: number; approval?: { rationale: string }; recoveryEvidence?: { source: string; evidence: string; timestamp: string }; safeRetryAuthorization?: { ordinal: number; ceiling: number; delayMs?: number }; observationRetryPendingDelayMs?: number };
 export type TraversalReport = { stopReason: 'cancelled' | 'paused' | 'active_time' | 'submissions' | 'cells' | 'gaps' | 'failed' | 'unrecognized' | 'empty' | 'in_progress' | 'complete'; outcome: 'complete' | 'in_progress' | 'partial_empty_success' | 'partial_failed' | 'partial_unrecognized' | 'partial_limit' | 'partial_cancelled' | 'partial_gaps'; queue: string[]; blocked: string[]; gaps: TraversalState['gaps']; submissions: number; activeTime: number; cells: TraversalState['cells'] };
-export type DetailWork = { id: string; status: 'pending'; identity: string; observationIds: string[] };
+export type DetailAttempt = { id: string; status: 'reserved' | 'dispatched' | 'uncertain' | 'completed' | 'skipped'; knownId?: string };
+export type DetailWork = { id: string; status: 'pending' | 'reserved' | 'dispatched' | 'uncertain' | 'completed' | 'skipped'; identity: string; observationIds: string[]; attempts: DetailAttempt[] };
 export type TraversalState = { detailWork?: DetailWork[]; timeUnit: 'milliseconds'; geometry: Geometry; limits: TraversalLimits; queue: string[]; admitted: string[]; cells: Record<string, { outcome: CellOutcome }>; candidates: CandidateObservation[]; gaps: { cellKey: string; cause: 'failed' | 'unrecognized' | 'uncertain'; scope?: 'isolated' | 'global'; status?: 'unresolved' | 'resolved' | 'skipped' }[]; paused: boolean; submissions: number; activeTime: number; blocked: string[]; attempts: Attempt[]; cancelled: boolean; activeInterval?: boolean; recoveryPending?: boolean; cleanPauseEvidence?: { evidence: string }; recoveryDebitEvidence?: { elapsed: number; evidence: string }; resendCeiling?: number; resendApprovalsConsumed?: number };
 export type DiscoveryResult = { status: 'success'; candidates: { id: string; coordinate?: { latitude: number; longitude: number } | null; verifiedCanonicalKey?: string }[] } | { status: 'empty' } | { status: 'failed'; cause?: string; scope: 'isolated' | 'global' } | { status: 'unrecognized' };
 
@@ -27,6 +28,25 @@ export function authorizeSafeRetry(state: TraversalState, key: string, retryOrdi
   if (!previous || previous.status !== 'uncertain' || !Number.isInteger(retryOrdinal) || retryOrdinal < 1 || retryOrdinal > ceiling || !Number.isSafeInteger(delayMs) || delayMs < 0 || state.paused || state.cancelled) throw new Error('Safe retry cannot be authorized');
   const attempts = [...state.attempts]; attempts[attempts.indexOf(previous)] = { ...previous, safeRetryAuthorization: { ordinal: retryOrdinal, ceiling, delayMs } };
   return { ...state, attempts };
+}
+export function reserveDetailSubmission(state: TraversalState, workId: string): TraversalState {
+  if (state.recoveryPending || state.paused || state.cancelled || state.activeTime >= state.limits.activeTime) throw new Error('Detail submission stopped');
+  if (state.submissions >= state.limits.submissions) throw new Error('Submission limit reached');
+  const work = state.detailWork?.find(item => item.id === workId);
+  if (!work || work.status !== 'pending') throw new Error('Detail work is not pending');
+  const ordinal = work.attempts.length + 1;
+  const detailWork = state.detailWork!.map(item => item.id === workId ? { ...item, status: 'reserved' as const, attempts: [...item.attempts, { id: `${workId}:attempt:${ordinal}`, status: 'reserved' as const }] } : item);
+  return { ...state, submissions: state.submissions + 1, detailWork };
+}
+export function dispatchDetailSubmission(state: TraversalState, workId: string): TraversalState {
+  if (state.recoveryPending) throw new Error('Recovery accounting is unresolved');
+  if (state.cancelled || state.paused || state.activeTime >= state.limits.activeTime) throw new Error('Detail dispatch stopped');
+  if (state.submissions > state.limits.submissions) throw new Error('Submission limit prevents dispatch');
+  const work = state.detailWork?.find(item => item.id === workId);
+  if (!work || work.status !== 'reserved') throw new Error('Detail work is not reserved');
+  if (state.detailWork!.filter(item => item.id === workId).length !== 1) throw new Error('Duplicate detail work ID');
+  const detailWork = state.detailWork!.map(item => item.id === workId ? { ...item, status: 'dispatched' as const, attempts: item.attempts.map((attempt, i) => i === item.attempts.length - 1 ? { ...attempt, status: 'dispatched' as const } : attempt) } : item);
+  return { ...state, detailWork };
 }
 export function reserveSubmission(state: TraversalState, key: string): TraversalState {
   if (state.recoveryPending) throw new Error('Recovery accounting is unresolved');
@@ -167,7 +187,7 @@ export function applyDiscoveryResult(state: TraversalState, key: string, result:
     for (const candidate of state.candidates) {
       const identity = candidate.verifiedCanonicalKey ? `verified:${candidate.verifiedCanonicalKey}` : `observation:${candidate.observationId}`;
       let work = detailWork.find(item => item.identity === identity);
-      if (!work) { work = { id: `detail:${identity}`, status: 'pending', identity, observationIds: [] }; detailWork.push(work); }
+      if (!work) { work = { id: `detail:${identity}`, status: 'pending', identity, observationIds: [], attempts: [] }; detailWork.push(work); }
       work.observationIds.push(candidate.observationId);
     }
   }
@@ -189,7 +209,7 @@ export function applyDiscoveryResult(state: TraversalState, key: string, result:
       const identity = candidate.verifiedCanonicalKey ? `verified:${candidate.verifiedCanonicalKey}` : `observation:${observationId}`;
       let work = detailWork.find(item => item.identity === identity);
       if (work && work.id !== `detail:${identity}`) throw new Error('Invalid detail work identity');
-      if (!work) { work = { id: `detail:${identity}`, status: 'pending', identity, observationIds: [] }; detailWork.push(work); }
+      if (!work) { work = { id: `detail:${identity}`, status: 'pending', identity, observationIds: [], attempts: [] }; detailWork.push(work); }
       if (!work.observationIds.includes(observationId)) work.observationIds.push(observationId);
     }
     const [column, row] = key.split(',').map(Number);
