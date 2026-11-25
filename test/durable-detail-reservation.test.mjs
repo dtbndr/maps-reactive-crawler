@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { validateGeometry, createTraversal, admitNextCell, reserveSubmission, observeKnownId, applyDiscoveryResult } from '../dist/index.js';
 import { reserveDetailSubmission, dispatchDetailSubmission } from '../dist/traversal.js';
-import { executeDurableDetail } from '../dist/durable-discovery.js';
+import { executeDurableDetail, cancelDurableDiscovery } from '../dist/durable-discovery.js';
 import { DurableState } from '../dist/durable-state.js';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -43,6 +43,22 @@ test('detail executor enforces active-time cap before reserving and accounts cal
     d.transitionTraversal(value => ({ ...value, activeTime: 0, limits: { ...value.limits, activeTime: 100 } })); now = 0;
     const result = executeDurableDetail(d, workId, () => { sends++; now += 4; return { id: 'x' }; }, () => { now += 3; return { elapsed: 3 }; }, { monotonicNow: () => now });
     assert.equal(sends, 1); assert.equal(result.activeTime, 7);
+  } finally { d.close(); rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('detail callbacks reject nested execution and cancellation without extra sends, preserving time and final state', () => {
+  const { dir, path } = temp(); const d = DurableState.open(path); let clock = 0; let sends = 0; let nestedRejected = false; let cancelRejected = false;
+  try {
+    const base = discovered(); d.writeTraversal(base); const workId = base.detailWork[0].id;
+    const result = executeDurableDetail(d, workId, () => {
+      sends++; clock += 2;
+      assert.throws(() => executeDurableDetail(d, workId, () => { sends++; return { id: 'nested' }; }, () => ({ elapsed: 0 }), { monotonicNow: () => clock }), /active interval/i); nestedRejected = true;
+      assert.throws(() => cancelDurableDiscovery(d), /active interval/i); cancelRejected = true;
+      return { id: 'detail-id' };
+    }, id => { assert.equal(id, 'detail-id'); clock += 3; return { elapsed: 3 }; }, { monotonicNow: () => clock });
+    assert.equal(nestedRejected, true); assert.equal(cancelRejected, true); assert.equal(sends, 1);
+    assert.equal(result.activeTime, 5); assert.equal(result.activeInterval, false); assert.equal(result.cancelled, false);
+    assert.equal(result.detailWork[0].status, 'completed'); assert.deepEqual(d.readTraversal(), result);
   } finally { d.close(); rmSync(dir, { recursive: true, force: true }); }
 });
 
