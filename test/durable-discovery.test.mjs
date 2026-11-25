@@ -586,5 +586,16 @@ test('fresh-process recovery does not revive exhausted retry using a raised call
     assert.equal(result.cells['0,0'].outcome, 'parked');
     assert.equal(result.cells['1,0'].outcome, 'empty');
     assert.deepEqual(result.gaps.map(g => [g.cellKey, g.cause]), [['0,0', 'failed'], ['0,0', 'failed'], ['0,0', 'uncertain']]);
+    assert.equal(result.attempts.filter(a => a.cellKey === '0,0').at(-1).status, 'uncertain');
+    assert.equal(result.limits.submissions, 20);
+    const ledgerBeforeExhaustion = readFileSync(ledgerPath, 'utf8');
+    const payloadBeforeExhaustion = JSON.stringify(result);
+    for (const ceiling of [2, 9]) {
+      const exhaustedScript = `import * as fs from 'node:fs'; import {DurableState} from ${JSON.stringify(durableUrl)}; import {executeDurableDiscovery} from ${JSON.stringify(executorUrl)}; const d=DurableState.open(${JSON.stringify(path)}); const before=JSON.stringify(d.readTraversal()); try { executeDurableDiscovery(d,w=>{fs.appendFileSync(${JSON.stringify(ledgerPath)},'unexpected'); return {id:'unexpected'}},()=>({elapsed:1,result:{status:'empty'}}),'isolated',{observationCeiling:0,submissionCeiling:${ceiling},knownSafeSubmissionError:()=>true}); throw Error('expected exact retry exhaustion'); } catch(e) { if(e.message!=='No recoverable discovery work') throw e; } if(JSON.stringify(d.readTraversal())!==before) throw Error('durable payload changed'); d.close();`;
+      const exhausted = spawnSync(process.execPath, ['--input-type=module', '-e', exhaustedScript], { encoding: 'utf8' });
+      assert.equal(exhausted.status, 0, exhausted.stderr);
+      assert.equal(readFileSync(ledgerPath, 'utf8'), ledgerBeforeExhaustion);
+      const verify = DurableState.open(path); assert.equal(JSON.stringify(verify.readTraversal()), payloadBeforeExhaustion); verify.close();
+    }
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
