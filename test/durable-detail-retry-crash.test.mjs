@@ -11,6 +11,45 @@ import { executeDurableDetail, resolveDurableRecoveryDebit } from '../dist/durab
 import { reserveDetailSubmission, dispatchDetailSubmission, recordDetailId, authorizeDetailObservationRetry, markDetailUncertain } from '../dist/traversal.js';
 
 const geometry = validateGeometry({ seed: { latitude: 0, longitude: 0 }, spacing: 100, area: { type: 'bbox', south: -1, north: 1, west: -1, east: 1 } });
+
+test('actual SQLite detail executor reads throwing elapsed getter once and closes observation', () => {
+  for (const recovered of [false, true]) {
+    const dir = mkdtempSync(join(tmpdir(), 'detail-elapsed-')); const path = join(dir, 'state.db');
+    let db;
+    try {
+      let state = createTraversal(geometry, { cells: 5, submissions: 3, activeTime: 100 }); const cell = state.queue[0];
+      state = reserveSubmission(admitNextCell(state), cell); state = { ...state, attempts: state.attempts.map(a => ({ ...a, status: 'dispatched', knownId: 'raw' })) };
+      state = observeKnownId(state, cell, 'raw', 0); state = applyDiscoveryResult(state, cell, { status: 'success', candidates: [{ id: 'one' }] });
+      const work = state.detailWork[0];
+      if (recovered) { state = reserveDetailSubmission(state, work.id); state = dispatchDetailSubmission(state, work.id); state = recordDetailId(state, work.id, 'detail-id'); state = markDetailUncertain(state, work.id); }
+      db = DurableState.open(path); db.writeTraversal(state); if (recovered) { db.close(); db = DurableState.open(path); }
+      let reads = 0, sends = 0, polls = 0; const ledger = [];
+      const result = () => Object.defineProperty({}, 'elapsed', { get() { reads++; throw Error('unreadable elapsed'); } });
+      assert.throws(() => executeDurableDetail(db, work.id, () => { ledger.push('send:detail-id'); sends++; return { id: 'detail-id' }; }, id => { ledger.push(`observe:${id}`); polls++; return result(); }, { monotonicNow: () => 0 }, { observationCeiling: 0, knownSafeObservationError: () => false }), /Invalid detail observation time/);
+      assert.equal(reads, 1); assert.equal(polls, 1); assert.equal(sends, recovered ? 0 : 1);
+      assert.deepEqual(ledger, recovered ? ['observe:detail-id'] : ['send:detail-id', 'observe:detail-id']);
+      const final = db.readTraversal(); const attempt = final.detailWork[0].attempts.at(-1);
+      assert.equal(attempt.knownId, 'detail-id'); assert.equal(attempt.observationRetryDisposition, 'closed');
+      assert.equal(final.detailWork[0].status, 'uncertain');
+      assert.deepEqual(final.detailGaps, [{ workId: work.id, identity: work.identity, observationIds: [...work.observationIds], status: 'unresolved' }]);
+      db.close(); db = DurableState.open(path); let again = 0;
+      assert.throws(() => executeDurableDetail(db, work.id, () => { ledger.push('unexpected-send'); sends++; return { id: 'resend' }; }, id => { ledger.push(`unexpected-observe:${id}`); again++; return { elapsed: 0 }; }, { monotonicNow: () => 0 }));
+      assert.equal(sends, recovered ? 0 : 1); assert.equal(again, 0); assert.deepEqual(ledger, recovered ? ['observe:detail-id'] : ['send:detail-id', 'observe:detail-id']);
+    } finally { db?.close(); rmSync(dir, { recursive: true, force: true }); }
+  }
+});
+
+test('detail elapsed getter is sampled only once when its value changes', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'detail-elapsed-changing-')); const db = DurableState.open(join(dir, 'state.db'));
+  try {
+    let state = createTraversal(geometry, { cells: 5, submissions: 3, activeTime: 100 }); const cell = state.queue[0];
+    state = reserveSubmission(admitNextCell(state), cell); state = { ...state, attempts: state.attempts.map(a => ({ ...a, status: 'dispatched', knownId: 'raw' })) };
+    state = observeKnownId(state, cell, 'raw', 0); state = applyDiscoveryResult(state, cell, { status: 'success', candidates: [{ id: 'one' }] });
+    const work = state.detailWork[0]; db.writeTraversal(state); let reads = 0;
+    executeDurableDetail(db, work.id, () => ({ id: 'detail-id' }), () => ({ get elapsed() { return ++reads === 1 ? 0 : NaN; } }), { monotonicNow: () => 0 });
+    assert.equal(reads, 1); assert.equal(db.readTraversal().detailWork[0].status, 'completed');
+  } finally { db.close(); rmSync(dir, { recursive: true, force: true }); }
+});
 test('fresh-process death after consuming detail observation retry closes it without resend', () => {
   const dir = mkdtempSync(join(tmpdir(), 'detail-retry-crash-')); const path = join(dir, 'state.db'); const ledger = join(dir, 'ledger');
   const executor = new URL('../dist/durable-discovery.js', import.meta.url).href;
