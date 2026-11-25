@@ -5,7 +5,7 @@ export type SyntheticSend = (workId: string) => { id: string };
 export type SyntheticObserve = (id: string) => { result: DiscoveryResult; elapsed: number };
 export type SyntheticDetailSend = (workId: string) => { id: string };
 export type SyntheticDetailObserve = (id: string) => { elapsed: number };
-export type DurableDetailBoundary = 'reserved' | 'dispatched' | 'sent' | 'id-persisted';
+export type DurableDetailBoundary = 'reserved' | 'dispatched' | 'sent' | 'id-persisted' | 'retry-consumed';
 let detailBoundaryHook: ((boundary: DurableDetailBoundary) => void) | undefined;
 /** Test-only crash injection seam for durable detail execution. */
 export function setDurableDetailBoundaryHookForTest(hook: ((boundary: DurableDetailBoundary) => void) | undefined): void { detailBoundaryHook = hook; }
@@ -36,6 +36,7 @@ export function executeDurableDetail(state: DurableState, workId: string, send: 
         waitForRetry(retryPolicy, pendingDelay);
         // Consume authorization durably before the callback; a crash during the wait repeats it.
         state.transitionTraversal(value => ({ ...value, detailWork: markDetailUncertain(value, workId).detailWork!.map(item => item.id === workId ? { ...item, attempts: item.attempts.map((entry, index) => index === item.attempts.length - 1 ? { ...entry, observationRetryPendingDelayMs: undefined, observationRetryDisposition: 'closed' as const } : entry) } : item) }));
+        detailBoundaryHook?.('retry-consumed');
       }
       settle();
       current = state.readTraversal();
