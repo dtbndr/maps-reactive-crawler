@@ -358,6 +358,12 @@ test('fresh process death after application UPDATE but before COMMIT rolls back 
     assert.equal(child.status, 42, child.stderr);
     assert.deepEqual(JSON.parse(readFileSync(interruptionMarker, 'utf8')), { termination: 'abrupt', cleanPause: false });
     assert.deepEqual(JSON.parse(readFileSync(ledgerPath, 'utf8')), { 'work:0,0': { id: 'ledger-id', count: 1 } });
+    const rawAfterCrash = new DatabaseSync(path);
+    const payloadAfterCrash = JSON.parse(rawAfterCrash.prepare('SELECT payload FROM traversal WHERE id=1').get().payload);
+    rawAfterCrash.close();
+    assert.equal(payloadAfterCrash.attempts[0].status, 'observing');
+    assert.deepEqual(payloadAfterCrash.candidates, []);
+    assert.ok(payloadAfterCrash.detailWork === undefined || payloadAfterCrash.detailWork.length === 0);
     const reopened = DurableState.open(path);
     const state = reopened.readTraversal();
     assert.equal(state.submissions, 1);
@@ -381,6 +387,7 @@ test('fresh process death after application UPDATE but before COMMIT rolls back 
     assert.deepEqual(recovered.queue, ['0,1', '0,-1', '1,0', '-1,0']);
     assert.equal(recovered.activeTime, 1);
     assert.equal(recovered.submissions, 1);
+    assert.deepEqual(JSON.parse(readFileSync(ledgerPath, 'utf8')), { 'work:0,0': { id: 'ledger-id', count: 1 } });
     verified.close();
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
