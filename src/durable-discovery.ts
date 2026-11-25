@@ -1,8 +1,43 @@
 import type { DurableState } from './durable-state.js';
-import { admitNextCell, applyDiscoveryResult, authorizeSafeRetry, authorizeSafeRetryReservation, dispatchSubmission, confirmNoSend, markUncertain, observeKnownId, reserveSubmission, retryKnownIdObservation, recoverKnownId, skipAttempt, authorizeResend, cancelTraversal, type DiscoveryResult, type TraversalState } from './traversal.js';
+import { admitNextCell, applyDiscoveryResult, authorizeSafeRetry, authorizeSafeRetryReservation, dispatchSubmission, confirmNoSend, markUncertain, observeKnownId, reserveSubmission, retryKnownIdObservation, recoverKnownId, skipAttempt, authorizeResend, cancelTraversal, reserveDetailSubmission, dispatchDetailSubmission, recordDetailId, completeDetailWork, type DiscoveryResult, type TraversalState } from './traversal.js';
 
 export type SyntheticSend = (workId: string) => { id: string };
 export type SyntheticObserve = (id: string) => { result: DiscoveryResult; elapsed: number };
+export type SyntheticDetailSend = (workId: string) => { id: string };
+export type SyntheticDetailObserve = (id: string) => { elapsed: number };
+
+/** Executes one durable detail item; a persisted dispatch without an ID is never resent. */
+export function executeDurableDetail(state: DurableState, workId: string, send: SyntheticDetailSend, observe: SyntheticDetailObserve, clock: { monotonicNow: () => number } = { monotonicNow: () => Number(process.hrtime.bigint()) / 1_000_000 }): TraversalState {
+  return executeTimed(state, settle => {
+    let current = state.readTraversal();
+    if (current.recoveryPending || current.paused || current.cancelled) throw new Error('Detail execution is paused');
+    let work = current.detailWork?.find(item => item.id === workId);
+    if (!work) throw new Error('Unknown detail work');
+    if (work.status === 'dispatched' || work.status === 'uncertain') {
+      const attempt = work.attempts.at(-1);
+      if (!attempt?.knownId) {
+        state.transitionTraversal(value => ({ ...value, detailWork: value.detailWork!.map(item => item.id === workId ? { ...item, status: 'uncertain' as const, attempts: item.attempts.map((a, i) => i === item.attempts.length - 1 ? { ...a, status: 'uncertain' as const } : a) } : item) }));
+        throw new Error('Detail dispatch outcome uncertain; refusing resend');
+      }
+      const observed = observe(attempt.knownId);
+      if (!Number.isFinite(observed.elapsed) || observed.elapsed < 0) throw new Error('Invalid detail observation time');
+      settle(value => completeDetailWork(value, workId, attempt.knownId!));
+      return state.readTraversal();
+    }
+    settle();
+    if (state.readTraversal().activeTime >= state.readTraversal().limits.activeTime) throw new Error('Active-time limit reached before detail reservation');
+    state.transitionTraversal(value => reserveDetailSubmission(value, workId));
+    state.transitionTraversal(value => dispatchDetailSubmission(value, workId));
+    let id: string;
+    try { id = send(workId).id; } catch (error) { throw error; }
+    if (!id) throw new Error('Synthetic detail send returned no ID');
+    state.transitionTraversal(value => recordDetailId(value, workId, id));
+    const observed = observe(id);
+    if (!Number.isFinite(observed.elapsed) || observed.elapsed < 0) throw new Error('Invalid detail observation time');
+    settle(value => completeDetailWork(value, workId, id));
+    return state.readTraversal();
+  }, clock);
+}
 export type DurableRetryPolicy = { observationCeiling: number; knownSafeObservationError: (error: unknown) => boolean; submissionCeiling?: number; knownSafeSubmissionError?: (error: unknown) => boolean; retryBaseDelayMs?: number; retryMaxDelayMs?: number; wait?: (milliseconds: number) => void };
 function retryDelay(policy: DurableRetryPolicy | undefined, ordinal: number): number {
   const base = policy?.retryBaseDelayMs ?? 0;

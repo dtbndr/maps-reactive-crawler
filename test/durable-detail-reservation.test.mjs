@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { validateGeometry, createTraversal, admitNextCell, reserveSubmission, observeKnownId, applyDiscoveryResult } from '../dist/index.js';
 import { reserveDetailSubmission, dispatchDetailSubmission } from '../dist/traversal.js';
+import { executeDurableDetail } from '../dist/durable-discovery.js';
 import { DurableState } from '../dist/durable-state.js';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -17,6 +18,49 @@ function discovered() {
   return applyDiscoveryResult(state, key, { status: 'success', candidates: [{ id: 'one' }, { id: 'two' }] });
 }
 function temp() { const dir = mkdtempSync(join(tmpdir(), 'detail-reservation-')); return { dir, path: join(dir, 'state.db') }; }
+
+test('detail execution persists the known ID before observation and consumes shared submission accounting', () => {
+  const { dir, path } = temp(); const d = DurableState.open(path); let sends = 0; let observedId;
+  try {
+    const base = discovered(); d.writeTraversal(base);
+    let now = 0;
+    const result = executeDurableDetail(d, base.detailWork[0].id, () => { sends++; now += 4; return { id: 'detail-id' }; }, id => { observedId = id; now += 3; return { elapsed: 3 }; }, { monotonicNow: () => now });
+    assert.equal(sends, 1); assert.equal(observedId, 'detail-id');
+    assert.equal(result.submissions, 2); assert.equal(result.activeTime, 7);
+    assert.equal(result.detailWork[0].status, 'completed');
+    assert.equal(result.detailWork[0].attempts[0].knownId, 'detail-id');
+    assert.deepEqual(d.readTraversal(), result);
+  } finally { d.close(); rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('detail executor enforces active-time cap before reserving and accounts callback time through shared clock', () => {
+  const { dir, path } = temp(); const d = DurableState.open(path); let sends = 0; let now = 10;
+  try {
+    const base = { ...discovered(), limits: { ...discovered().limits, activeTime: 0 } }; d.writeTraversal(base);
+    const workId = base.detailWork[0].id;
+    assert.throws(() => executeDurableDetail(d, workId, () => { sends++; return { id: 'x' }; }, () => ({ elapsed: 0 }), { monotonicNow: () => 0 }), /limit/i);
+    assert.equal(sends, 0); assert.equal(d.readTraversal().submissions, 1);
+    d.transitionTraversal(value => ({ ...value, activeTime: 0, limits: { ...value.limits, activeTime: 100 } })); now = 0;
+    const result = executeDurableDetail(d, workId, () => { sends++; now += 4; return { id: 'x' }; }, () => { now += 3; return { elapsed: 3 }; }, { monotonicNow: () => now });
+    assert.equal(sends, 1); assert.equal(result.activeTime, 7);
+  } finally { d.close(); rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('known detail ID recovers by observation only and uncertain missing ID is never resent', () => {
+  const { dir, path } = temp(); const d = DurableState.open(path); let sends = 0; let observations = 0;
+  try {
+    let state = discovered(); const id = state.detailWork[0].id;
+    state = reserveDetailSubmission(state, id); state = dispatchDetailSubmission(state, id);
+    state = { ...state, detailWork: state.detailWork.map((w, i) => i ? w : { ...w, attempts: w.attempts.map(a => ({ ...a, knownId: 'known' })) }) };
+    d.writeTraversal(state);
+    const result = executeDurableDetail(d, id, () => { sends++; return { id: 'wrong' }; }, raw => { assert.equal(raw, 'known'); observations++; return { elapsed: 0 }; }, { monotonicNow: () => 1 });
+    assert.equal(sends, 0); assert.equal(observations, 1); assert.equal(result.detailWork[0].status, 'completed');
+    const other = result.detailWork[1].id;
+    state = reserveDetailSubmission(result, other); state = dispatchDetailSubmission(state, other); d.writeTraversal(state);
+    assert.throws(() => executeDurableDetail(d, other, () => { sends++; return { id: 'unsafe' }; }, () => ({ elapsed: 0 }), { monotonicNow: () => 1 }), /uncertain|refusing/i);
+    assert.equal(sends, 0); assert.equal(d.readTraversal().detailWork[1].status, 'uncertain');
+  } finally { d.close(); rmSync(dir, { recursive: true, force: true }); }
+});
 
 test('detail reservation uses shared cap, refuses duplicates, and dispatch does not send', () => {
   const { dir, path } = temp(); const d = DurableState.open(path); let sends = 0;

@@ -39,6 +39,19 @@ export function reserveDetailSubmission(state: TraversalState, workId: string): 
   const detailWork = state.detailWork!.map(item => item.id === workId ? { ...item, status: 'reserved' as const, attempts: [...item.attempts, { id: `${workId}:attempt:${ordinal}`, status: 'reserved' as const }] } : item);
   return { ...state, submissions: state.submissions + 1, detailWork };
 }
+export function recordDetailId(state: TraversalState, workId: string, id: string): TraversalState {
+  if (!id) throw new Error('Detail ID is required');
+  const work = state.detailWork?.find(item => item.id === workId);
+  if (!work || work.status !== 'dispatched' || work.attempts.at(-1)?.status !== 'dispatched') throw new Error('Detail attempt is not dispatched');
+  return { ...state, detailWork: state.detailWork!.map(item => item.id === workId ? { ...item, attempts: item.attempts.map((attempt, index) => index === item.attempts.length - 1 ? { ...attempt, knownId: id } : attempt) } : item) };
+}
+export function completeDetailWork(state: TraversalState, workId: string, id: string): TraversalState {
+  const work = state.detailWork?.find(item => item.id === workId);
+  if (!work || !['dispatched', 'uncertain'].includes(work.status) || work.attempts.at(-1)?.knownId !== id) throw new Error('Detail result does not match durable ID');
+  const detailWork = state.detailWork!.map(item => item.id === workId ? { ...item, status: 'completed' as const, attempts: item.attempts.map((attempt, index) => index === item.attempts.length - 1 ? { ...attempt, status: 'completed' as const } : attempt) } : item);
+  const gaps = work.identity.startsWith('verified:') ? state.gaps.map(gap => gap.cellKey.startsWith('detail:') && gap.cellKey !== workId && gap.cause === 'uncertain' ? { ...gap, status: 'resolved' as const } : gap) : state.gaps;
+  return { ...state, detailWork, gaps };
+}
 export function dispatchDetailSubmission(state: TraversalState, workId: string): TraversalState {
   if (state.recoveryPending) throw new Error('Recovery accounting is unresolved');
   if (state.cancelled || state.paused || state.activeTime >= state.limits.activeTime) throw new Error('Detail dispatch stopped');
