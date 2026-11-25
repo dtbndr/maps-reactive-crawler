@@ -218,7 +218,7 @@ test('detail observation failure records linked unresolved gap and recovery neve
     assert.equal(sends, 1);
     const valid = d.readTraversal();
     const duplicateGapState = { ...valid, detailGaps: [...valid.detailGaps, { ...valid.detailGaps[0], status: 'resolved' }] };
-    assert.throws(() => d.writeTraversal(duplicateGapState), /invalid|valid/i);
+    assert.throws(() => d.writeTraversal(duplicateGapState), /Corrupt traversal checkpoint/);
     assert.deepEqual(d.readTraversal(), valid);
   } finally { d.close(); rmSync(dir, { recursive: true, force: true }); }
 });
