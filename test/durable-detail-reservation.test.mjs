@@ -140,3 +140,24 @@ test('invalid persisted detail reservation checkpoint fails closed', () => {
     assert.throws(() => DurableState.open(path), /Corrupt traversal checkpoint/);
   } finally { try { d.close(); } catch {} rmSync(dir, { recursive: true, force: true }); }
 });
+
+test('detail-only execution accounts active time and recovered reservation is uncertain without resend', () => {
+  const { dir, path } = temp(); const d = DurableState.open(path); let sends = 0; let now = 0;
+  try {
+    const base = discovered(); const workId = base.detailWork[0].id;
+    let state = { ...base, queue: [], cells: Object.fromEntries(Object.entries(base.cells).map(([key]) => [key, { outcome: 'empty' }])) };
+    state = reserveDetailSubmission(state, workId); d.writeTraversal(state);
+    assert.throws(() => executeDurableDetail(d, workId, () => { sends++; return { id: 'unsafe' }; }, () => ({ elapsed: 0 }), { monotonicNow: () => now }), /persisted|refusing/i);
+    assert.equal(sends, 0); assert.equal(d.readTraversal().submissions, 2);
+    assert.equal(d.readTraversal().detailWork[0].status, 'uncertain');
+  } finally { d.close(); rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('detail completion never resolves unrelated uncertainty gaps', async () => {
+  const { completeDetailWork } = await import('../dist/traversal.js');
+  const base = discovered(); const workId = base.detailWork[0].id;
+  let state = reserveDetailSubmission(base, workId); state = dispatchDetailSubmission(state, workId);
+  state = { ...state, detailWork: state.detailWork.map((w, i) => i ? w : { ...w, identity: 'verified:one', attempts: w.attempts.map(a => ({ ...a, knownId: 'detail-id' })) }), gaps: [{ cellKey: 'detail:unrelated', cause: 'uncertain', status: 'unresolved' }] };
+  const completed = completeDetailWork(state, workId, 'detail-id');
+  assert.equal(completed.gaps[0].status, 'unresolved');
+});

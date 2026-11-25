@@ -13,12 +13,18 @@ export function executeDurableDetail(state: DurableState, workId: string, send: 
     if (current.recoveryPending || current.paused || current.cancelled) throw new Error('Detail execution is paused');
     let work = current.detailWork?.find(item => item.id === workId);
     if (!work) throw new Error('Unknown detail work');
+    if (work.status === 'reserved') {
+      state.transitionTraversal(value => ({ ...value, detailWork: value.detailWork!.map(item => item.id === workId ? { ...item, status: 'uncertain' as const, attempts: item.attempts.map((a, i) => i === item.attempts.length - 1 ? { ...a, status: 'uncertain' as const } : a) } : item) }));
+      throw new Error('Persisted detail reservation has unknown outcome; refusing send');
+    }
     if (work.status === 'dispatched' || work.status === 'uncertain') {
       const attempt = work.attempts.at(-1);
       if (!attempt?.knownId) {
         state.transitionTraversal(value => ({ ...value, detailWork: value.detailWork!.map(item => item.id === workId ? { ...item, status: 'uncertain' as const, attempts: item.attempts.map((a, i) => i === item.attempts.length - 1 ? { ...a, status: 'uncertain' as const } : a) } : item) }));
         throw new Error('Detail dispatch outcome uncertain; refusing resend');
       }
+      if (current.cancelled || current.paused) throw new Error('Detail execution is paused');
+      if (current.activeTime >= current.limits.activeTime) throw new Error('Active-time limit reached before detail observation');
       const observed = observe(attempt.knownId);
       if (!Number.isFinite(observed.elapsed) || observed.elapsed < 0) throw new Error('Invalid detail observation time');
       settle(value => completeDetailWork(value, workId, attempt.knownId!));
@@ -32,6 +38,10 @@ export function executeDurableDetail(state: DurableState, workId: string, send: 
     try { id = send(workId).id; } catch (error) { throw error; }
     if (!id) throw new Error('Synthetic detail send returned no ID');
     state.transitionTraversal(value => recordDetailId(value, workId, id));
+    current = state.readTraversal();
+    if (current.cancelled || current.paused) throw new Error('Detail execution is paused');
+    settle();
+    if (state.readTraversal().activeTime >= state.readTraversal().limits.activeTime) throw new Error('Active-time limit reached before detail observation');
     const observed = observe(id);
     if (!Number.isFinite(observed.elapsed) || observed.elapsed < 0) throw new Error('Invalid detail observation time');
     settle(value => completeDetailWork(value, workId, id));
@@ -221,7 +231,8 @@ function executeTimed(state: DurableState, operation: (settle: (change?: (value:
   const current = state.readTraversal();
   if (current.recoveryPending) throw new Error('Recovery accounting is unresolved');
   const hasRecoverableKnownId = current.attempts.some(item => ['uncertain', 'dispatched', 'observing'].includes(item.status) && item.knownId);
-  if (current.paused || current.cancelled || (!current.queue.length && !Object.values(current.cells).some(cell => cell.outcome === 'running') && !hasRecoverableKnownId)) return operation(() => {});
+  const hasDetailWork = current.detailWork?.some(item => ['pending', 'reserved', 'dispatched', 'uncertain'].includes(item.status)) ?? false;
+  if (current.paused || current.cancelled || (!current.queue.length && !Object.values(current.cells).some(cell => cell.outcome === 'running') && !hasRecoverableKnownId && !hasDetailWork)) return operation(() => {});
   state.beginActiveInterval();
   let last = clock.monotonicNow();
   if (!Number.isFinite(last)) throw new Error('Invalid monotonic clock sample');

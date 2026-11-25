@@ -49,8 +49,7 @@ export function completeDetailWork(state: TraversalState, workId: string, id: st
   const work = state.detailWork?.find(item => item.id === workId);
   if (!work || !['dispatched', 'uncertain'].includes(work.status) || work.attempts.at(-1)?.knownId !== id) throw new Error('Detail result does not match durable ID');
   const detailWork = state.detailWork!.map(item => item.id === workId ? { ...item, status: 'completed' as const, attempts: item.attempts.map((attempt, index) => index === item.attempts.length - 1 ? { ...attempt, status: 'completed' as const } : attempt) } : item);
-  const gaps = work.identity.startsWith('verified:') ? state.gaps.map(gap => gap.cellKey.startsWith('detail:') && gap.cellKey !== workId && gap.cause === 'uncertain' ? { ...gap, status: 'resolved' as const } : gap) : state.gaps;
-  return { ...state, detailWork, gaps };
+  return { ...state, detailWork };
 }
 export function dispatchDetailSubmission(state: TraversalState, workId: string): TraversalState {
   if (state.recoveryPending) throw new Error('Recovery accounting is unresolved');
