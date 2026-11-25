@@ -188,6 +188,7 @@ export function recordDurableCleanPause(state: DurableState, evidence: string): 
   if (typeof evidence !== 'string' || !evidence.trim()) throw new Error('Clean-pause evidence is required');
   state.transitionTraversal(value => {
     if (value.recoveryPending) throw new Error('Cannot assert clean pause after interruption');
+    if (value.activeInterval === true) throw new Error('Cannot assert clean pause during an active interval');
     return { ...value, paused: true, recoveryPending: false, cleanPauseEvidence: { evidence } };
   });
   return state.readTraversal();
