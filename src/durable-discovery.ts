@@ -37,7 +37,7 @@ export function executeDurableDetail(state: DurableState, workId: string, send: 
       settle(value => completeDetailWork(value, workId, attempt.knownId!));
       return state.readTraversal();
     }
-    if (current.gaps.some(gap => gap.scope === 'global' && gap.status !== 'resolved' && gap.status !== 'skipped') || current.detailGaps?.some(gap => gap.status === 'unresolved')) throw new Error('Global uncertainty blocks new detail work');
+    if (current.gaps.some(gap => gap.scope === 'global' && gap.status !== 'resolved' && gap.status !== 'skipped') || current.detailGaps?.some(gap => gap.status === 'unresolved') || current.detailWork?.some(item => item.id !== workId && ['reserved', 'dispatched', 'uncertain'].includes(item.status) && !item.attempts.at(-1)?.knownId)) throw new Error('Global uncertainty blocks new detail work');
     settle();
     if (state.readTraversal().activeTime >= state.readTraversal().limits.activeTime) throw new Error('Active-time limit reached before detail reservation');
     state.transitionTraversal(value => reserveDetailSubmission(value, workId));

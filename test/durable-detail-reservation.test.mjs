@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { validateGeometry, createTraversal, admitNextCell, reserveSubmission, observeKnownId, applyDiscoveryResult } from '../dist/index.js';
 import { reserveDetailSubmission, dispatchDetailSubmission, recordDetailId, completeDetailWork } from '../dist/traversal.js';
-import { executeDurableDetail, executeDurableDiscovery, cancelDurableDiscovery } from '../dist/durable-discovery.js';
+import { executeDurableDetail, executeDurableDiscovery, cancelDurableDiscovery, resolveDurableRecoveryDebit } from '../dist/durable-discovery.js';
 import { DurableState } from '../dist/durable-state.js';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -92,6 +92,28 @@ test('known detail ID recovers by observation only and uncertain missing ID is n
     assert.throws(() => executeDurableDetail(d, other, () => { sends++; return { id: 'unsafe' }; }, () => ({ elapsed: 0 }), { monotonicNow: () => 1 }), /uncertain|refusing/i);
     assert.equal(sends, 0); assert.equal(d.readTraversal().detailWork[1].status, 'uncertain');
   } finally { d.close(); rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('no-ID detail attempt blocks other detail and discovery work after SQLite recovery debit', () => {
+  for (const boundary of ['reserved', 'dispatched']) {
+  const { dir, path } = temp(); const d = DurableState.open(path); let sends = 0; let closed = false;
+  try {
+    let state = discovered();
+    const [first, second] = state.detailWork;
+    state = reserveDetailSubmission(state, first.id);
+    if (boundary === 'dispatched') state = dispatchDetailSubmission(state, first.id);
+    state = { ...state, recoveryPending: true, activeInterval: false };
+    d.writeTraversal(state); d.close(); closed = true;
+    const reopened = DurableState.open(path);
+    try {
+      resolveDurableRecoveryDebit(reopened, 1, 'synthetic interruption');
+      assert.throws(() => executeDurableDetail(reopened, second.id, () => { sends++; return { id: 'bad' }; }, () => ({ elapsed: 0 })), /uncertain|refusing/i);
+      assert.throws(() => executeDurableDiscovery(reopened, () => { sends++; return { id: 'bad' }; }, () => ({ result: { status: 'success', candidates: [] }, elapsed: 0 })), /uncertainty/i);
+      assert.equal(sends, 0);
+      assert.equal(reopened.readTraversal().submissions, state.submissions);
+    } finally { reopened.close(); }
+  } finally { if (!closed) d.close(); rmSync(dir, { recursive: true, force: true }); }
+  }
 });
 
 test('detail reservation uses shared cap, refuses duplicates, and dispatch does not send', () => {
