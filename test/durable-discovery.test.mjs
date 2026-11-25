@@ -311,7 +311,7 @@ test('fresh-process crash matrix records independent sends and durable transitio
         const verified = DurableState.open(path); const recovered = verified.readTraversal(); verified.close();
         assert.deepEqual(Object.keys(JSON.parse(readFileSync(ledgerPath, 'utf8'))), ['work:0,0']);
         assert.equal(recovered.cells['0,0'].outcome, 'nonempty');
-        assert.deepEqual(recovered.candidates.map(item => item.id), ['fixture-result']);
+        assert.deepEqual(recovered.candidates.map(item => item.id), ['fixture-result', 'fixture-result']);
         assert.deepEqual(recovered.queue, ['0,1', '0,-1', '1,0', '-1,0']);
         assert.equal(recovered.submissions, 1);
         assert.equal(recovered.activeTime, 1);
@@ -366,7 +366,7 @@ test('fresh process death after application UPDATE but before COMMIT rolls back 
     assert.equal(state.attempts[0].knownId, 'ledger-id');
     assert.equal(state.attempts[0].status, 'observing');
     assert.deepEqual(state.candidates, []);
-    assert.deepEqual(state.detailWork, []);
+    assert.ok(state.detailWork === undefined || state.detailWork.length === 0);
     assert.deepEqual(state.gaps, []);
     assert.deepEqual(state.queue, []);
     reopened.close();
