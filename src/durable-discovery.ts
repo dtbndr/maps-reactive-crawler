@@ -5,6 +5,10 @@ export type SyntheticSend = (workId: string) => { id: string };
 export type SyntheticObserve = (id: string) => { result: DiscoveryResult; elapsed: number };
 export type SyntheticDetailSend = (workId: string) => { id: string };
 export type SyntheticDetailObserve = (id: string) => { elapsed: number };
+export type DurableDetailBoundary = 'id-persisted';
+let detailBoundaryHook: ((boundary: DurableDetailBoundary) => void) | undefined;
+/** Test-only crash injection seam for durable detail execution. */
+export function setDurableDetailBoundaryHookForTest(hook: ((boundary: DurableDetailBoundary) => void) | undefined): void { detailBoundaryHook = hook; }
 
 /** Executes one durable detail item; a persisted dispatch without an ID is never resent. */
 export function executeDurableDetail(state: DurableState, workId: string, send: SyntheticDetailSend, observe: SyntheticDetailObserve, clock: { monotonicNow: () => number } = { monotonicNow: () => Number(process.hrtime.bigint()) / 1_000_000 }): TraversalState {
@@ -41,6 +45,7 @@ export function executeDurableDetail(state: DurableState, workId: string, send: 
     try { id = send(workId).id; } catch (error) { throw error; }
     if (!id) throw new Error('Synthetic detail send returned no ID');
     state.transitionTraversal(value => recordDetailId(value, workId, id));
+    detailBoundaryHook?.('id-persisted');
     current = state.readTraversal();
     if (current.cancelled || current.paused) throw new Error('Detail execution is paused');
     settle();
