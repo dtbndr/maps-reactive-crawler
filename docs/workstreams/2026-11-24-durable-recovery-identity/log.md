@@ -22,7 +22,7 @@ Operator approved splitting the discovery gate into A0 foundation and A integrat
 - Independent full gate: PASS; fresh build followed by full check passed 222/222 tests.
 - Evidence boundary: tests use synthetic fixtures and establish offline durable behavior only. They do not verify real provider identity mapping, retry/idempotency, billing, lookup, or cancellation contracts; no live provider calls were made.
 - Fail-closed boundary: origin legacy untagged blockers remain fail-closed; no assumption that legacy untagged data is trusted or safely recoverable.
-- Remaining sequence from `slices.md`: Slice C is complete. Next workstream is Workstream 3/provider integration, requiring verified current provider contracts and operator approval before any paid calls. Remaining first-release work also includes the CLI/export and release readiness; provider and location integrations are not established by this offline gate.
+- Remaining sequence from `slices.md`: Slice C is complete. Next workstream is Workstream 3/offline operator path and acceptance. Provider and location integrations are Milestone 3 and require verified current provider contracts and operator approval before any paid calls. Remaining first-release work also includes the CLI/export and release readiness; provider and location integrations are not established by this offline gate.
 
 ## Final verification and independent review — reviewer `8ade8fe3`
 

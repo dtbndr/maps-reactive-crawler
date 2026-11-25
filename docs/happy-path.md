@@ -11,7 +11,7 @@ Status: **target, not implemented end to end**. The offline bounded traversal co
 ## Acceptance boundaries
 
 - Offline tests exercise the bounded traversal and synthetic durable state/recovery behavior, including restart and fixture-declared verified identity. They do not demonstrate an end-to-end crawler or live provider semantics.
-- Specify and test whether boundaries constrain cell centers, returned places, or both; do not claim strict place boundaries without reliable coordinates and filtering.
+- Implemented offline eligibility checks constrain cell centers to the configured geographic bounds. They do not establish a returned-place filtering policy: output filtering/reporting semantics remain unspecified. Do not claim strict place boundaries without reliable coordinates and filtering.
 - Clearly explain that spatial expansion can miss disconnected areas and provider results may be incomplete; it is not exhaustive coverage.
 - A real bounded end-to-end run is separately approved by the operator and may incur charges. No paid calls are part of default tests.
 - MCP supports agentic workflows; it is not a requirement for an LLM to run the scheduler. Direct API usage is allowed with notice and must be documented.

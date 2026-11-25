@@ -8,11 +8,11 @@
 
 ## Provisional workstream sizing
 
-These ordered workstreams and slice counts are provisional estimates, not blanket implementation authorization. Each workstream requires its own scope and approval. Tests accompany behavioral slices; the final workstream adds connected acceptance coverage. See the [bounded crawl and recovery handoff](../research/bounded-crawl-recovery.md) for detailed contracts and synthetic traces.
+These ordered workstreams and slice counts are historical provisional estimates, not actual effort accounting or blanket implementation authorization. Each workstream requires its own scope and approval. Tests accompany behavioral slices; the final workstream adds connected acceptance coverage. See the [bounded crawl and recovery handoff](../research/bounded-crawl-recovery.md) for detailed contracts and synthetic traces.
 
 ### Workstream 1 — Bounded reactive core (about 3–4 slices)
 
-**Status: Complete.** See the [workstream brief and log](../workstreams/2026-11-23-bounded-reactive-core/brief.md). The milestone as a whole remains incomplete.
+**Status: Workstreams 1 and 2 complete; Milestone 2 remains incomplete.** Workstream 1: [brief](../workstreams/2026-11-23-bounded-reactive-core/brief.md). Workstream 2: [durable recovery and result identity brief](../workstreams/2026-11-24-durable-recovery-identity/brief.md) and [final log/review](../workstreams/2026-11-24-durable-recovery-identity/log.md).
 
 Build pure geometry, a single deterministic scheduler and synthetic fixture-backed provider behavior. Use a seed-anchored metre grid and practical finite JavaScript Number arithmetic: inclusive bbox comparisons on actual submitted coordinates and spherical haversine distance ≤ radius. Preflight invalid, pole and seam geometry; do not add arbitrary epsilon/buffer or round coordinates after checks. Given one coordinate seed and explicit geography, admit eligible cells, react to successful raw nonempty results before deduplication, and respect independent cell, submission and active-time limits. Separate cell eligibility from reliable inside/outside and unverified candidate classification, and empty success from failure. Model admission, reservation, uncertain submission and result application as distinguishable transitions. Do not claim strict containment or exhaustive coverage.
 
