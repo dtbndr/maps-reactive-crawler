@@ -138,6 +138,9 @@ export class DurableState {
   }
   writeTraversal(state: TraversalState): void {
     validateTraversal(state);
+    if (state.timeUnit !== 'milliseconds') throw new Error('Durable traversal time unit is unmarked; explicit migration required');
+    const existing = this.db.prepare('SELECT payload FROM traversal WHERE id=1').get();
+    if (existing && JSON.parse(String(existing.payload)).timeUnit !== 'milliseconds') throw new Error('Durable traversal time unit is unmarked; explicit migration required');
     this.db.prepare('INSERT INTO traversal(id,payload) VALUES(1,?) ON CONFLICT(id) DO UPDATE SET payload=excluded.payload').run(JSON.stringify(state));
   }
   transitionTraversal(change: (state: TraversalState) => TraversalState): void {
@@ -145,6 +148,7 @@ export class DurableState {
     try {
       const next = change(this.readTraversal());
       validateTraversal(next);
+      if (next.timeUnit !== 'milliseconds') throw new Error('Durable traversal time unit is unmarked; explicit migration required');
       this.db.prepare('UPDATE traversal SET payload=? WHERE id=1').run(JSON.stringify(next));
       afterTraversalWriteForTest?.();
       this.db.exec('COMMIT');
