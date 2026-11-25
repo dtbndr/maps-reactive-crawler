@@ -64,7 +64,9 @@ function validateTraversal(value: unknown): asserts value is TraversalState {
         const hasCeiling = attempt.observationRetryCeiling !== undefined;
         const hasPendingDelay = attempt.observationRetryPendingDelayMs !== undefined;
         const hasRetryHistory = hasOrdinal && hasCeiling && Number.isSafeInteger(attempt.observationRetryOrdinal) && attempt.observationRetryOrdinal > 0 && Number.isSafeInteger(attempt.observationRetryCeiling) && attempt.observationRetryCeiling >= attempt.observationRetryOrdinal;
-        return (hasOrdinal !== hasCeiling) || ((hasOrdinal || hasCeiling || hasPendingDelay || attempt.observationRetryDisposition === 'authorized') && (index !== work.attempts.length - 1 || !attempt.knownId || attempt.status !== 'uncertain' || !hasOrdinal || !hasCeiling || !hasRetryHistory)) || (hasPendingDelay && (attempt.status !== 'uncertain' || !hasRetryHistory || !Number.isSafeInteger(attempt.observationRetryPendingDelayMs) || attempt.observationRetryPendingDelayMs < 0));
+        const hasRetryAuthorization = attempt.observationRetryDisposition === 'authorized';
+        const hasRetryState = hasOrdinal || hasCeiling || hasPendingDelay || hasRetryAuthorization;
+        return (hasOrdinal !== hasCeiling) || (hasRetryState && (index !== work.attempts.length - 1 || !attempt.knownId || !['uncertain', 'completed'].includes(attempt.status) || !hasRetryHistory)) || (hasRetryAuthorization && attempt.status !== 'uncertain') || (hasPendingDelay && (attempt.status !== 'uncertain' || !Number.isSafeInteger(attempt.observationRetryPendingDelayMs) || attempt.observationRetryPendingDelayMs < 0));
       })) throw new Error('Corrupt traversal checkpoint');
       if ((work.status === 'pending' && work.attempts.length !== 0) || (work.status !== 'pending' && work.attempts.length === 0)) throw new Error('Corrupt traversal checkpoint');
       if (work.attempts.some((attempt: any, index: number) => attempt.id !== `${work.id}:attempt:${index + 1}` || attemptIds.has(attempt.id))) throw new Error('Corrupt traversal checkpoint');

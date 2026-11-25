@@ -239,7 +239,7 @@ test('detail-only execution accounts active time and recovered reservation is un
   } finally { d.close(); rmSync(dir, { recursive: true, force: true }); }
 });
 
-test('detail observation failure globally blocks detail and discovery sends but permits known-ID observation', () => {
+test('detail observation failure globally blocks sends and preserves unresolved uncertainty', () => {
   const { dir, path } = temp(); const d = DurableState.open(path); let sends = 0;
   try {
     const base = discovered(); const workId = base.detailWork[0].id; const secondId = base.detailWork[1].id;
@@ -252,13 +252,26 @@ test('detail observation failure globally blocks detail and discovery sends but 
     assert.throws(() => executeDurableDetail(d, secondId, () => { sends++; return { id: 'second-id' }; }, () => ({ elapsed: 0 }), { monotonicNow: () => 0 }), /global uncertainty/i);
     assert.throws(() => executeDurableDiscovery(d, () => { sends++; return { id: 'discovery-id' }; }, () => ({ result: { status: 'empty' }, elapsed: 0 })), /global uncertainty/i);
     assert.equal(sends, 1);
-    const recovered = executeDurableDetail(d, workId, () => { sends++; return { id: 'duplicate' }; }, () => ({ elapsed: 0 }), { monotonicNow: () => 0 });
-    assert.equal(recovered.detailWork[0].status, 'completed');
+    assert.throws(() => executeDurableDetail(d, workId, () => { sends++; return { id: 'duplicate' }; }, () => ({ elapsed: 0 }), { monotonicNow: () => 0 }), /disposition is closed/);
     assert.equal(sends, 1);
     const valid = d.readTraversal();
+    assert.equal(valid.detailWork[0].status, 'uncertain');
+    assert.equal(valid.detailGaps[0].status, 'unresolved');
     const duplicateGapState = { ...valid, detailGaps: [...valid.detailGaps, { ...valid.detailGaps[0], status: 'resolved' }] };
     assert.throws(() => d.writeTraversal(duplicateGapState), /Corrupt traversal checkpoint/);
     assert.deepEqual(d.readTraversal(), valid);
+  } finally { d.close(); rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('completed detail retry history cannot retain an authorized retry tuple', () => {
+  const { dir, path } = temp(); const d = DurableState.open(path);
+  try {
+    const base = discovered(); d.writeTraversal(base);
+    executeDurableDetail(d, base.detailWork[0].id, () => ({ id: 'known' }), (() => { let n = 0; return () => { if (++n === 1) throw Error('transient'); return { elapsed: 0 }; }; })(), { monotonicNow: () => 0 }, { observationCeiling: 1, knownSafeObservationError: () => true });
+    const completed = d.readTraversal();
+    const corrupted = { ...completed, detailWork: completed.detailWork.map(work => ({ ...work, attempts: work.attempts.map(attempt => ({ ...attempt, observationRetryDisposition: 'authorized' })) })) };
+    assert.throws(() => d.writeTraversal(corrupted), /Corrupt traversal checkpoint/);
+    assert.deepEqual(d.readTraversal(), completed);
   } finally { d.close(); rmSync(dir, { recursive: true, force: true }); }
 });
 
