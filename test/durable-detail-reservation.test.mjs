@@ -297,6 +297,19 @@ test('detail observation failure disposition persists across reopen and ignores 
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
+test('classified detail retry exhaustion remains closed across reopen with a larger ceiling', () => {
+  const { dir, path } = temp(); let db = DurableState.open(path); let sends = 0; let polls = 0;
+  try {
+    const base = discovered(); db.writeTraversal(base);
+    assert.throws(() => executeDurableDetail(db, base.detailWork[0].id, () => { sends++; return { id: 'known' }; }, () => { polls++; throw Error('classified'); }, { monotonicNow: () => 0 }, { observationCeiling: 1, knownSafeObservationError: () => true }), /classified|ceiling exhausted/);
+    const authorized = db.readTraversal().detailWork[0].attempts[0];
+    assert.equal(authorized.observationRetryOrdinal, 1);
+    db.close(); db = DurableState.open(path);
+    assert.throws(() => executeDurableDetail(db, base.detailWork[0].id, () => { sends++; return { id: 'wrong' }; }, () => { polls++; throw Error('should not poll'); }, { monotonicNow: () => 0 }, { observationCeiling: 8, knownSafeObservationError: () => true }), /closed|ceiling/i);
+    assert.equal(sends, 1); assert.equal(polls, 2);
+  } finally { db?.close(); rmSync(dir, { recursive: true, force: true }); }
+});
+
 test('detail retry authorization without its persisted delay is rejected before callbacks', () => {
   const { dir, path } = temp();
   try {
