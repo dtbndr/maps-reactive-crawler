@@ -265,6 +265,24 @@ test('invalid detail observation time closes retry path across reopen without re
   } finally { reopened.close(); rmSync(dir, { recursive: true, force: true }); }
 });
 
+test('invalid initial detail observations fail closed and persist known ID across reopen', () => {
+  for (const invalid of [null, NaN, -1, Infinity, '1', {}, undefined]) {
+    const { dir, path } = temp(); const d = DurableState.open(path); let sends = 0; let polls = 0;
+    try {
+      const base = discovered(); const workId = base.detailWork[0].id; d.writeTraversal(base);
+      assert.throws(() => executeDurableDetail(d, workId, () => { sends++; return { id: 'known' }; }, () => { polls++; return invalid; }, { monotonicNow: () => 0, observationCeiling: 0, knownSafeObservationError: () => false }), /Invalid detail observation time/);
+      d.close(); const reopened = DurableState.open(path);
+      try {
+        const state = reopened.readTraversal();
+        assert.equal(state.detailWork[0].attempts[0].knownId, 'known');
+        assert.equal(state.detailGaps[0].status, 'unresolved');
+        assert.throws(() => executeDurableDetail(reopened, workId, () => { sends++; return { id: 'duplicate' }; }, () => { polls++; return { elapsed: 0 }; }, { monotonicNow: () => 0, observationCeiling: 0 }), /closed/);
+      } finally { reopened.close(); }
+      assert.equal(sends, 1); assert.equal(polls, 1);
+    } finally { try { d.close(); } catch {} rmSync(dir, { recursive: true, force: true }); }
+  }
+});
+
 test('known-ID detail-only recovery settles moving time before active-time gate and never resends', () => {
   const { dir, path } = temp(); const d = DurableState.open(path); let sends = 0; let polls = 0; let samples = 0;
   try {
