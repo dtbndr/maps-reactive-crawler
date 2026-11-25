@@ -52,7 +52,11 @@ export function markDetailUncertain(state: TraversalState, workId: string): Trav
   const detailWork = state.detailWork!.map(item => item.id === workId ? { ...item, status: 'uncertain' as const, attempts: item.attempts.map((attempt, index) => index === item.attempts.length - 1 ? { ...attempt, status: 'uncertain' as const } : attempt) } : item);
   const gaps = state.detailGaps ?? [];
   const existing = gaps.some(gap => gap.workId === workId && gap.status === 'unresolved');
-  return { ...state, detailWork, detailGaps: existing ? gaps : [...gaps, { workId, identity: work.identity, observationIds: [...work.observationIds], status: 'unresolved' }] };
+  const globalGap = work.observationIds.map(id => state.candidates.find(candidate => candidate.observationId === id)?.sourceCell).find((key): key is string => Boolean(key));
+  const traversalGaps = globalGap && !state.gaps.some(gap => gap.cellKey === globalGap && gap.cause === 'uncertain' && gap.scope === 'global' && gap.status !== 'resolved' && gap.status !== 'skipped')
+    ? [...state.gaps, { cellKey: globalGap, cause: 'uncertain' as const, scope: 'global' as const, status: 'unresolved' as const }]
+    : state.gaps;
+  return { ...state, gaps: traversalGaps, detailWork, detailGaps: existing ? gaps : [...gaps, { workId, identity: work.identity, observationIds: [...work.observationIds], status: 'unresolved' }] };
 }
 export function completeDetailWork(state: TraversalState, workId: string, id: string): TraversalState {
   const work = state.detailWork?.find(item => item.id === workId);
@@ -61,7 +65,12 @@ export function completeDetailWork(state: TraversalState, workId: string, id: st
   const detailGaps = state.detailGaps ?? [];
   const matching = detailGaps.filter(gap => gap.identity === work.identity && gap.status === 'unresolved');
   const reconciled = work.identity.startsWith('verified:') && work.identity.length > 'verified:'.length && work.observationIds.every(observationId => state.candidates.some(candidate => candidate.observationId === observationId && candidate.verifiedCanonicalKey === work.identity.slice('verified:'.length)));
-  return { ...state, detailWork, detailGaps: detailGaps.map(gap => matching.includes(gap) && reconciled ? { ...gap, status: 'resolved' as const } : gap) };
+  const resolvedObservationIds = work.observationIds;
+  const gaps = state.gaps.map(gap => {
+    const belongsToWork = resolvedObservationIds.some(observationId => state.candidates.some(candidate => candidate.observationId === observationId && candidate.sourceCell === gap.cellKey));
+    return belongsToWork && gap.cause === 'uncertain' && gap.scope === 'global' && reconciled ? { ...gap, status: 'resolved' as const } : gap;
+  });
+  return { ...state, gaps, detailWork, detailGaps: detailGaps.map(gap => matching.includes(gap) && reconciled ? { ...gap, status: 'resolved' as const } : gap) };
 }
 export function dispatchDetailSubmission(state: TraversalState, workId: string): TraversalState {
   if (state.recoveryPending) throw new Error('Recovery accounting is unresolved');

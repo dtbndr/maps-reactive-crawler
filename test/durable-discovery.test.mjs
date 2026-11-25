@@ -11,6 +11,23 @@ import { DatabaseSync } from 'node:sqlite';
 const geometry = validateGeometry({ seed: { latitude: 0, longitude: 0 }, spacing: 100, area: { type: 'bbox', south: -1, north: 1, west: -1, east: 1 } });
 const temp = () => { const dir = mkdtempSync(join(tmpdir(), 'durable-discovery-')); return { dir, path: join(dir, 'state.db') }; };
 
+test('global no-ID discovery uncertainty blocks second work after SQLite reopen and debit', () => {
+  const { dir, path } = temp(); const ledger = join(dir, 'sends.txt');
+  try {
+    const state = DurableState.open(path); let initial = createTraversal(geometry, { cells: 5, submissions: 5, activeTime: 100 });
+    const first = initial.queue[0]; initial = { ...initial, queue: [first, '1,0'], admitted: [first, '1,0'], cells: { ...initial.cells, '1,0': { outcome: 'queued' } } };
+    state.writeTraversal(initial);
+    assert.throws(() => executeDurableDiscovery(state, work => { writeFileSync(ledger, work); return {}; }, () => ({ result: { status: 'empty' }, elapsed: 0 }), 'global', undefined, { monotonicNow: () => 0 }));
+    assert.equal(state.readTraversal().gaps.some(g => g.scope === 'global' && g.status === 'unresolved'), true);
+    state.close();
+    const reopened = DurableState.open(path);
+    assert.throws(() => executeDurableDiscovery(reopened, work => { writeFileSync(ledger, work); return { id: 'B' }; }, () => ({ result: { status: 'empty' }, elapsed: 0 }), 'global', undefined, { monotonicNow: () => 0 }), /paused|Global uncertainty/);
+    assert.equal(readFileSync(ledger, 'utf8').length > 0, true);
+    assert.equal(reopened.readTraversal().submissions, 1);
+    reopened.close();
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
 test('durable execution charges failed polls and retry waits using its monotonic clock', () => {
   const { dir, path } = temp();
   try {
