@@ -64,6 +64,7 @@ export function skipAttempt(state: TraversalState, key: string): TraversalState 
 export function authorizeResend(state: TraversalState, key: string, rationale = 'operator-approved', ceiling = 1): TraversalState {
   const i = state.attempts.map(a => a.cellKey).lastIndexOf(key);
   if (i < 0 || state.attempts[i].status !== 'uncertain') throw new Error('Attempt is not uncertain');
+  if (state.attempts[i].knownId) throw new Error('Known ID must be observed, not resubmitted');
   if (!rationale.trim()) throw new Error('Resend rationale is required');
   if (!Number.isSafeInteger(ceiling) || ceiling < 1) throw new Error('Invalid resend ceiling');
   if (state.resendCeiling !== undefined && state.resendCeiling !== ceiling) throw new Error('Resend ceiling is immutable');
