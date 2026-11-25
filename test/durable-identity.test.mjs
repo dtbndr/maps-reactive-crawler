@@ -82,7 +82,23 @@ test('durable checkpoint rejects observation links to unknown attempts or source
       { ...valid, detailWork: [{ ...valid.detailWork[0], observationIds: [...valid.detailWork[0].observationIds, valid.detailWork[1].observationIds[0]] }, valid.detailWork[1]] },
       { ...valid, detailWork: [{ ...valid.detailWork[0], identity: 'observation:wrong' }, valid.detailWork[1]] },
     ];
-    for (const corrupted of corruptions) assert.throws(() => durable.writeTraversal(corrupted), /Corrupt traversal checkpoint/);
+    const verified = discovered([
+      { id: 'one', verifiedCanonicalKey: 'canonical:shared' },
+      { id: 'two', verifiedCanonicalKey: 'canonical:shared' },
+    ]).state;
+    const [firstObservation, secondObservation] = verified.detailWork[0].observationIds;
+    const forgedMultipleRows = {
+      ...verified,
+      detailWork: [
+        { ...verified.detailWork[0], observationIds: [firstObservation] },
+        { ...verified.detailWork[0], id: 'detail:forged-second', observationIds: [secondObservation] },
+      ],
+    };
+    const malformedId = {
+      ...verified,
+      detailWork: [{ ...verified.detailWork[0], id: 'not-the-deterministic-id' }],
+    };
+    for (const corrupted of [...corruptions, forgedMultipleRows, malformedId]) assert.throws(() => durable.writeTraversal(corrupted), /Corrupt traversal checkpoint/);
     durable.close();
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });

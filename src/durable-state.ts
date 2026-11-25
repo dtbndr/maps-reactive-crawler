@@ -44,7 +44,8 @@ function validateTraversal(value: unknown): asserts value is TraversalState {
       workIds.add(work.id);
       const verified = work.identity.startsWith('verified:');
       const identityKey = verified ? work.identity.slice('verified:'.length) : undefined;
-      if (verified && !identityKey) return false;
+      if (verified && (!identityKey || work.id !== `detail:${work.identity}`)) return false;
+      if (!verified && work.id !== `detail:${work.identity}`) return false;
       const local = new Set<string>();
       for (const id of work.observationIds) {
         const candidate = observationById.get(id) as any;
