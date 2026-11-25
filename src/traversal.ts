@@ -28,6 +28,7 @@ export function authorizeSafeRetry(state: TraversalState, key: string, retryOrdi
   return { ...state, attempts };
 }
 export function reserveSubmission(state: TraversalState, key: string): TraversalState {
+  if (state.recoveryPending) throw new Error('Recovery accounting is unresolved');
   if (state.paused || state.cancelled || state.activeTime >= state.limits.activeTime) throw new Error('Submission stopped');
   if (state.submissions >= state.limits.submissions) throw new Error('Submission limit reached');
   if (state.attempts.some(a => a.cellKey === key && ['reserved','dispatched','uncertain','observing','observed','skipped'].includes(a.status))) throw new Error('Attempt outstanding');
@@ -37,6 +38,7 @@ export function reserveSubmission(state: TraversalState, key: string): Traversal
   return { ...state, submissions: state.submissions + 1, attempts: [...state.attempts, { id: `${workId}:attempt:${ordinal}`, workId, cellKey: key, status: 'reserved', submissionRetryOrdinal: 0 }] };
 }
 export function dispatchSubmission(state: TraversalState, key: string): TraversalState {
+  if (state.recoveryPending) throw new Error('Recovery accounting is unresolved');
   if (state.cancelled || state.paused || state.activeTime >= state.limits.activeTime) throw new Error('Dispatch stopped');
   if (state.submissions > state.limits.submissions) throw new Error('Submission limit prevents dispatch');
   const i = state.attempts.map(a => a.cellKey).lastIndexOf(key);
@@ -44,6 +46,7 @@ export function dispatchSubmission(state: TraversalState, key: string): Traversa
   const attempts = [...state.attempts]; attempts[i] = { ...attempts[i], status: 'dispatched' }; return { ...state, attempts };
 }
 export function admitNextCell(state: TraversalState): TraversalState {
+  if (state.recoveryPending) throw new Error('Recovery accounting is unresolved');
   if (state.cancelled) throw new Error('Traversal is cancelled');
   if (state.paused) throw new Error('Traversal is paused');
   if (state.activeTime >= state.limits.activeTime) throw new Error('Active-time limit reached');
