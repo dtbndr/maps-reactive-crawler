@@ -282,6 +282,12 @@ test('fresh-process crash matrix records independent sends and durable transitio
       const script = `import * as fs from 'node:fs'; import {DurableState} from ${JSON.stringify(durableUrl)}; import {executeDurableDiscovery,setDurableDiscoveryBoundaryHookForTest} from ${JSON.stringify(executorUrl)}; const d=DurableState.open(${JSON.stringify(path)}); setDurableDiscoveryBoundaryHookForTest(x=>{if(x===${JSON.stringify(boundary)}) process.exit(41)}); executeDurableDiscovery(d,workId=>{const p=${JSON.stringify(ledgerPath)}; const l=JSON.parse(fs.readFileSync(p)); if(l[workId]) throw Error('duplicate send '+workId); l[workId]='process-job-id'; fs.writeFileSync(p,JSON.stringify(l)); return {id:'process-job-id'}},()=>({elapsed:2,result:{status:'success',candidates:[{id:'fixture-result',coordinate:null,verifiedCanonicalKey:'fixture-place'},{id:'fixture-result',coordinate:null,verifiedCanonicalKey:'fixture-place'}]}}),'global',undefined,{monotonicNow:()=>0});`;
       const child = spawnSync(process.execPath, ['--input-type=module', '-e', script], { encoding: 'utf8' });
       assert.equal(child.status, 41, child.stderr);
+      let committedPayload;
+      if (boundary === 'committed') {
+        const rawCommitted = new DatabaseSync(path, { readOnly: true });
+        try { committedPayload = JSON.parse(rawCommitted.prepare('SELECT payload FROM traversal WHERE id=1').get().payload); }
+        finally { rawCommitted.close(); }
+      }
       const ledger = JSON.parse(readFileSync(ledgerPath, 'utf8'));
       const reopened = DurableState.open(path);
       const state = reopened.readTraversal();
@@ -320,9 +326,6 @@ test('fresh-process crash matrix records independent sends and durable transitio
         const recoveryScript = `import * as fs from 'node:fs'; import {DurableState} from ${JSON.stringify(durableUrl)}; import {executeDurableDiscovery,resolveDurableRecoveryDebit} from ${JSON.stringify(executorUrl)}; const d=DurableState.open(${JSON.stringify(path)}); if(!d.readTraversal().recoveryPending) throw Error('missing recovery accounting'); const beforeTime=d.readTraversal().activeTime; resolveDurableRecoveryDebit(d,1,'synthetic bounded interruption'); if(d.readTraversal().recoveryPending||d.readTraversal().activeTime!==beforeTime+1) throw Error('debit not persisted'); const ledgerPath=${JSON.stringify(ledgerPath)}; const before=d.readTraversal(); executeDurableDiscovery(d,w=>{const l=JSON.parse(fs.readFileSync(ledgerPath)); if(l[w]) throw new Error('duplicate work send'); l[w]=1; fs.writeFileSync(ledgerPath,JSON.stringify(l)); return {id:'id:'+w}},id=>({elapsed:1,result:{status:'empty'}}),'global',undefined,{monotonicNow:()=>0}); const s=d.readTraversal(); const ids=[s.attempts[0].id+':observation:1',s.attempts[0].id+':observation:2']; if(s.cells['0,0'].outcome!=='nonempty'||JSON.stringify(s.candidates.map(x=>x.observationId))!==JSON.stringify(ids)||JSON.stringify(s.detailWork.map(x=>[x.id,x.observationIds]))!==JSON.stringify([['detail:verified:fixture-place',ids]])||s.submissions!==2||s.activeTime!==1||s.cells['0,1'].outcome!=='empty'||s.attempts.length!==before.attempts.length+1) process.exit(43); d.close();`;
         const recoveredChild = spawnSync(process.execPath, ['--input-type=module', '-e', recoveryScript], { encoding: 'utf8' });
         assert.equal(recoveredChild.status, 0, recoveredChild.stderr);
-        const rawCommitted = new DatabaseSync(path);
-        const committedPayload = JSON.parse(rawCommitted.prepare('SELECT payload FROM traversal WHERE id=1').get().payload);
-        rawCommitted.close();
         const afterChild = DurableState.open(path);
         const committed = afterChild.readTraversal();
         assert.equal(committed.cells['0,0'].outcome, 'nonempty');
