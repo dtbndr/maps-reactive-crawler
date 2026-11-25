@@ -4,6 +4,7 @@ import { mkdtempSync, rmSync, writeFileSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
+import { DatabaseSync } from 'node:sqlite';
 import { DurableState } from '../dist/durable-state.js';
 import { validateGeometry, createTraversal, admitNextCell, reserveSubmission, observeKnownId, applyDiscoveryResult } from '../dist/index.js';
 
@@ -23,10 +24,23 @@ test('fresh-process detail recovery observes persisted ID without resending afte
     const child = `import * as fs from 'node:fs'; import {DurableState} from ${JSON.stringify(stateUrl)}; import {executeDurableDetail,setDurableDetailBoundaryHookForTest} from ${JSON.stringify(executorUrl)}; const d=DurableState.open(${JSON.stringify(path)}); setDurableDetailBoundaryHookForTest(x=>{if(x==='id-persisted')process.exit(41)}); executeDurableDetail(d,d.readTraversal().detailWork[0].id,w=>{fs.appendFileSync(${JSON.stringify(ledger)},w+'\\n');return {id:'detail-1'}},()=>({elapsed:0}),{monotonicNow:()=>0});`;
     const died = spawnSync(process.execPath, ['--input-type=module', '-e', child], { encoding: 'utf8' });
     assert.equal(died.status, 41, died.stderr);
-    assert.deepEqual(readFileSync(ledger, 'utf8').trim().split('\\n'), [base.detailWork[0].id]);
-    const resume = `import * as fs from 'node:fs'; import {DurableState} from ${JSON.stringify(stateUrl)}; import {resolveDurableRecoveryDebit} from ${JSON.stringify(executorUrl)}; import {executeDurableDetail} from ${JSON.stringify(executorUrl)}; const d=DurableState.open(${JSON.stringify(path)}); let sends=0,polls=0; const work=d.readTraversal().detailWork[0]; const before=d.readTraversal(); if(before.recoveryPending!==true||before.activeInterval!==false||before.submissions!==2||before.detailWork[0].attempts[0].status!=='dispatched'||before.detailWork[0].attempts[0].knownId!=='detail-1') throw Error(JSON.stringify({recoveryPending:before.recoveryPending,activeInterval:before.activeInterval,submissions:before.submissions,attempts:before.detailWork[0].attempts})); try { executeDurableDetail(d,work.id,()=>{sends++;return{id:'duplicate'}},()=>{polls++;return{elapsed:1}}); throw Error('execution unexpectedly accepted before debit'); } catch(e) { if(e.message==='execution unexpectedly accepted before debit') throw e; } if(sends!==0||polls!==0) throw Error(JSON.stringify({sends,polls})); resolveDurableRecoveryDebit(d,2,'synthetic conservative debit'); const debited=d.readTraversal(); if(debited.recoveryPending!==false||debited.activeInterval!==false||debited.activeTime!==2||debited.submissions!==2) throw Error(JSON.stringify(debited)); const s=executeDurableDetail(d,work.id,w=>{sends++;fs.appendFileSync(${JSON.stringify(ledger)},w+'\\n');throw Error('resend')},id=>{polls++;return{elapsed:1}},{monotonicNow:()=>0}); if(sends!==0||polls!==1||s.submissions!==2||s.activeTime!==2||s.recoveryPending!==false||s.activeInterval!==false||s.detailWork[0].status!=='completed') throw Error(JSON.stringify({sends,polls,s})); d.close();`;
+    const rawDb = new DatabaseSync(path, { readOnly: true });
+    try {
+      const payload = JSON.parse(rawDb.prepare('SELECT payload FROM traversal WHERE id=1').get().payload);
+      assert.equal(payload.activeInterval, true);
+      assert.equal(payload.detailWork[0].id, base.detailWork[0].id);
+      assert.equal(payload.detailWork[0].attempts[0].status, 'dispatched');
+      assert.equal(payload.detailWork[0].attempts[0].knownId, 'detail-1');
+    } finally { rawDb.close(); }
+    const resume = `import * as fs from 'node:fs'; import {DurableState} from ${JSON.stringify(stateUrl)}; import {resolveDurableRecoveryDebit} from ${JSON.stringify(executorUrl)}; import {executeDurableDetail} from ${JSON.stringify(executorUrl)}; const d=DurableState.open(${JSON.stringify(path)}); let sends=0,polls=0; const work=d.readTraversal().detailWork[0]; const before=d.readTraversal(); if(before.recoveryPending!==true||before.activeInterval!==false||before.submissions!==2||before.detailWork[0].attempts[0].status!=='dispatched'||before.detailWork[0].attempts[0].knownId!=='detail-1') throw Error(JSON.stringify({recoveryPending:before.recoveryPending,activeInterval:before.activeInterval,submissions:before.submissions,attempts:before.detailWork[0].attempts})); try { executeDurableDetail(d,work.id,()=>{sends++;return{id:'duplicate'}},()=>{polls++;return{elapsed:1}}); throw Error('execution unexpectedly accepted before debit'); } catch(e) { if(e.message==='execution unexpectedly accepted before debit') throw e; } if(sends!==0||polls!==0) throw Error(JSON.stringify({sends,polls})); resolveDurableRecoveryDebit(d,2,'synthetic conservative debit'); const debited=d.readTraversal(); if(debited.recoveryPending!==false||debited.activeInterval!==false||debited.activeTime!==2||debited.submissions!==2) throw Error(JSON.stringify(debited)); const s=executeDurableDetail(d,work.id,w=>{sends++;fs.appendFileSync(${JSON.stringify(ledger)},w+'\\n');throw Error('resend')},id=>{polls++;if(id!=='detail-1') throw Error('unexpected poll ID '+id);return{elapsed:1}},{monotonicNow:()=>0}); if(sends!==0||polls!==1||s.submissions!==2||s.activeTime!==2||s.recoveryPending!==false||s.activeInterval!==false||s.detailWork[0].status!=='completed') throw Error(JSON.stringify({sends,polls,s})); d.close();`;
     const resumed = spawnSync(process.execPath, ['--input-type=module', '-e', resume], { encoding: 'utf8' }); assert.equal(resumed.status, 0, resumed.stderr);
-    const final = DurableState.open(path).readTraversal();
+    const finalState = DurableState.open(path);
+    const final = finalState.readTraversal();
     assert.equal(final.detailWork[0].attempts[0].knownId, 'detail-1'); assert.equal(final.submissions, 2); assert.equal(final.activeTime, 2);
+    assert.equal(final.detailWork[0].status, 'completed');
+    assert.equal(final.recoveryPending, false); assert.equal(final.activeInterval, false);
+    assert.deepEqual(final.gaps, base.gaps); assert.deepEqual(final.detailGaps ?? [], base.detailGaps ?? []);
+    assert.deepEqual(readFileSync(ledger, 'utf8').trim().split('\\n'), [base.detailWork[0].id]);
+    finalState.close();
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
