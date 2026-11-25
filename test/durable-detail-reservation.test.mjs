@@ -62,6 +62,24 @@ test('detail executor enforces active-time cap before reserving and accounts cal
   } finally { d.close(); rmSync(dir, { recursive: true, force: true }); }
 });
 
+test('detail retry uses one timed execution interval for classified observation failures', () => {
+  const { dir, path } = temp(); const d = DurableState.open(path);
+  try {
+    const base = discovered(); d.writeTraversal(base);
+    let sends = 0; const observedIds = [];
+    const result = executeDurableDetail(d, base.detailWork[0].id, () => { sends++; return { id: 'retry-id' }; }, id => {
+      observedIds.push(id); if (observedIds.length === 1) throw new Error('transient'); return { elapsed: 0 };
+    }, { monotonicNow: () => 0 }, { observationCeiling: 1, knownSafeObservationError: () => true });
+    assert.equal(sends, 1);
+    assert.deepEqual(observedIds, ['retry-id', 'retry-id']);
+    assert.equal(result.detailWork[0].status, 'completed');
+    assert.equal(result.detailWork[0].attempts.at(-1).knownId, 'retry-id');
+    assert.equal(result.detailWork[0].attempts.at(-1).observationRetryOrdinal, 1);
+    assert.equal(result.detailWork[0].attempts.at(-1).observationRetryCeiling, 1);
+    assert.equal(result.detailWork[0].attempts.at(-1).observationRetryPendingDelayMs, undefined);
+  } finally { d.close(); rmSync(dir, { recursive: true, force: true }); }
+});
+
 test('detail callbacks reject nested execution and cancellation without extra sends, preserving time and final state', () => {
   const { dir, path } = temp(); const d = DurableState.open(path); let clock = 0; let sends = 0; let nestedRejected = false; let cancelRejected = false;
   try {
@@ -251,4 +269,16 @@ test('detail completion never resolves unrelated uncertainty gaps', async () => 
   state = { ...state, detailWork: state.detailWork.map((w, i) => i ? w : { ...w, identity: 'verified:one', attempts: w.attempts.map(a => ({ ...a, knownId: 'detail-id' })) }), gaps: [{ cellKey: 'detail:unrelated', cause: 'uncertain', status: 'unresolved' }] };
   const completed = completeDetailWork(state, workId, 'detail-id');
   assert.equal(completed.gaps[0].status, 'unresolved');
+});
+
+test('detail observation failure disposition persists across reopen and ignores changed retry policy', () => {
+  const { dir, path } = temp(); let sends = 0, polls = 0;
+  try {
+    let db = DurableState.open(path); const base = discovered(); db.writeTraversal(base);
+    assert.throws(() => executeDurableDetail(db, base.detailWork[0].id, () => { sends++; return { id: 'detail-known' }; }, () => { polls++; throw Error('unclassified'); }, { monotonicNow: () => 0 }), /unclassified/);
+    db.close(); db = DurableState.open(path);
+    assert.throws(() => executeDurableDetail(db, base.detailWork[0].id, () => { sends++; return { id: 'bad' }; }, () => { polls++; return { elapsed: 0 }; }, { monotonicNow: () => 0 }, { observationCeiling: 4, knownSafeObservationError: () => true }));
+    assert.equal(sends, 1); assert.equal(polls, 1);
+    assert.equal(db.readTraversal().detailWork[0].attempts[0].observationRetryDisposition, 'closed'); db.close();
+  } finally { rmSync(dir, { recursive: true, force: true }); }
 });

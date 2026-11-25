@@ -5,7 +5,7 @@ export type CandidateObservation = { id: string; coordinate?: { latitude: number
 export type TraversalLimits = { cells: number; submissions: number; activeTime: number };
 export type Attempt = { id: string; workId: string; cellKey: string; status: 'reserved' | 'dispatched' | 'uncertain' | 'observing' | 'observed' | 'skipped' | 'confirmed_no_send'; knownId?: string; retryOrdinal?: number; observationRetryCeiling?: number; retryCeiling?: number; submissionRetryOrdinal?: number; submissionRetryCeiling?: number; resendOrdinal?: number; resendCeiling?: number; approval?: { rationale: string }; recoveryEvidence?: { source: string; evidence: string; timestamp: string }; safeRetryAuthorization?: { ordinal: number; ceiling: number; delayMs?: number }; observationRetryPendingDelayMs?: number };
 export type TraversalReport = { stopReason: 'cancelled' | 'paused' | 'active_time' | 'submissions' | 'cells' | 'gaps' | 'failed' | 'unrecognized' | 'empty' | 'in_progress' | 'complete'; outcome: 'complete' | 'in_progress' | 'partial_empty_success' | 'partial_failed' | 'partial_unrecognized' | 'partial_limit' | 'partial_cancelled' | 'partial_gaps'; queue: string[]; blocked: string[]; gaps: TraversalState['gaps']; submissions: number; activeTime: number; cells: TraversalState['cells'] };
-export type DetailAttempt = { id: string; status: 'reserved' | 'dispatched' | 'uncertain' | 'completed' | 'skipped'; knownId?: string };
+export type DetailAttempt = { id: string; status: 'reserved' | 'dispatched' | 'uncertain' | 'completed' | 'skipped'; knownId?: string; observationRetryOrdinal?: number; observationRetryCeiling?: number; observationRetryPendingDelayMs?: number; observationRetryDisposition?: 'initial' | 'authorized' | 'closed' };
 export type DetailWork = { id: string; status: 'pending' | 'reserved' | 'dispatched' | 'uncertain' | 'completed' | 'skipped'; identity: string; observationIds: string[]; attempts: DetailAttempt[] };
 export type DetailGap = { workId: string; identity: string; observationIds: string[]; status: 'unresolved' | 'resolved' | 'skipped' };
 export type TraversalState = { detailWork?: DetailWork[]; detailGaps?: DetailGap[]; timeUnit: 'milliseconds'; geometry: Geometry; limits: TraversalLimits; queue: string[]; admitted: string[]; cells: Record<string, { outcome: CellOutcome }>; candidates: CandidateObservation[]; gaps: { cellKey: string; cause: 'failed' | 'unrecognized' | 'uncertain'; scope?: 'isolated' | 'global'; status?: 'unresolved' | 'resolved' | 'skipped' }[]; paused: boolean; submissions: number; activeTime: number; blocked: string[]; attempts: Attempt[]; cancelled: boolean; activeInterval?: boolean; recoveryPending?: boolean; cleanPauseEvidence?: { evidence: string }; recoveryDebitEvidence?: { elapsed: number; evidence: string }; resendCeiling?: number; resendApprovalsConsumed?: number };
@@ -58,10 +58,21 @@ export function markDetailUncertain(state: TraversalState, workId: string): Trav
     : state.gaps;
   return { ...state, gaps: traversalGaps, detailWork, detailGaps: existing ? gaps : [...gaps, { workId, identity: work.identity, observationIds: [...work.observationIds], status: 'unresolved' }] };
 }
+export function authorizeDetailObservationRetry(state: TraversalState, workId: string, ceiling: number, delayMs: number): TraversalState {
+  if (!Number.isSafeInteger(ceiling) || ceiling < 0 || !Number.isSafeInteger(delayMs) || delayMs < 0) throw new Error('Invalid finite detail retry policy');
+  const work = state.detailWork?.find(item => item.id === workId), attempt = work?.attempts.at(-1);
+  if (!work || !attempt?.knownId || !['dispatched', 'uncertain'].includes(attempt.status)) throw new Error('No known detail ID to retry observation');
+  if (attempt.observationRetryCeiling !== undefined && attempt.observationRetryCeiling !== ceiling) throw new Error('Detail retry ceiling is immutable');
+  const ordinal = (attempt.observationRetryOrdinal ?? 0) + 1;
+  if (ordinal > (attempt.observationRetryCeiling ?? ceiling)) throw new Error('Detail observation retry ceiling exhausted');
+  const detailWork = state.detailWork!.map(item => item.id === workId ? { ...item, status: 'uncertain' as const, attempts: item.attempts.map((value, index) => index === item.attempts.length - 1 ? { ...value, status: 'uncertain' as const, observationRetryOrdinal: ordinal, observationRetryCeiling: attempt.observationRetryCeiling ?? ceiling, observationRetryPendingDelayMs: delayMs, observationRetryDisposition: 'authorized' as const } : value) } : item);
+  return { ...state, detailWork };
+}
 export function completeDetailWork(state: TraversalState, workId: string, id: string): TraversalState {
+  if (state.cancelled || state.paused) throw new Error('Detail completion stopped');
   const work = state.detailWork?.find(item => item.id === workId);
   if (!work || !['dispatched', 'uncertain'].includes(work.status) || work.attempts.at(-1)?.knownId !== id) throw new Error('Detail result does not match durable ID');
-  const detailWork = state.detailWork!.map(item => item.id === workId ? { ...item, status: 'completed' as const, attempts: item.attempts.map((attempt, index) => index === item.attempts.length - 1 ? { ...attempt, status: 'completed' as const } : attempt) } : item);
+  const detailWork = state.detailWork!.map(item => item.id === workId ? { ...item, status: 'completed' as const, attempts: item.attempts.map((attempt, index) => index === item.attempts.length - 1 ? { ...attempt, status: 'completed' as const, observationRetryPendingDelayMs: undefined } : attempt) } : item);
   const detailGaps = state.detailGaps ?? [];
   const matching = detailGaps.filter(gap => gap.identity === work.identity && gap.status === 'unresolved');
   const reconciled = work.identity.startsWith('verified:') && work.identity.length > 'verified:'.length && work.observationIds.every(observationId => state.candidates.some(candidate => candidate.observationId === observationId && candidate.verifiedCanonicalKey === work.identity.slice('verified:'.length)));

@@ -41,7 +41,7 @@ function validateTraversal(value: unknown): asserts value is TraversalState {
     const workIds = new Set<string>();
     const linkedObservations = new Set<string>();
     if (!Array.isArray(s.detailWork) || !s.detailWork.every((work: any) => {
-      if (!work || typeof work.id !== 'string' || !work.id || workIds.has(work.id) || !['pending', 'reserved', 'dispatched', 'uncertain', 'completed', 'skipped'].includes(work.status) || !Array.isArray(work.attempts) || !work.attempts.every((attempt: any) => attempt && typeof attempt.id === 'string' && ['reserved', 'dispatched', 'uncertain', 'completed', 'skipped'].includes(attempt.status)) || typeof work.identity !== 'string' || !work.identity || !Array.isArray(work.observationIds) || work.observationIds.length === 0) return false;
+      if (!work || typeof work.id !== 'string' || !work.id || workIds.has(work.id) || !['pending', 'reserved', 'dispatched', 'uncertain', 'completed', 'skipped'].includes(work.status) || !Array.isArray(work.attempts) || !work.attempts.every((attempt: any) => attempt && typeof attempt.id === 'string' && ['reserved', 'dispatched', 'uncertain', 'completed', 'skipped'].includes(attempt.status) && (attempt.knownId === undefined || (typeof attempt.knownId === 'string' && !!attempt.knownId.trim())) && ['observationRetryOrdinal', 'observationRetryCeiling', 'observationRetryPendingDelayMs'].every(key => attempt[key] === undefined || (Number.isSafeInteger(attempt[key]) && attempt[key] >= 0)) && (attempt.observationRetryDisposition === undefined || ['initial', 'authorized', 'closed'].includes(attempt.observationRetryDisposition)) && (attempt.observationRetryOrdinal === undefined ? attempt.observationRetryCeiling === undefined && attempt.observationRetryPendingDelayMs === undefined : Number.isSafeInteger(attempt.observationRetryCeiling) && attempt.observationRetryOrdinal > 0 && attempt.observationRetryOrdinal <= attempt.observationRetryCeiling) && (attempt.observationRetryPendingDelayMs === undefined || (attempt.status === 'uncertain' && typeof attempt.knownId === 'string' && attempt.observationRetryDisposition === 'authorized'))) || typeof work.identity !== 'string' || !work.identity || !Array.isArray(work.observationIds) || work.observationIds.length === 0) return false;
       workIds.add(work.id);
       const verified = work.identity.startsWith('verified:');
       const identityKey = verified ? work.identity.slice('verified:'.length) : undefined;
@@ -59,6 +59,13 @@ function validateTraversal(value: unknown): asserts value is TraversalState {
     if (linkedObservations.size !== observationById.size) throw new Error('Corrupt traversal checkpoint');
     const attemptIds = new Set(s.attempts.map((attempt: any) => attempt.id));
     for (const work of s.detailWork) {
+      if (work.attempts.some((attempt: any, index: number) => {
+        const hasOrdinal = attempt.observationRetryOrdinal !== undefined;
+        const hasCeiling = attempt.observationRetryCeiling !== undefined;
+        const hasPendingDelay = attempt.observationRetryPendingDelayMs !== undefined;
+        const hasRetryHistory = hasOrdinal && hasCeiling && Number.isSafeInteger(attempt.observationRetryOrdinal) && attempt.observationRetryOrdinal > 0 && Number.isSafeInteger(attempt.observationRetryCeiling) && attempt.observationRetryCeiling >= attempt.observationRetryOrdinal;
+        return (hasOrdinal !== hasCeiling) || ((hasOrdinal || hasCeiling || hasPendingDelay) && (index !== work.attempts.length - 1 || !attempt.knownId || !['uncertain', 'completed'].includes(attempt.status) || !hasRetryHistory)) || (hasPendingDelay && (attempt.status !== 'uncertain' || !hasRetryHistory || !Number.isSafeInteger(attempt.observationRetryPendingDelayMs) || attempt.observationRetryPendingDelayMs < 0));
+      })) throw new Error('Corrupt traversal checkpoint');
       if ((work.status === 'pending' && work.attempts.length !== 0) || (work.status !== 'pending' && work.attempts.length === 0)) throw new Error('Corrupt traversal checkpoint');
       if (work.attempts.some((attempt: any, index: number) => attempt.id !== `${work.id}:attempt:${index + 1}` || attemptIds.has(attempt.id))) throw new Error('Corrupt traversal checkpoint');
       for (const attempt of work.attempts) attemptIds.add(attempt.id);
