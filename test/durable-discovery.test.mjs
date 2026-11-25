@@ -440,7 +440,7 @@ test('durable executor persists reservation before fixture send and applies resp
       const ledger = { sends, workId, id: 'synthetic-id-1' };
       writeFileSync(ledgerPath, JSON.stringify(ledger));
       return { id: ledger.id };
-    }, id => { assert.equal(id, 'synthetic-id-1'); return { elapsed: 1, result: { status: 'success', candidates: [{ id: 'raw-id', coordinate: null }, { id: 'raw-id', coordinate: null }] } }; });
+    }, id => { assert.equal(id, 'synthetic-id-1'); return { elapsed: 1, result: { status: 'success', candidates: [{ id: 'raw-id', coordinate: null }, { id: 'raw-id', coordinate: null }] } }; }, 'global', undefined, { monotonicNow: () => 0 });
     assert.equal(sends, 1);
     assert.equal(JSON.parse(readFileSync(ledgerPath, 'utf8')).sends, 1);
     assert.equal(result.attempts[0].knownId, 'synthetic-id-1');
