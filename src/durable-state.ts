@@ -67,7 +67,10 @@ function validateTraversal(value: unknown): asserts value is TraversalState {
     }
   }
   if (s.detailGaps !== undefined) {
+    const detailGapWorkIds = new Set<string>();
     if (!Array.isArray(s.detailGaps) || !s.detailGaps.every((gap: any) => {
+      if (typeof gap?.workId !== 'string' || detailGapWorkIds.has(gap.workId)) return false;
+      detailGapWorkIds.add(gap.workId);
       const work = s.detailWork?.find((item: any) => item.id === gap?.workId);
       if (!work || gap.identity !== work.identity || !Array.isArray(gap.observationIds) || gap.observationIds.length === 0 || new Set(gap.observationIds).size !== gap.observationIds.length || !gap.observationIds.every((id: string) => work.observationIds.includes(id)) || !['unresolved', 'resolved', 'skipped'].includes(gap.status)) return false;
       if (gap.status !== 'resolved') return true;

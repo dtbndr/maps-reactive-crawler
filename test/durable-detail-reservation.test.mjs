@@ -216,6 +216,10 @@ test('detail observation failure records linked unresolved gap and recovery neve
     const recovered = executeDurableDetail(d, workId, () => { sends++; return { id: 'duplicate' }; }, () => ({ elapsed: 0 }), { monotonicNow: () => 0 });
     assert.equal(recovered.detailWork[0].status, 'completed');
     assert.equal(sends, 1);
+    const valid = d.readTraversal();
+    const duplicateGapState = { ...valid, detailGaps: [...valid.detailGaps, { ...valid.detailGaps[0], status: 'resolved' }] };
+    assert.throws(() => d.writeTraversal(duplicateGapState), /invalid|valid/i);
+    assert.deepEqual(d.readTraversal(), valid);
   } finally { d.close(); rmSync(dir, { recursive: true, force: true }); }
 });
 
