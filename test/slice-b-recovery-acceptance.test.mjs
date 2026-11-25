@@ -23,15 +23,25 @@ test('Slice C: discovery fans out A/B/C; detail recovery refuses unknown B and b
     const died = spawnSync(process.execPath, ['--input-type=module', '-e', child], { encoding: 'utf8' });
     assert.equal(died.status, 41, died.stderr);
     const firstLedger = JSON.parse(readFileSync(ledger));
-    assert.equal(firstLedger.length, 3); // discovery followed by A then B; C was never sent
-    const resume = `import * as fs from 'node:fs'; import {DurableState} from ${JSON.stringify(stateUrl)}; import {executeDurableDetail,resolveDurableRecoveryDebit} from ${JSON.stringify(discoveryUrl)}; const d=DurableState.open(${JSON.stringify(path)}); resolveDurableRecoveryDebit(d,1,'bounded synthetic interruption'); const s=d.readTraversal(), w=s.detailWork; if(w[1].attempts.at(-1).knownId) throw Error('B unexpectedly has ID'); try{executeDurableDetail(d,w[1].id,x=>{fs.appendFileSync(${JSON.stringify(ledger)},JSON.stringify(x));throw Error('must refuse')},()=>({elapsed:0}),{monotonicNow:()=>0});throw Error('expected refusal')}catch(e){if(!/uncertain|refusing/i.test(e.message))throw e} try{executeDurableDetail(d,w[2].id,x=>{fs.appendFileSync(${JSON.stringify(ledger)},JSON.stringify(x));throw Error('C sent')},()=>({elapsed:0}),{monotonicNow:()=>0});throw Error('expected global block')}catch(e){if(!/Global uncertainty blocks/.test(e.message))throw e} d.close();`;
+    assert.deepEqual(firstLedger, ['work:0,0', 'detail:verified:place:A', 'detail:verified:place:B']);
+    let rawState = DurableState.open(path); const raw = rawState.readTraversal(); rawState.close();
+    assert.deepEqual(raw.detailWork.map(item => [item.id, item.status, item.attempts.map(attempt => attempt.knownId ?? null)]), [
+      ['detail:verified:place:A', 'completed', ['detail-A']],
+      ['detail:verified:place:B', 'dispatched', [null]],
+      ['detail:verified:place:C', 'pending', []],
+    ]);
+    assert.deepEqual(raw.detailGaps, []);
+    assert.equal(raw.submissions, 3); assert.equal(raw.activeTime, 0); assert.equal(raw.recoveryPending, true);
+    const resume = `import * as fs from 'node:fs'; import {DurableState} from ${JSON.stringify(stateUrl)}; import {executeDurableDetail,resolveDurableRecoveryDebit} from ${JSON.stringify(discoveryUrl)}; const d=DurableState.open(${JSON.stringify(path)}), l=${JSON.stringify(ledger)}; const before=d.readTraversal(), ledgerBefore=fs.readFileSync(l,'utf8'); let callbacks=0; const send=x=>{callbacks++;fs.appendFileSync(l,JSON.stringify(x));throw Error('unexpected callback')}; try{executeDurableDetail(d,before.detailWork[2].id,send,()=>({elapsed:0}),{monotonicNow:()=>0});throw Error('expected accounting block')}catch(e){if(!/Recovery accounting is unresolved/.test(e.message))throw e} if(callbacks||fs.readFileSync(l,'utf8')!==ledgerBefore||JSON.stringify(d.readTraversal())!==JSON.stringify(before))throw Error('pre-debit attempt changed state or ledger'); resolveDurableRecoveryDebit(d,1,'bounded synthetic interruption'); const debited=d.readTraversal(); if(debited.recoveryPending||debited.activeTime!==1||debited.submissions!==before.submissions)throw Error('incorrect recovery debit'); try{executeDurableDetail(d,before.detailWork[1].id,send,()=>({elapsed:0}),{monotonicNow:()=>0});throw Error('expected B refusal')}catch(e){if(!/uncertain|refusing/i.test(e.message))throw e} const afterB=d.readTraversal(); if(afterB.detailWork[1].status!=='uncertain'||afterB.detailWork[1].attempts.at(-1).knownId)throw Error('B not uncertain'); try{executeDurableDetail(d,before.detailWork[2].id,send,()=>({elapsed:0}),{monotonicNow:()=>0});throw Error('expected global block')}catch(e){if(!/Global uncertainty blocks/.test(e.message))throw e} if(callbacks||fs.readFileSync(l,'utf8')!==ledgerBefore)throw Error('unexpected callback'); d.close();`;
     const resumed = spawnSync(process.execPath, ['--input-type=module', '-e', resume], { encoding: 'utf8' });
     assert.equal(resumed.status, 0, resumed.stderr);
     const finalState = DurableState.open(path); const snapshot = finalState.readTraversal(); finalState.close();
     assert.deepEqual(JSON.parse(readFileSync(ledger)), firstLedger);
     assert.deepEqual(firstLedger, ['work:0,0', 'detail:verified:place:A', 'detail:verified:place:B']);
     assert.deepEqual(snapshot.detailWork.map(x => x.status), ['completed', 'uncertain', 'pending']);
-    assert.equal(snapshot.submissions, 3); assert.equal(snapshot.activeTime, 1);
-    assert.ok(snapshot.detailGaps?.length || snapshot.gaps?.length);
+    assert.equal(snapshot.submissions, 3); assert.equal(snapshot.activeTime, 1); assert.equal(snapshot.recoveryPending, false);
+    assert.deepEqual(snapshot.detailGaps, [
+      { workId: 'detail:verified:place:B', identity: 'verified:place:B', observationIds: [snapshot.detailWork[1].observationIds[0]], status: 'unresolved' },
+    ]);
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
