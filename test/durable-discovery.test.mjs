@@ -45,6 +45,18 @@ test('durable execution charges failed polls and retry waits using its monotonic
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
+test('reported observation elapsed does not double count monotonic active time', () => {
+  const { dir, path } = temp();
+  try {
+    const state = DurableState.open(path);
+    state.writeTraversal(createTraversal(geometry, { cells: 1, submissions: 1, activeTime: 100 }));
+    const result = executeDurableDiscovery(state, () => ({ id: 'known' }), () => ({ result: { status: 'empty' }, elapsed: 1 }), 'global', undefined, { monotonicNow: () => 0 });
+    assert.equal(result.activeTime, 0);
+    assert.equal(result.attempts.at(-1).knownId, 'known');
+    state.close();
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
 test('durable result settlement applies elapsed time and discovery atomically', () => {
   const { dir, path } = temp();
   try {

@@ -271,7 +271,7 @@ function executeDurableDiscoveryImpl(state: DurableState, send: SyntheticSend, o
     throw new Error('Invalid observation time');
   }
   boundaryHook?.('observed');
-  settle!(value => applyDiscoveryResult(observeKnownId(value, running!, id, elapsed), running!, response.result));
+  settle!(value => applyDiscoveryResult(observeKnownId(value, running!, id, 0), running!, response.result));
   boundaryHook?.('committed');
   return state.readTraversal();
 }
