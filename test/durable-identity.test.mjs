@@ -45,20 +45,20 @@ test('applying results migrates legacy observations to deterministic detail fano
   const legacy = { ...current, detailWork: undefined, candidates: [
     { ...current.candidates[0], observationId: 'legacy:1', attemptId: current.attempts[0].id, verifiedCanonicalKey: 'place:legacy' },
     { ...current.candidates[0], observationId: 'legacy:2', attemptId: current.attempts[0].id, verifiedCanonicalKey: 'place:legacy' },
-    { ...current.candidates[0], observationId: 'legacy:3', attemptId: current.attempts[0].id, verifiedCanonicalKey: undefined },
-  ], cells: { ...current.cells, [key]: { outcome: 'running' } } };
-  const original = structuredClone(legacy);
-  const empty = applyDiscoveryResult(legacy, key, { status: 'empty' });
-  assert.deepEqual(legacy, original);
+    { ...current.candidates[0], observationId: 'legacy:3', attemptId: current.attempts[0].id },
+  ], limits: { ...current.limits, submissions: 2 } };
+  const newKey = legacy.queue[0];
+  let pending = reserveSubmission(admitNextCell(legacy), newKey);
+  const newAttemptId = pending.attempts.at(-1).id;
+  pending = { ...pending, attempts: pending.attempts.map(attempt => attempt.id === newAttemptId ? { ...attempt, status: 'dispatched', knownId: 'new-results' } : attempt) };
+  pending = observeKnownId(pending, newKey, 'new-results', 0);
+  const original = structuredClone(pending);
+  const empty = applyDiscoveryResult(pending, newKey, { status: 'empty' });
+  assert.deepEqual(pending, original);
   assert.deepEqual(empty.detailWork.map(work => [work.id, work.observationIds]), [
     ['detail:verified:place:legacy', ['legacy:1', 'legacy:2']], ['detail:observation:legacy:3', ['legacy:3']],
   ]);
-  let nonemptyInput = admitNextCell(legacy);
-  const newKey = nonemptyInput.queue[0];
-  nonemptyInput = reserveSubmission(nonemptyInput, newKey);
-  const newAttemptId = nonemptyInput.attempts.at(-1).id;
-  nonemptyInput = { ...nonemptyInput, attempts: nonemptyInput.attempts.map(attempt => attempt.id === newAttemptId ? { ...attempt, status: 'dispatched', knownId: 'new-results' } : attempt), cells: { ...nonemptyInput.cells, [newKey]: { outcome: 'running' } } };
-  nonemptyInput = observeKnownId(nonemptyInput, newKey, 'new-results', 0);
+  const nonemptyInput = pending;
   const nonemptyBefore = structuredClone(nonemptyInput);
   const nonempty = applyDiscoveryResult(nonemptyInput, newKey, { status: 'success', candidates: [{ id: 'new' }] });
   assert.deepEqual(nonemptyInput, nonemptyBefore);
