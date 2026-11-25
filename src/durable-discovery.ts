@@ -23,6 +23,8 @@ export function executeDurableDetail(state: DurableState, workId: string, send: 
         state.transitionTraversal(value => ({ ...value, detailWork: value.detailWork!.map(item => item.id === workId ? { ...item, status: 'uncertain' as const, attempts: item.attempts.map((a, i) => i === item.attempts.length - 1 ? { ...a, status: 'uncertain' as const } : a) } : item) }));
         throw new Error('Detail dispatch outcome uncertain; refusing resend');
       }
+      settle();
+      current = state.readTraversal();
       if (current.cancelled || current.paused) throw new Error('Detail execution is paused');
       if (current.activeTime >= current.limits.activeTime) throw new Error('Active-time limit reached before detail observation');
       const observed = observe(attempt.knownId);

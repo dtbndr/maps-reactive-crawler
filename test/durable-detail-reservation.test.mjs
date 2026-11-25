@@ -141,6 +141,22 @@ test('invalid persisted detail reservation checkpoint fails closed', () => {
   } finally { try { d.close(); } catch {} rmSync(dir, { recursive: true, force: true }); }
 });
 
+test('known-ID detail-only recovery settles moving time before active-time gate and never resends', () => {
+  const { dir, path } = temp(); const d = DurableState.open(path); let sends = 0; let polls = 0; let samples = 0;
+  try {
+    const base = discovered(); const workId = base.detailWork[0].id;
+    let state = { ...base, queue: [], cells: Object.fromEntries(Object.entries(base.cells).map(([key]) => [key, { outcome: 'empty' }])) };
+    state = reserveDetailSubmission(state, workId); state = dispatchDetailSubmission(state, workId);
+    state = { ...state, activeTime: 99, limits: { ...state.limits, activeTime: 100 }, detailWork: state.detailWork.map((w, i) => i ? w : { ...w, attempts: w.attempts.map(a => ({ ...a, knownId: 'known' })) }) };
+    d.writeTraversal(state);
+    assert.throws(() => executeDurableDetail(d, workId, () => { sends++; return { id: 'wrong' }; }, () => { polls++; return { elapsed: 0 }; }, { monotonicNow: () => samples++ === 0 ? 0 : 1 }), /limit/i);
+    assert.equal(d.readTraversal().activeTime, 100); assert.equal(polls, 0); assert.equal(sends, 0);
+    d.transitionTraversal(value => ({ ...value, limits: { ...value.limits, activeTime: 200 } }));
+    const result = executeDurableDetail(d, workId, () => { sends++; return { id: 'wrong' }; }, () => { polls++; return { elapsed: 1 }; }, { monotonicNow: () => 1 });
+    assert.equal(polls, 1); assert.equal(sends, 0); assert.equal(result.detailWork[0].status, 'completed');
+  } finally { d.close(); rmSync(dir, { recursive: true, force: true }); }
+});
+
 test('detail-only execution accounts active time and recovered reservation is uncertain without resend', () => {
   const { dir, path } = temp(); const d = DurableState.open(path); let sends = 0; let now = 0;
   try {
