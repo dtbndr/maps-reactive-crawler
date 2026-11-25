@@ -9,6 +9,37 @@ import { DurableState } from '../dist/durable-state.js';
 import { validateGeometry, createTraversal, admitNextCell, reserveSubmission, observeKnownId, applyDiscoveryResult } from '../dist/index.js';
 
 const geometry = validateGeometry({ seed: { latitude: 0, longitude: 0 }, spacing: 100, area: { type: 'bbox', south: -1, north: 1, west: -1, east: 1 } });
+test('fresh-process detail recovery marks reserved and dispatched no-ID crashes uncertain without resend', () => {
+  for (const boundary of ['reserved', 'sent']) {
+    const dir = mkdtempSync(join(tmpdir(), 'detail-no-id-'));
+    const path = join(dir, 'state.db'); const ledger = join(dir, 'sends.json');
+    const executorUrl = new URL('../dist/durable-discovery.js', import.meta.url).href;
+    const stateUrl = new URL('../dist/durable-state.js', import.meta.url).href;
+    try {
+      let base = createTraversal(geometry, { cells: 5, submissions: 3, activeTime: 10 });
+      const key = base.queue[0]; base = reserveSubmission(admitNextCell(base), key);
+      base = { ...base, attempts: base.attempts.map(a => ({ ...a, status: 'dispatched', knownId: 'raw' })) };
+      base = observeKnownId(base, key, 'raw', 0);
+      base = applyDiscoveryResult(base, key, { status: 'success', candidates: [{ id: 'one' }] });
+      const d = DurableState.open(path); d.writeTraversal(base); d.close(); writeFileSync(ledger, '');
+      const child = `import * as fs from 'node:fs'; import {DurableState} from ${JSON.stringify(stateUrl)}; import {executeDurableDetail,setDurableDetailBoundaryHookForTest} from ${JSON.stringify(executorUrl)}; const d=DurableState.open(${JSON.stringify(path)}); setDurableDetailBoundaryHookForTest(x=>{if(x===${JSON.stringify(boundary)})process.exit(41)}); executeDurableDetail(d,d.readTraversal().detailWork[0].id,w=>{fs.appendFileSync(${JSON.stringify(ledger)},w+'\\n');return{id:'never-returned'}},()=>({elapsed:0}),{monotonicNow:()=>0});`;
+      const died = spawnSync(process.execPath, ['--input-type=module', '-e', child], { encoding: 'utf8' });
+      assert.equal(died.status, 41, died.stderr);
+      const raw = new DatabaseSync(path, { readOnly: true });
+      try {
+        const payload = JSON.parse(raw.prepare('SELECT payload FROM traversal WHERE id=1').get().payload);
+        assert.equal(payload.detailWork[0].status, boundary === 'sent' ? 'dispatched' : boundary);
+        assert.equal(payload.detailWork[0].attempts.at(-1).knownId, undefined);
+      } finally { raw.close(); }
+      assert.equal(readFileSync(ledger, 'utf8'), boundary === 'sent' ? `${base.detailWork[0].id}\n` : '');
+      const restart = `import * as fs from 'node:fs'; import {DurableState} from ${JSON.stringify(stateUrl)}; import {executeDurableDetail,resolveDurableRecoveryDebit} from ${JSON.stringify(executorUrl)}; const d=DurableState.open(${JSON.stringify(path)}); let sends=0; const w=d.readTraversal().detailWork[0]; try{executeDurableDetail(d,w.id,x=>{sends++;fs.appendFileSync(${JSON.stringify(ledger)},x+'\\n');return{id:'duplicate'}},()=>({elapsed:0}))}catch{} const pending=d.readTraversal(); if(pending.recoveryPending!==true||sends!==0)throw Error(JSON.stringify(pending)); resolveDurableRecoveryDebit(d,2,'uncertain detail send'); const after=d.readTraversal(); if(after.recoveryPending||after.submissions!==2)throw Error(JSON.stringify(after)); try{executeDurableDetail(d,w.id,()=>{sends++;return{id:'bad'}},()=>({elapsed:0}))}catch{} const parked=d.readTraversal(); if(sends!==0||parked.detailWork[0].status!=='uncertain'||!parked.detailGaps?.length)throw Error(JSON.stringify(parked)); d.close();`;
+      const resumed = spawnSync(process.execPath, ['--input-type=module', '-e', restart], { encoding: 'utf8' });
+      assert.equal(resumed.status, 0, resumed.stderr);
+      assert.equal(readFileSync(ledger, 'utf8'), boundary === 'sent' ? `${base.detailWork[0].id}\n` : '');
+    } finally { rmSync(dir, { recursive: true, force: true }); }
+  }
+});
+
 test('fresh-process detail recovery observes persisted ID without resending after crash', () => {
   const dir = mkdtempSync(join(tmpdir(), 'detail-crash-'));
   const path = join(dir, 'state.db'); const ledger = join(dir, 'sends.json');

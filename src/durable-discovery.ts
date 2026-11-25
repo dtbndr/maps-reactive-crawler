@@ -5,7 +5,7 @@ export type SyntheticSend = (workId: string) => { id: string };
 export type SyntheticObserve = (id: string) => { result: DiscoveryResult; elapsed: number };
 export type SyntheticDetailSend = (workId: string) => { id: string };
 export type SyntheticDetailObserve = (id: string) => { elapsed: number };
-export type DurableDetailBoundary = 'id-persisted';
+export type DurableDetailBoundary = 'reserved' | 'dispatched' | 'sent' | 'id-persisted';
 let detailBoundaryHook: ((boundary: DurableDetailBoundary) => void) | undefined;
 /** Test-only crash injection seam for durable detail execution. */
 export function setDurableDetailBoundaryHookForTest(hook: ((boundary: DurableDetailBoundary) => void) | undefined): void { detailBoundaryHook = hook; }
@@ -40,9 +40,12 @@ export function executeDurableDetail(state: DurableState, workId: string, send: 
     settle();
     if (state.readTraversal().activeTime >= state.readTraversal().limits.activeTime) throw new Error('Active-time limit reached before detail reservation');
     state.transitionTraversal(value => reserveDetailSubmission(value, workId));
+    detailBoundaryHook?.('reserved');
     state.transitionTraversal(value => dispatchDetailSubmission(value, workId));
+    detailBoundaryHook?.('dispatched');
     let id: string;
     try { id = send(workId).id; } catch (error) { throw error; }
+    detailBoundaryHook?.('sent');
     if (!id) throw new Error('Synthetic detail send returned no ID');
     state.transitionTraversal(value => recordDetailId(value, workId, id));
     detailBoundaryHook?.('id-persisted');
