@@ -43,6 +43,8 @@ test('detail dispatch is blocked by paused, cancelled, recovery, and time limits
   }
   assert.throws(() => dispatchDetailSubmission({ ...base, submissions: 4 }, base.detailWork[0].id), /limit/i);
   assert.doesNotThrow(() => dispatchDetailSubmission(base, base.detailWork[0].id));
+  const emptyAttempts = { ...base, detailWork: base.detailWork.map((w, i) => i ? w : { ...w, attempts: [] }) };
+  assert.throws(() => dispatchDetailSubmission(emptyAttempts, base.detailWork[0].id), /attempt/i);
   for (const attempt of [{ ...base.detailWork[0].attempts[0], id: 'wrong' }, { ...base.detailWork[0].attempts[0], status: 'dispatched' }]) {
     const malformed = { ...base, detailWork: base.detailWork.map((w, i) => i ? w : { ...w, attempts: [attempt] }) };
     assert.throws(() => dispatchDetailSubmission(malformed, base.detailWork[0].id), /attempt/i);
@@ -60,7 +62,7 @@ test('corrupt detail checkpoint variants reject without changing stored payload'
     ['duplicate attempt IDs', { ...reserved, detailWork: reserved.detailWork.map(w => ({ ...w, attempts: [{ id: 'duplicate', status: 'reserved' }] })) }],
     ['cross-owner attempt ID', { ...reserved, detailWork: reserved.detailWork.map((w, i) => i ? { ...w, status: 'reserved', attempts: [{ id: reserved.detailWork[0].attempts[0].id, status: 'reserved' }] } : w) }],
     ['malformed ordinal', { ...reserved, detailWork: reserved.detailWork.map((w, i) => i ? w : { ...w, attempts: [{ ...w.attempts[0], id: `${w.id}:attempt:2` }] }) }],
-    ['unresolved earlier reservation', { ...reserved, detailWork: reserved.detailWork.map((w, i) => i ? w : { ...w, status: 'dispatched', attempts: [{ id: `${w.id}:attempt:1`, status: 'reserved' }, { id: `${w.id}:attempt:2`, status: 'dispatched' }] }) }],
+    ['unresolved earlier reservation', { ...reserved, submissions: reserved.submissions + 1, detailWork: reserved.detailWork.map((w, i) => i ? w : { ...w, status: 'dispatched', attempts: [{ id: `${w.id}:attempt:1`, status: 'reserved' }, { id: `${w.id}:attempt:2`, status: 'dispatched' }] }) }],
     ['malformed attempt ID', { ...reserved, detailWork: reserved.detailWork.map((w, i) => i ? w : { ...w, attempts: [{ ...w.attempts[0], id: '' }] }) }],
     ['duplicate work IDs', { ...base, detailWork: [base.detailWork[0], { ...base.detailWork[1], id: base.detailWork[0].id }] }],
   ];
