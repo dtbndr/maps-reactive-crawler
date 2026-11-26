@@ -84,12 +84,7 @@ Before editing affected durable behavior, inspect existing tests and add and run
 - [x] Add fixture parser/identity and geometry and finite limit validation. Test malformed fixture, missing references, duplicate keys, unsupported version, whitespace-only matching `id`/`observationId`, and invalid geometry/limits; assert rejection before checkpoint mutation or sends. Same bytes at another path yield the same identity; changed bytes differ.
 - [x] Demonstrate focused RED for each contract, then build and run `mise exec -- node --test test/operator-fixture.test.mjs` and the full check as above.
 
-**Carry-forward:** Validated configuration and exact-byte fixture identity only; no operator execution. The targeted follow-up below does not invalidate this completed slice.
-
-### Slice A1 follow-up: Fixture candidate validation gate
-**Goal**: Close the externally reviewed validation gap before execution, without reopening A1's completed record.
-- [ ] Reject blank or whitespace-only `verifiedCanonicalKey` values and candidate coordinates outside inclusive latitude [-90, 90] and longitude [-180, 180] before checkpoint mutation or sends. Accept boundary coordinates and valid coordinates outside the crawl area; do not filter returned places.
-- [ ] Add focused fixture regressions for each invalid class, inclusive boundaries and valid outside-area candidates; demonstrate RED, build, run `mise exec -- node --test test/operator-fixture.test.mjs`, and run the full check. This gate must pass before B3 enables execution.
+**Carry-forward:** Validated configuration and exact-byte fixture identity only; no operator execution. Slice A4 does not invalidate this completed slice.
 
 ### Slice A2: Atomic publication and SQLite writer claim
 **Status**: Blocked pending approval of the revised brief; no implementation authorized.
@@ -114,7 +109,12 @@ Before editing affected durable behavior, inspect existing tests and add and run
 
 **Watch out:** Do not use `DurableState.open` as read-only inspection. Validate before cap changes, and never infer known IDs from fixture ordering.
 
-**Carry-forward:** A1 and A2 contracts plus same-connection validated identity-bound checkpoints and stable fixture lookup. Operator execution may be enabled only after all three slices pass; do not yet claim connected acceptance.
+**Carry-forward:** A1 and A2 contracts plus same-connection validated identity-bound checkpoints and stable fixture lookup. Operator execution may be enabled only after A1 through A4 pass; do not yet claim connected acceptance.
+
+### Slice A4: Fixture candidate validation gate
+**Goal**: Close the externally reviewed A1 validation gap before execution, without reopening A1's completed record.
+- [ ] Reject blank or whitespace-only `verifiedCanonicalKey` values and candidate coordinates outside inclusive latitude [-90, 90] and longitude [-180, 180] before checkpoint mutation or sends. Accept boundary coordinates and valid coordinates outside the crawl area; do not filter returned places.
+- [ ] Add focused fixture regressions for each invalid class, inclusive boundaries and valid outside-area candidates; demonstrate RED, build, run `mise exec -- node --test test/operator-fixture.test.mjs`, and run the full check. This gate must pass before B3 enables execution.
 
 ### Slice B1: Pre-invocation eligibility prerequisite
 **Goal**: Independently establish eligibility decisions without enabling shared operator execution.
@@ -133,7 +133,7 @@ Before editing affected durable behavior, inspect existing tests and add and run
 **Carry-forward:** Tested timed boundary and typed stop signals only; no enabled shared run path.
 
 ### Slice B3: Serial operator execution
-**Goal**: Connect shared start/resume only after B1, B2 and the A1 follow-up validation gate pass.
+**Goal**: Connect shared start/resume only after B1, B2 and the A4 validation gate pass.
 - [ ] Implement shared asynchronous start/resume and preflight using both prerequisites. Execute discovery serially; persist pending detail but never reserve or dispatch it. Test cell-cap admitted draining, blocked frontier not promoted by cap edit, simultaneous caps, known-ID observation at submission/time cap, no blind resend, no implicit unpause/debit/approval, identity validation before resume changes limits or other durable state, and truthful partial outcomes versus unexpected exceptions. Test equal and decreased explicit caps rejected atomically, mixed valid/invalid cap updates unchanged, omitted caps retained and strictly increased caps accepted. Test an original thrown command fails, then parked-only unknown-ID uncertainty returns a blocked document after a successful claim without timed execution, debit or sends; an isolated parked gap does not prevent other eligible work.
 - [ ] Demonstrate focused RED, build and run `mise exec -- node --test test/operator-execution.test.mjs`, then full check as above; record RED and GREEN.
 
