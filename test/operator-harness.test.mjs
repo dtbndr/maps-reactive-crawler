@@ -78,10 +78,16 @@ test('dispatched boundary fault is isolated to the harness and preserves writer 
     const fixture = join(directory, 'fixture.json');
     const checkpoint = join(directory, 'state.db');
     const witness = join(directory, 'witness.ndjson');
+    const observationCalls = join(directory, 'observation-calls.ndjson');
     writeFileSync(fixture, JSON.stringify({ version: 1, discoveries: { 'work:0,0': { id: 'job-0', observationId: 'job-0' } }, observations: { 'job-0': { result: { status: 'empty' }, elapsed: 1 } } }));
-    const child = spawnSync(process.execPath, ['test/operator-harness.mjs', 'start', JSON.stringify({ checkpoint, fixture, geometry, limits, witness, fault: 'dispatched-boundary' })], { encoding: 'utf8' });
+    writeFileSync(observationCalls, '');
+    const child = spawnSync(process.execPath, ['test/operator-harness.mjs', 'start', JSON.stringify({ checkpoint, fixture, geometry, limits, witness, observationCalls, fault: 'dispatched-boundary' })], { encoding: 'utf8' });
     assert.notEqual(child.status, 0);
     assert.match(child.stderr, /dispatched boundary fault/);
+    const events = readFileSync(witness, 'utf8').trim().split('\n').map(line => JSON.parse(line));
+    assert.deepEqual(events.map(event => event.type), ['preflight']);
+    assert.equal(events.some(event => event.type === 'send'), false);
+    assert.equal(readFileSync(observationCalls, 'utf8'), '');
     const identity = operator.parseSyntheticFixture(readFileSync(fixture)).identity;
     const durable = DurableState.openBound(checkpoint, identity);
     try {

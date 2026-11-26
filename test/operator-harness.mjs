@@ -23,6 +23,7 @@ const result = await runOperatorWithDependencies(command, options, {
     return { id: fixture.discoveries[workId].id };
   },
   observe: id => {
+    if (options.observationCalls) appendFileSync(options.observationCalls, `${id}\n`);
     if (options.fault === 'settlement-write') setAfterTraversalWriteForTest(() => { throw new Error('settlement failed'); });
     return fixture.observations[id];
   },
