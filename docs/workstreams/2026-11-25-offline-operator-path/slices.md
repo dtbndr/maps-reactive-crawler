@@ -149,8 +149,8 @@ Before editing affected durable behavior, inspect existing tests and add and run
 
 ### Slice B5: CLI execution adapter
 **Goal**: Add strict process-facing start, resume and cancel without a parallel scheduler.
-- [ ] Implement these commands using the shared library, including strict parsing, preflight, stdout/stderr and exit contracts above; status/export arrive in Slice C. Test parser and adapter behavior against a stubbed shared command result, including malformed input, forwarding equal/decreased explicit cap inputs and library rejection diagnostics without duplicating cap validation in the CLI, busy and exceptions, preflight ordering and successful command routing. Do not assert production success documents or claim the final writer-response snapshot contract until B6 passes.
-- [ ] Demonstrate focused RED, build and run `mise exec -- node --test test/operator-cli.test.mjs`, then full check as above; record RED and GREEN.
+- [x] Implement these commands using the shared library, including strict parsing, preflight, stdout/stderr and exit contracts above; status/export arrive in Slice C. Test parser and adapter behavior against a stubbed shared command result, including malformed input, forwarding equal/decreased explicit cap inputs and library rejection diagnostics without duplicating cap validation in the CLI, busy and exceptions, preflight ordering and successful command routing. Do not assert production success documents or claim the final writer-response snapshot contract until B6 passes.
+- [x] Record focused RED and GREEN, build and run `mise exec -- node --test test/operator-cli.test.mjs`, then full check. Operator preauthorized a B5-specific exception for partial historical RED; masked assertions are not claimed as RED.
 
 **Carry-forward:** B1, B2, B3 and B4 shared execution and cancellation plus strict CLI adaptation. B6 depends on B5; B7 depends on both.
 

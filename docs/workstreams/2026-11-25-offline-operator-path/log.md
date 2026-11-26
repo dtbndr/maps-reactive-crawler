@@ -2,6 +2,9 @@
 
 Opt-ins: playback=on, external review=on
 
+## B5 acceptance
+B5 complete at 438d667 after independent behavioral review, focused 6/6 and full 303/303. Applied the operator's preauthorized slice-specific exception for partial historical RED: six raw behavioral failures were retained, but early assertions masked other contracts; passing probes are GREEN evidence, not historical RED. No other gate was waived.
+
 ## B4 acceptance
 B4 complete at bece11f after independent behavioral review and full 297/297 check. The operator accepted a B4-specific exception for incomplete original historical RED: original timer-abort RED observed five sends instead of one; later pre-fix RED for private storage, retained lease and snapshot substitution concerns those follow-up fixes, not original remaining B4 contracts. An earlier full-check failure's raw output was overwritten; its cause remains unverified. Three separately approved retry-test clocks were made deterministic and independently reviewed.
 
