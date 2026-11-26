@@ -132,3 +132,5 @@ This is a behavioral assertion failure: `work:00,0` was accepted although `cellK
 - `src/operator.ts` now accepts only canonical numeric coordinate tokens in `work:<column>,<row>` IDs; this follows `cellKey`/traversal generation and prevents fixture entries that cannot match generated work IDs.
 - Changed files: `src/operator.ts`, `test/operator-fixture.test.mjs`, and this report.
 - Self-review: scope remains fixture identity and validation; no execution or persistence behavior changed. No cross-slice conflicts or residual concerns identified. No files were staged before committing.
+
+Controller record: original per-contract historical RED unavailable; reconstructed RED at 7331380 in detached scratch worktree with src/index.ts restored from 6d401bf, src/operator.ts removed, minimal pass-through config and JSON parse stubs, then build and `mise exec -- node --test test/operator-fixture.test.mjs`: assertion failures `Missing expected exception` and identity `Expected values to be strictly equal`; GREEN at 7331380 per focused 10/10 and full 232/232. Scratch worktree removed. This is fresh reconstruction, not historical evidence.
