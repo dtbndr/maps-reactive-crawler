@@ -151,6 +151,50 @@ export class DurableState {
       afterCreateForTest?.();
     } finally { rmSync(staging, { recursive: true, force: true }); }
   }
+  static openBound(path: string, fixtureIdentity: string): DurableState {
+    if (typeof fixtureIdentity !== 'string' || !/^[a-f0-9]{64}$/.test(fixtureIdentity)) throw new Error('Invalid fixture identity');
+    const db = new DatabaseSync(path);
+    try {
+      db.exec('BEGIN IMMEDIATE');
+      const tables = new Set(db.prepare("SELECT name FROM sqlite_master WHERE type='table'").all().map((row: any) => row.name));
+      if (!tables.has('checkpoint') || !tables.has('owner') || !tables.has('operator_binding') || !tables.has('traversal')) throw new Error('Corrupt state: missing bound checkpoint schema');
+      const checkpoint = db.prepare('SELECT version, payload FROM checkpoint WHERE id=1').get();
+      if (!checkpoint || checkpoint.version !== 1) throw new Error('Unsupported or missing checkpoint schema version');
+      validate(JSON.parse(String(checkpoint.payload)));
+      const binding = db.prepare('SELECT payload FROM operator_binding WHERE id=1').get();
+      if (!binding) throw new Error('Corrupt state: missing operator binding');
+      let parsedBinding: unknown;
+      try { parsedBinding = JSON.parse(String(binding.payload)); } catch { throw new Error('Corrupt state: invalid operator binding'); }
+      if (!parsedBinding || typeof parsedBinding !== 'object' || Array.isArray(parsedBinding) || Object.keys(parsedBinding).length !== 2 || (parsedBinding as any).version !== 1 || typeof (parsedBinding as any).fixtureIdentity !== 'string' || !/^[a-f0-9]{64}$/.test((parsedBinding as any).fixtureIdentity)) throw new Error('Corrupt state: invalid operator binding');
+      if ((parsedBinding as any).fixtureIdentity !== fixtureIdentity) throw new Error('Fixture identity does not match checkpoint binding');
+      const traversalRow = db.prepare('SELECT payload FROM traversal WHERE id=1').get();
+      if (!traversalRow) throw new Error('Corrupt state: missing traversal');
+      const traversal = JSON.parse(String(traversalRow.payload));
+      validateTraversal(traversal);
+      if (traversal.timeUnit !== 'milliseconds') throw new Error('Durable traversal time unit is unmarked; explicit migration required');
+      const owner = db.prepare('SELECT pid FROM owner WHERE id=1').get();
+      let recoveredPreviousOwner = false;
+      afterOwnerReadForTest?.();
+      if (owner) {
+        const pid = owner.pid;
+        if (typeof pid !== 'number' || !Number.isSafeInteger(pid) || pid < 1 || pid > 2147483647) throw new Error('Corrupt state: invalid owner PID');
+        if (isAlive(pid)) throw new Error('Database is already owned');
+        recoveredPreviousOwner = true;
+      }
+      if (traversal.activeInterval === true || (recoveredPreviousOwner && !traversal.cleanPauseEvidence)) {
+        db.prepare('UPDATE traversal SET payload=? WHERE id=1').run(JSON.stringify({ ...traversal, recoveryPending: true, activeInterval: false }));
+      } else if (recoveredPreviousOwner) {
+        db.prepare('UPDATE traversal SET payload=? WHERE id=1').run(JSON.stringify({ ...traversal, recoveryPending: false }));
+      }
+      db.prepare('INSERT OR REPLACE INTO owner(id,pid) VALUES(1,?)').run(process.pid);
+      db.exec('COMMIT');
+      return new DurableState(db);
+    } catch (error) {
+      try { db.exec('ROLLBACK'); } catch (rollbackError) { if (!(rollbackError instanceof Error)) throw rollbackError; }
+      try { db.close(); } catch (closeError) { if (!(closeError instanceof Error)) throw closeError; }
+      throw error;
+    }
+  }
   static open(path: string): DurableState {
     let db: DatabaseSync;
     const staging = mkdtempSync(join(dirname(path), `.${basename(path)}.init-`));
