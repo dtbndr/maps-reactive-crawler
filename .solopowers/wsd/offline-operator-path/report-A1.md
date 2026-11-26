@@ -94,3 +94,41 @@ The RED command was rerun after correcting the whitespace fixture to contain an 
 Fixes: duplicate/unknown-key parsing now uses a null-prototype JSON object so `__proto__` remains visible for validation; candidate coordinates must be plain records with exactly latitude/longitude; failed-result scope must be a string enum (not coercible arrays); tokenizer whitespace now follows JSON's four permitted whitespace characters.
 
 Self-review: all four reported defects now have focused negative assertions and pass. No cross-slice conflicts or remaining concerns identified.
+
+## Fix round 2 — discovery work ID format and whitespace matching assertion
+
+### Verification and ruling
+
+`src/traversal.ts` builds discovery work IDs as `` `work:${key}` ``, where `key` comes from `cellKey(column, row)`; `cellKey` in `src/index.ts` requires integer indices and returns `` `${column},${row}` ``. Thus `work:00,0` is not emitted by the core and cannot match a generated work ID. Fixture validation accepts these keys as arbitrary nonblank strings, so they can silently fail to match. Matching `id` and `observationId`/observation-key whitespace also needed explicit separate assertions rather than relying on a combined generic invalid-fixtures test.
+
+Ruling: accept only work IDs whose two coordinate tokens are integer strings in the same canonical spelling produced by JavaScript interpolation of integer indices — this prevents accepted fixture discoveries that core work generation cannot match — cost if wrong: callers relying on arbitrary work labels or noncanonical spellings will need to normalize fixture keys.
+
+### RED (recorded before implementation)
+
+After adding focused coverage and before modifying implementation, ran:
+
+```text
+mise exec -- npm run build && mise exec -- node --test test/operator-fixture.test.mjs
+```
+
+The initial build passed; after adding the separately named whitespace-preservation assertion, reran the focused suite before implementation. The suite exposed the expected behavioral gap (9 passed, 1 failed). Verbatim excerpt from that final pre-edit RED run:
+
+```text
+✖ rejects noncanonical core discovery work IDs (0.434583ms)
+ℹ tests 10
+ℹ pass 9
+ℹ fail 1
+  AssertionError [ERR_ASSERTION]: Missing expected exception.
+```
+
+This is a behavioral assertion failure: `work:00,0` was accepted although `cellKey(0, 0)` yields `0,0` and traversal emits `work:0,0`. It was not a module-load or test execution failure.
+
+### GREEN and completion evidence
+
+- `mise exec -- npm run build && mise exec -- node --test test/operator-fixture.test.mjs` — passed; 10 focused tests, 0 failures.
+- `mise exec -- npm run check` — passed; typecheck passed, 232 tests passed (0 failed), build passed.
+- `git diff --check` — passed.
+- Added a separately named preservation test for whitespace-only `id`, matching `observationId`, and observation lookup key. The existing exact-byte identity behavior test is also explicitly labeled `[preservation]`.
+- `src/operator.ts` now accepts only canonical numeric coordinate tokens in `work:<column>,<row>` IDs; this follows `cellKey`/traversal generation and prevents fixture entries that cannot match generated work IDs.
+- Changed files: `src/operator.ts`, `test/operator-fixture.test.mjs`, and this report.
+- Self-review: scope remains fixture identity and validation; no execution or persistence behavior changed. No cross-slice conflicts or residual concerns identified. No files were staged before committing.

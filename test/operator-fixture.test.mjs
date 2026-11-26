@@ -24,7 +24,7 @@ test('validates one-seed operator geometry and independent finite limits', () =>
   ]) assert.throws(() => validateOperatorConfig(invalid));
 });
 
-test('parses strict v1 synthetic discoveries with exact-byte SHA-256 identity', () => {
+test('[preservation] parses strict v1 synthetic discoveries with exact-byte SHA-256 identity', () => {
   assert.equal(typeof parseSyntheticFixture, 'function');
   const parsed = parseSyntheticFixture(fixtureBytes);
   assert.equal(parsed.identity, createHash('sha256').update(fixtureBytes).digest('hex'));
@@ -71,11 +71,27 @@ test('rejects non-JSON whitespace between values', () => {
 
 test('rejects invalid references, duplicate IDs per work, whitespace IDs and invalid observations', () => {
   const invalidFixtures = [
-    { version: 1, discoveries: { w: { id: 'missing', observationId: 'missing' } }, observations: {} },
-    { version: 1, discoveries: { w: { id: '  ', observationId: 'x' } }, observations: { x: { result: { status: 'empty' }, elapsed: 0 } } },
-    { version: 1, discoveries: { w: { id: 'x', observationId: '  ' } }, observations: { '  ': { result: { status: 'empty' }, elapsed: 0 } } },
-    { version: 1, discoveries: { a: { id: 'same', observationId: 'x' }, b: { id: 'same', observationId: 'y' } }, observations: { x: { result: { status: 'empty' }, elapsed: 0 }, y: { result: { status: 'empty' }, elapsed: 0 } } },
-    { version: 1, discoveries: { w: { id: 'x', observationId: 'x' } }, observations: { x: { result: { status: 'empty' }, elapsed: -1 } } },
+    { version: 1, discoveries: { 'work:0,0': { id: 'missing', observationId: 'missing' } }, observations: {} },
+    { version: 1, discoveries: { 'work:0,0': { id: '  ', observationId: 'x' } }, observations: { x: { result: { status: 'empty' }, elapsed: 0 } } },
+    { version: 1, discoveries: { 'work:0,0': { id: '  ', observationId: '  ' } }, observations: { '  ': { result: { status: 'empty' }, elapsed: 0 } } },
+    { version: 1, discoveries: { 'work:0,0': { id: 'x', observationId: '  ' } }, observations: { '  ': { result: { status: 'empty' }, elapsed: 0 } } },
+    { version: 1, discoveries: { 'work:0,0': { id: 'same', observationId: 'x' }, 'work:1,0': { id: 'same', observationId: 'y' } }, observations: { x: { result: { status: 'empty' }, elapsed: 0 }, y: { result: { status: 'empty' }, elapsed: 0 } } },
+    { version: 1, discoveries: { 'work:0,0': { id: 'x', observationId: 'x' } }, observations: { x: { result: { status: 'empty' }, elapsed: -1 } } },
   ];
   for (const fixture of invalidFixtures) assert.throws(() => parseSyntheticFixture(Buffer.from(JSON.stringify(fixture))));
+});
+
+test('[preservation] rejects matching whitespace-only discovery and observation IDs', () => {
+  for (const fixture of [
+    { version: 1, discoveries: { 'work:0,0': { id: '  ', observationId: '  ' } }, observations: { '  ': { result: { status: 'empty' }, elapsed: 0 } } },
+    { version: 1, discoveries: { 'work:0,0': { id: 'job', observationId: '  ' } }, observations: { '  ': { result: { status: 'empty' }, elapsed: 0 } } },
+    { version: 1, discoveries: { 'work:0,0': { id: '  ', observationId: 'job' } }, observations: { job: { result: { status: 'empty' }, elapsed: 0 } } },
+  ]) assert.throws(() => parseSyntheticFixture(Buffer.from(JSON.stringify(fixture))));
+});
+
+test('rejects noncanonical core discovery work IDs', () => {
+  for (const workId of ['work:00,0', 'work:0,00', 'work:+1,0', 'work:1.0,0', 'work:0,0 ']) {
+    const fixture = { version: 1, discoveries: { [workId]: { id: 'job', observationId: 'job' } }, observations: { job: { result: { status: 'empty' }, elapsed: 0 } } };
+    assert.throws(() => parseSyntheticFixture(Buffer.from(JSON.stringify(fixture))), /work ID/);
+  }
 });

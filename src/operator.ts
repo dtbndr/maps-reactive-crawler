@@ -110,7 +110,8 @@ export function parseSyntheticFixture(bytes: Uint8Array): ParsedSyntheticFixture
   const observations = parsed.observations as Record<string, unknown>;
   const idsByWork = new Map<string, Set<string>>();
   for (const [workId, value] of Object.entries(discoveries)) {
-    if (!workId.trim()) throw new Error('Invalid work ID');
+    const coordinates = workId.startsWith('work:') ? workId.slice('work:'.length).split(',') : [];
+    if (coordinates.length !== 2 || coordinates.some(coordinate => !Number.isInteger(Number(coordinate)) || String(Number(coordinate)) !== coordinate)) throw new Error('Invalid work ID');
     exactObject(value, ['id', 'observationId'], 'discovery');
     const { id, observationId } = value;
     if (typeof id !== 'string' || !id.trim() || typeof observationId !== 'string' || !observationId.trim() || id !== observationId || !Object.hasOwn(observations, observationId)) throw new Error('Invalid discovery observation reference');
