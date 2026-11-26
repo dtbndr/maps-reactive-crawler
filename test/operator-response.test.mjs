@@ -96,11 +96,11 @@ test('status agrees with eligibility across persisted attempt and independent fl
 
 test('all current unresolved attempts and terminal attempt statuses project without historical scans', () => {
   for (const statusName of ['reserved', 'dispatched', 'uncertain', 'observing']) {
-    const state = createTraversal(geometry, limits); state.queue = []; state.cells['0,0'] = { outcome: 'running' };
+    const state = createTraversal(geometry, limits); state.queue = []; state.cells['0,0'] = { outcome: 'nonempty' };
     state.attempts = [{ id: 'work:0,0:attempt:1', workId: 'work:0,0', cellKey: '0,0', status: statusName, ...(statusName === 'observing' ? { knownId: 'known' } : {}) }];
     state.submissions = 1;
     const status = operator.projectOperatorStatus(state);
-    assert.equal(status.conditions.includes('recovery_pending'), statusName !== 'observing', statusName);
+    assert.equal(status.frontier.discoveryExhausted, false, `${statusName} attempt prevents exhaustion without a frontier blocker`);
   }
   for (const statusName of ['observed', 'skipped', 'confirmed_no_send']) {
     const state = createTraversal(geometry, limits); state.queue = []; state.cells['0,0'] = { outcome: 'empty' };
@@ -162,11 +162,20 @@ test('reserved-boundary throw persists reservation from the actual writer invoca
     setDurableDiscoveryBoundaryHookForTest(boundary => { if (boundary === 'reserved') throw new Error('reserved boundary fault'); });
     await assert.rejects(operator.resume({ checkpoint: files.checkpoint, fixture: files.fixture }), /reserved boundary fault/);
     const state = DurableState.openBound(files.checkpoint, operator.parseSyntheticFixture(bytes).identity);
-    try {
-      const persisted = state.readTraversal();
-      assert.deepEqual(persisted.attempts.map(({ status, cellKey }) => ({ status, cellKey })), [{ status: 'reserved', cellKey: '0,0' }]);
-      assert.equal(persisted.submissions, 1);
-    } finally { state.close(); }
+    const persisted = state.readTraversal();
+    assert.deepEqual(persisted.attempts.map(({ status, cellKey }) => ({ status, cellKey })), [{ status: 'reserved', cellKey: '0,0' }]);
+    assert.equal(persisted.submissions, 1);
+    state.close();
+    setDurableDiscoveryBoundaryHookForTest(undefined);
+    const blockedDocument = await operator.resume({ checkpoint: files.checkpoint, fixture: files.fixture });
+    const verification = DurableState.openBound(files.checkpoint, operator.parseSyntheticFixture(bytes).identity);
+    let activeTime;
+    try { activeTime = verification.readTraversal().activeTime; } finally { verification.close(); }
+    assert.deepEqual(blockedDocument, expectedResult('resume', expectedStatus({
+      state: 'idle', headline: 'recovery_pending', conditions: ['recovery_pending'],
+      counters: { admitted: 1, submissions: 1, activeTime },
+      frontier: { queued: [], running: ['0,0'], parked: [], blocked: [], discoveryExhausted: false },
+    })));
   } finally { setDurableDiscoveryBoundaryHookForTest(undefined); rmSync(files.directory, { recursive: true, force: true }); }
 });
 
@@ -194,6 +203,30 @@ test('writer execution and response agree for flags, both caps and known-ID obse
         if (after.paused) assert.equal(result.status.state, 'paused', item.name);
         else assert.equal(result.status.state, expectedState, item.name);
       } finally { persisted.close(); }
+    } finally { rmSync(files.directory, { recursive: true, force: true }); }
+  }
+});
+
+test('writer returns independently expected documents for refusal, known-ID recovery and independent recovery flags', async () => {
+  const cases = [
+    { name: 'dispatched unknown refusal', prepare: state => { state.queue = []; state.cells['0,0'] = { outcome: 'running' }; state.attempts = [{ id: 'work:0,0:attempt:1', workId: 'work:0,0', cellKey: '0,0', status: 'dispatched' }]; state.submissions = 1; }, expected: { headline: 'recovery_pending', conditions: ['recovery_pending'], counters: { admitted: 1, submissions: 1, activeTime: 0 }, frontier: { queued: [], running: ['0,0'], parked: [], blocked: [], discoveryExhausted: false } } },
+    { name: 'safe-retry refusal', prepare: state => { state.queue = []; state.cells['0,0'] = { outcome: 'running' }; state.attempts = [{ id: 'work:0,0:attempt:1', workId: 'work:0,0', cellKey: '0,0', status: 'uncertain', safeRetryAuthorization: { ordinal: 1, ceiling: 1 } }]; state.submissions = 1; }, expected: { headline: 'recovery_pending', conditions: ['recovery_pending'], counters: { admitted: 1, submissions: 1, activeTime: 0 }, frontier: { queued: [], running: ['0,0'], parked: [], blocked: [], discoveryExhausted: false } } },
+    { name: 'known-ID dispatched', prepare: state => { state.queue = []; state.cells['0,0'] = { outcome: 'running' }; state.attempts = [{ id: 'work:0,0:attempt:1', workId: 'work:0,0', cellKey: '0,0', status: 'dispatched', knownId: 'seed' }]; state.submissions = 1; }, expected: { headline: 'discovery_exhausted', conditions: [], counters: { admitted: 1, submissions: 1, activeTime: 0 }, frontier: { queued: [], running: [], parked: [], blocked: [], discoveryExhausted: true } } },
+    { name: 'known-ID observing', prepare: state => { state.queue = []; state.cells['0,0'] = { outcome: 'running' }; state.attempts = [{ id: 'work:0,0:attempt:1', workId: 'work:0,0', cellKey: '0,0', status: 'observing', knownId: 'seed' }]; state.submissions = 1; }, expected: { headline: 'discovery_exhausted', conditions: [], counters: { admitted: 1, submissions: 1, activeTime: 0 }, frontier: { queued: [], running: [], parked: [], blocked: [], discoveryExhausted: true } } },
+    { name: 'recovery-pending flag', prepare: state => { state.recoveryPending = true; }, expected: { state: 'potentially_interrupted', headline: 'recovery_pending', conditions: ['recovery_pending'] } },
+    { name: 'active interval flag', prepare: state => { state.activeInterval = true; }, expected: { state: 'potentially_interrupted', headline: 'recovery_pending', conditions: ['recovery_pending'] } },
+  ];
+  for (const item of cases) {
+    const files = createFiles(); fixture(files.fixture);
+    try {
+      const state = createTraversal(geometry, limits); item.prepare(state);
+      DurableState.createBound(files.checkpoint, operator.parseSyntheticFixture(bytes).identity, state);
+      const result = await operator.resume({ checkpoint: files.checkpoint, fixture: files.fixture });
+      const persisted = DurableState.openBound(files.checkpoint, operator.parseSyntheticFixture(bytes).identity);
+      let activeTime;
+      try { activeTime = persisted.readTraversal().activeTime; } finally { persisted.close(); }
+      const expected = { ...item.expected, counters: { ...(item.expected.counters ?? { admitted: 1, submissions: 0, activeTime: 0 }), activeTime } };
+      assert.deepEqual(result, expectedResult('resume', expectedStatus(expected)), item.name);
     } finally { rmSync(files.directory, { recursive: true, force: true }); }
   }
 });
