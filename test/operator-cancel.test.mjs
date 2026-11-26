@@ -4,7 +4,7 @@ import * as operator from '../dist/operator.js';
 import { DatabaseSync } from 'node:sqlite';
 import { DurableState, setAfterTraversalWriteForTest } from '../dist/durable-state.js';
 import { createTraversal } from '../dist/traversal.js';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -18,6 +18,14 @@ const fixture = Buffer.from(JSON.stringify({
 const traversalFromDb = path => {
   const db = new DatabaseSync(path);
   try { return JSON.parse(db.prepare('SELECT payload FROM traversal WHERE id=1').get().payload); } finally { db.close(); }
+};
+const runWithDependencies = (command, options, overrides = {}) => {
+  const parsed = operator.parseSyntheticFixture(readFileSync(options.fixture));
+  return operator.runOperatorWithDependencies(command, options, {
+    send: overrides.send ?? (workId => ({ id: parsed.discoveries[workId].id })),
+    observe: overrides.observe ?? (id => parsed.observations[id]),
+    onPreflight: overrides.onPreflight ?? options.onPreflight ?? (() => {}),
+  });
 };
 const setup = () => {
   const directory = mkdtempSync(join(tmpdir(), 'operator-cancel-'));
@@ -33,11 +41,10 @@ test('timer abort from first send runs before second eligible operation and sett
   const sent = [];
   const observed = [];
   try {
-    operator.setOperatorDiscoveryForTest({
+    const result = await runWithDependencies('start', { checkpoint: files.checkpoint, fixture: files.fixturePath, geometry, limits, onPreflight() {}, signal: controller.signal }, {
       send: id => { sent.push(id); if (sent.length === 1) setTimeout(() => controller.abort(), 0); return { id: id.slice(5) }; },
       observe: id => { observed.push(id); return { result: { status: id === '0,0' ? 'success' : 'empty', ...(id === '0,0' ? { candidates: [{ id: 'place' }] } : {}) }, elapsed: 4 }; }
     });
-    const result = await operator.start({ checkpoint: files.checkpoint, fixture: files.fixturePath, geometry, limits, onPreflight() {}, signal: controller.signal });
     assert.equal(sent.length, 1);
     assert.deepEqual(observed, ['0,0']);
     assert.equal(result.status.state, 'cancelled');
@@ -50,7 +57,7 @@ test('timer abort from first send runs before second eligible operation and sett
       assert.equal(persisted.activeInterval, false);
       assert.equal(persisted.activeTime, result.status.counters.activeTime);
     } finally { db.close(); }
-  } finally { operator.setOperatorDiscoveryForTest(undefined); rmSync(files.directory, { recursive: true, force: true }); }
+  } finally {  rmSync(files.directory, { recursive: true, force: true }); }
 });
 
 test('pre-aborted run durably cancels before submitting work', async () => {
@@ -59,14 +66,13 @@ test('pre-aborted run durably cancels before submitting work', async () => {
   controller.abort();
   let sends = 0;
   try {
-    operator.setOperatorDiscoveryForTest({ send: () => { sends++; throw new Error('must not submit'); } });
-    const result = await operator.start({ checkpoint: files.checkpoint, fixture: files.fixturePath, geometry, limits, onPreflight() {}, signal: controller.signal });
+    const result = await runWithDependencies('start', { checkpoint: files.checkpoint, fixture: files.fixturePath, geometry, limits, onPreflight() {}, signal: controller.signal }, { send: () => { sends++; throw new Error('must not submit'); } });
     assert.equal(sends, 0);
     assert.equal(result.command, 'start');
     assert.equal(result.status.conditions.includes('cancelled'), true);
     assert.equal(result.status.counters.submissions, 0);
     assert.equal(result.status.counters.activeTime, 0);
-  } finally { operator.setOperatorDiscoveryForTest(undefined); rmSync(files.directory, { recursive: true, force: true }); }
+  } finally {  rmSync(files.directory, { recursive: true, force: true }); }
 });
 
 test('cancel-only acquisition reconciles orphan interval before cancel and preserves unresolved accounting', () => {
@@ -182,8 +188,7 @@ test('known-ID pending observation consumes its delay and remains eligible at bo
   DurableState.createBound(files.checkpoint, identity, state);
   let sends = 0, observations = 0;
   try {
-    operator.setOperatorDiscoveryForTest({ send: () => { sends++; throw new Error('must not resend'); }, observe: id => { observations++; assert.equal(id, '0,0'); return { result: { status: 'empty' }, elapsed: 1 }; } });
-    const result = await operator.resume({ checkpoint: files.checkpoint, fixture: files.fixturePath });
+    const result = await runWithDependencies('resume', { checkpoint: files.checkpoint, fixture: files.fixturePath }, { send: () => { sends++; throw new Error('must not resend'); }, observe: id => { observations++; assert.equal(id, '0,0'); return { result: { status: 'empty' }, elapsed: 1 }; } });
     assert.equal(result.command, 'resume');
     const persisted = traversalFromDb(files.checkpoint);
     assert.equal(persisted.attempts[0].status, 'observed');
@@ -193,7 +198,7 @@ test('known-ID pending observation consumes its delay and remains eligible at bo
     assert.equal(persisted.submissions, 1);
     assert.equal(sends, 0);
     assert.equal(observations, 1);
-  } finally { operator.setOperatorDiscoveryForTest(undefined); rmSync(files.directory, { recursive: true, force: true }); }
+  } finally {  rmSync(files.directory, { recursive: true, force: true }); }
 });
 
 test('refused unknown-ID safe-retry retains authorization and calls no callbacks when cancellation is requested', async () => {
@@ -209,15 +214,14 @@ test('refused unknown-ID safe-retry retains authorization and calls no callbacks
   controller.abort();
   let sends = 0, observations = 0;
   try {
-    operator.setOperatorDiscoveryForTest({ send: () => { sends++; throw new Error('must not send'); }, observe: () => { observations++; throw new Error('must not observe'); } });
-    const result = await operator.resume({ checkpoint: files.checkpoint, fixture: files.fixturePath, signal: controller.signal });
+    const result = await runWithDependencies('resume', { checkpoint: files.checkpoint, fixture: files.fixturePath, signal: controller.signal }, { send: () => { sends++; throw new Error('must not send'); }, observe: () => { observations++; throw new Error('must not observe'); } });
     assert.equal(result.status.conditions.includes('cancelled'), true);
     const persisted = traversalFromDb(files.checkpoint);
     assert.equal(persisted.cancelled, true);
     assert.deepEqual(persisted.attempts[0].safeRetryAuthorization, { ordinal: 1, ceiling: 1, delayMs: 20 });
     assert.equal(sends, 0);
     assert.equal(observations, 0);
-  } finally { operator.setOperatorDiscoveryForTest(undefined); rmSync(files.directory, { recursive: true, force: true }); }
+  } finally {  rmSync(files.directory, { recursive: true, force: true }); }
 });
 
 test('settlement failure remains an error and is not converted to cancellation', async () => {
@@ -225,14 +229,13 @@ test('settlement failure remains an error and is not converted to cancellation',
   const settlementError = new Error('settlement failed');
   const controller = new AbortController();
   try {
-    operator.setOperatorDiscoveryForTest({ send: id => { setTimeout(() => controller.abort(), 0); return { id: id.slice(5) }; }, observe: () => {
+    await assert.rejects(runWithDependencies('start', { checkpoint: files.checkpoint, fixture: files.fixturePath, geometry, limits: { ...limits, cells: 1 }, onPreflight() {}, signal: controller.signal }, { send: id => { setTimeout(() => controller.abort(), 0); return { id: id.slice(5) }; }, observe: () => {
       setAfterTraversalWriteForTest(() => { throw settlementError; });
       return { result: { status: 'empty' }, elapsed: 1 };
-    } });
-    await assert.rejects(operator.start({ checkpoint: files.checkpoint, fixture: files.fixturePath, geometry, limits: { ...limits, cells: 1 }, onPreflight() {}, signal: controller.signal }), error => error === settlementError);
+    } }), error => error === settlementError);
   } finally {
     setAfterTraversalWriteForTest(undefined);
-    operator.setOperatorDiscoveryForTest(undefined);
+
     rmSync(files.directory, { recursive: true, force: true });
   }
 });
@@ -254,15 +257,14 @@ test('resume abort cancellation uses the retained writer lease', async () => {
   const originalAcquire = DurableState.acquireCancelOnly;
   try {
     DurableState.createBound(files.checkpoint, operator.parseSyntheticFixture(fixture).identity, createTraversal(geometry, { ...limits, cells: 1 }));
-    operator.setOperatorDiscoveryForTest({ send: id => { setTimeout(() => controller.abort(), 0); return { id: id.slice(5) }; } });
     DurableState.acquireCancelOnly = () => { throw new Error('must retain the original writer lease'); };
-    const result = await operator.resume({ checkpoint: files.checkpoint, fixture: files.fixturePath, signal: controller.signal });
+    const result = await runWithDependencies('resume', { checkpoint: files.checkpoint, fixture: files.fixturePath, signal: controller.signal }, { send: id => { setTimeout(() => controller.abort(), 0); return { id: id.slice(5) }; } });
     assert.equal(result.status.state, 'cancelled');
     assert.equal(result.status.conditions.includes('cancelled'), true);
     assert.equal(result.status.counters.activeTime > 0, true);
   } finally {
     DurableState.acquireCancelOnly = originalAcquire;
-    operator.setOperatorDiscoveryForTest(undefined);
+
     rmSync(files.directory, { recursive: true, force: true });
   }
 });
@@ -322,15 +324,14 @@ test('in-run abort cancellation uses the retained writer lease', async () => {
   const controller = new AbortController();
   const originalAcquire = DurableState.acquireCancelOnly;
   try {
-    operator.setOperatorDiscoveryForTest({ send: id => { setTimeout(() => controller.abort(), 0); return { id: id.slice(5) }; } });
     DurableState.acquireCancelOnly = () => { throw new Error('must retain the original writer lease'); };
-    const result = await operator.start({ checkpoint: files.checkpoint, fixture: files.fixturePath, geometry, limits: { ...limits, cells: 1 }, onPreflight() {}, signal: controller.signal });
+    const result = await runWithDependencies('start', { checkpoint: files.checkpoint, fixture: files.fixturePath, geometry, limits: { ...limits, cells: 1 }, onPreflight() {}, signal: controller.signal }, { send: id => { setTimeout(() => controller.abort(), 0); return { id: id.slice(5) }; } });
     assert.equal(result.status.state, 'cancelled');
     assert.equal(result.status.conditions.includes('cancelled'), true);
     assert.equal(result.status.counters.activeTime > 0, true);
   } finally {
     DurableState.acquireCancelOnly = originalAcquire;
-    operator.setOperatorDiscoveryForTest(undefined);
+
     rmSync(files.directory, { recursive: true, force: true });
   }
 });

@@ -4,7 +4,7 @@ import * as operator from '../dist/operator.js';
 import * as publicOperator from '../dist/index.js';
 import { DurableState } from '../dist/durable-state.js';
 import { createTraversal } from '../dist/traversal.js';
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -17,6 +17,14 @@ const temp = () => {
 const fixture = (discoveries = {}, observations = {}) => Buffer.from(JSON.stringify({ version: 1, discoveries, observations }));
 const saveFixture = (path, bytes) => writeFileSync(path, bytes);
 const preflight = () => {};
+const runWithDependencies = (command, options, overrides = {}) => {
+  const parsed = operator.parseSyntheticFixture(readFileSync(options.fixture));
+  return operator.runOperatorWithDependencies(command, options, {
+    send: overrides.send ?? (workId => ({ id: parsed.discoveries[workId].id })),
+    observe: overrides.observe ?? (id => parsed.observations[id]),
+    onPreflight: overrides.onPreflight ?? options.onPreflight ?? preflight,
+  });
+};
 
 test('start validates and preflights before serial fixture-backed discovery, leaving detail pending', async () => {
   const files = temp();
@@ -25,13 +33,11 @@ test('start validates and preflights before serial fixture-backed discovery, lea
     saveFixture(files.fixture, bytes);
     let beforeSend;
     let sends = 0;
-    operator.setOperatorDiscoveryForTest({ send: workId => { sends++; return { id: operator.parseSyntheticFixture(bytes).discoveries[workId].id }; } });
-    const result = await operator.start({ checkpoint: files.checkpoint, fixture: files.fixture, geometry, limits: { ...limits, cells: 1 }, onPreflight: value => {
+    const result = await runWithDependencies('start', { checkpoint: files.checkpoint, fixture: files.fixture, geometry, limits: { ...limits, cells: 1 }, onPreflight: value => {
       beforeSend = value;
       assert.equal(existsSync(files.checkpoint), false);
       assert.equal(sends, 0);
-    } });
-    operator.setOperatorDiscoveryForTest(undefined);
+    } }, { send: workId => { sends++; return { id: operator.parseSyntheticFixture(bytes).discoveries[workId].id }; } });
     assert.equal(sends, 1);
     assert.deepEqual(beforeSend, { geometry, limits: { ...limits, cells: 1 } });
     assert.equal(result.command, 'start');
@@ -45,7 +51,6 @@ test('start validates and preflights before serial fixture-backed discovery, lea
       assert.equal(state.activeTime < 9999, true);
     } finally { db.close(); }
   } finally {
-    operator.setOperatorDiscoveryForTest(undefined);
     rmSync(files.directory, { recursive: true, force: true });
   }
 });
@@ -62,15 +67,15 @@ test('submission-cap resume drains admitted queue without replay and preserves o
   saveFixture(files.fixture, bytes);
   const sends = [];
   try {
-    operator.setOperatorDiscoveryForTest({ send: workId => { sends.push(workId); return { id: workId }; } });
-    const stopped = await operator.start({ checkpoint: files.checkpoint, fixture: files.fixture, geometry, limits: { cells: 5, submissions: 1, activeTime: 10000 }, onPreflight: preflight });
+    const dependencies = { send: workId => { sends.push(workId); return { id: workId }; } };
+    const stopped = await runWithDependencies('start', { checkpoint: files.checkpoint, fixture: files.fixture, geometry, limits: { cells: 5, submissions: 1, activeTime: 10000 }, onPreflight: preflight }, dependencies);
     assert.equal(stopped.command, 'start');
     assert.deepEqual(stopped.status.frontier.queued, ['-1,0', '0,-1', '0,1', '1,0']);
     assert.deepEqual(stopped.status.frontier.blocked, []);
     assert.deepEqual(stopped.status.counters, { admitted: 5, submissions: 1, activeTime: stopped.status.counters.activeTime });
     assert.deepEqual(sends, ['work:0,0']);
 
-    const resumed = await operator.resume({ checkpoint: files.checkpoint, fixture: files.fixture, limits: { submissions: 5 } });
+    const resumed = await runWithDependencies('resume', { checkpoint: files.checkpoint, fixture: files.fixture, limits: { submissions: 5 } }, dependencies);
     assert.equal(resumed.command, 'resume');
     assert.deepEqual(resumed.status.frontier.queued, []);
     assert.equal(resumed.status.counters.submissions, 5);
@@ -80,7 +85,6 @@ test('submission-cap resume drains admitted queue without replay and preserves o
     const completed = DurableState.openBound(files.checkpoint, operator.parseSyntheticFixture(bytes).identity);
     try { assert.deepEqual(completed.readTraversal().attempts.map(attempt => attempt.workId), workIds); } finally { completed.close(); }
   } finally {
-    operator.setOperatorDiscoveryForTest(undefined);
     rmSync(files.directory, { recursive: true, force: true });
   }
 });
@@ -158,8 +162,7 @@ test('known-ID observation remains eligible under both submission and active-tim
     state.submissions = 1;
     DurableState.createBound(files.checkpoint, identity, state);
     let observed = 0;
-    operator.setOperatorDiscoveryForTest({ send: () => { throw new Error('must not resend'); }, observe: id => { observed++; assert.equal(id, 'persisted-id'); return { result: { status: 'empty' }, elapsed: 50000 }; } });
-    const result = await operator.resume({ checkpoint: files.checkpoint, fixture: files.fixture });
+    const result = await runWithDependencies('resume', { checkpoint: files.checkpoint, fixture: files.fixture }, { send: () => { throw new Error('must not resend'); }, observe: id => { observed++; assert.equal(id, 'persisted-id'); return { result: { status: 'empty' }, elapsed: 50000 }; } });
     assert.equal(result.command, 'resume');
     assert.equal(observed, 1);
     assert.equal(result.status.counters.submissions, 1);
@@ -167,7 +170,6 @@ test('known-ID observation remains eligible under both submission and active-tim
     const durable = DurableState.openBound(files.checkpoint, identity);
     try { assert.equal(durable.readTraversal().attempts[0].status, 'observed'); } finally { durable.close(); }
   } finally {
-    operator.setOperatorDiscoveryForTest(undefined);
     rmSync(files.directory, { recursive: true, force: true });
   }
 });
@@ -195,8 +197,7 @@ test('parked-only unknown-ID uncertainty is typed blocked after the original sen
   let observations = 0;
   const originalError = new Error('original send failure');
   try {
-    operator.setOperatorDiscoveryForTest({ send: () => { sends++; throw originalError; } });
-    await assert.rejects(operator.start({ checkpoint: files.checkpoint, fixture: files.fixture, geometry, limits, onPreflight: preflight }), error => error === originalError);
+    await assert.rejects(runWithDependencies('start', { checkpoint: files.checkpoint, fixture: files.fixture, geometry, limits, onPreflight: preflight }, { send: () => { sends++; throw originalError; } }), error => error === originalError);
     const identity = operator.parseSyntheticFixture(bytes).identity;
     const prior = DurableState.openBound(files.checkpoint, identity);
     let before;
@@ -208,8 +209,7 @@ test('parked-only unknown-ID uncertainty is typed blocked after the original sen
       assert.equal(before.paused, false);
     } finally { prior.close(); }
     const callsBefore = sends;
-    operator.setOperatorDiscoveryForTest({ send: () => { sends++; throw new Error('must not send'); }, observe: () => { observations++; return { result: { status: 'empty' }, elapsed: 0 }; } });
-    const result = await operator.resume({ checkpoint: files.checkpoint, fixture: files.fixture });
+    const result = await runWithDependencies('resume', { checkpoint: files.checkpoint, fixture: files.fixture }, { send: () => { sends++; throw new Error('must not send'); }, observe: () => { observations++; return { result: { status: 'empty' }, elapsed: 0 }; } });
     assert.equal(result.command, 'resume');
     assert.equal(result.status.conditions.includes('recovery_pending'), true);
     assert.equal(sends, callsBefore);
@@ -223,7 +223,6 @@ test('parked-only unknown-ID uncertainty is typed blocked after the original sen
     } finally { after.close(); }
     assert.equal(Object.hasOwn(publicOperator, 'setOperatorDiscoveryForTest'), false);
   } finally {
-    operator.setOperatorDiscoveryForTest(undefined);
     rmSync(files.directory, { recursive: true, force: true });
   }
 });
@@ -233,8 +232,7 @@ test('isolated parked uncertainty does not prevent other queued discovery work',
   const bytes = fixture({ 'work:0,0': { id: 'job-0', observationId: 'job-0' }, 'work:0,1': { id: 'job-1', observationId: 'job-1' } }, { 'job-0': { result: { status: 'empty' }, elapsed: 0 }, 'job-1': { result: { status: 'empty' }, elapsed: 0 } });
   saveFixture(files.fixture, bytes);
   try {
-    operator.setOperatorDiscoveryForTest({ send: () => { throw new Error('park seed'); } });
-    await assert.rejects(operator.start({ checkpoint: files.checkpoint, fixture: files.fixture, geometry, limits, onPreflight: preflight }), /park seed/);
+    await assert.rejects(runWithDependencies('start', { checkpoint: files.checkpoint, fixture: files.fixture, geometry, limits, onPreflight: preflight }, { send: () => { throw new Error('park seed'); } }), /park seed/);
     const identity = operator.parseSyntheticFixture(bytes).identity;
     const db = DurableState.openBound(files.checkpoint, identity);
     try {
@@ -242,8 +240,7 @@ test('isolated parked uncertainty does not prevent other queued discovery work',
       db.writeTraversal({ ...state, queue: ['0,1'], admitted: [...state.admitted, '0,1'], cells: { ...state.cells, '0,1': { outcome: 'queued' } } });
     } finally { db.close(); }
     let sends = 0;
-    operator.setOperatorDiscoveryForTest({ send: _workId => { sends++; return { id: 'job-1' }; } });
-    const result = await operator.resume({ checkpoint: files.checkpoint, fixture: files.fixture });
+    const result = await runWithDependencies('resume', { checkpoint: files.checkpoint, fixture: files.fixture }, { send: _workId => { sends++; return { id: 'job-1' }; } });
     assert.equal(result.command, 'resume');
     assert.equal(sends, 1);
     const after = DurableState.openBound(files.checkpoint, operator.parseSyntheticFixture(bytes).identity);
@@ -252,7 +249,6 @@ test('isolated parked uncertainty does not prevent other queued discovery work',
       assert.equal(after.readTraversal().gaps.some(gap => gap.scope === 'isolated' && gap.status === 'unresolved'), true);
     } finally { after.close(); }
   } finally {
-    operator.setOperatorDiscoveryForTest(undefined);
     rmSync(files.directory, { recursive: true, force: true });
   }
 });

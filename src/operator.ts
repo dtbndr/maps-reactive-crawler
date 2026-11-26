@@ -190,12 +190,9 @@ type InternalRunResult = { kind: 'completed' | 'partial'; state: import('./trave
 export type OperatorStartOptions = OperatorConfig & { checkpoint: string; fixture: string; onPreflight: (configuration: OperatorConfig) => void; signal?: AbortSignal };
 export type OperatorResumeOptions = { checkpoint: string; fixture: string; limits?: Partial<TraversalLimits>; signal?: AbortSignal };
 
-type DiscoveryTestOverrides = { send?: SyntheticSend; observe?: SyntheticObserve };
-let discoveryTestOverrides: DiscoveryTestOverrides | undefined;
-/** Private-module test seam; it is intentionally not re-exported from the package entry point. */
-export function setOperatorDiscoveryForTest(overrides: DiscoveryTestOverrides | undefined): void { discoveryTestOverrides = overrides; }
+export type OperatorDiscoveryDependencies = { send: SyntheticSend; observe: SyntheticObserve; onPreflight: (configuration: OperatorConfig) => void };
 
-async function executeOperatorDiscovery(state: DurableState, fixture: ParsedSyntheticFixture, signal?: AbortSignal): Promise<InternalRunResult> {
+async function executeOperatorDiscovery(state: DurableState, fixture: ParsedSyntheticFixture, dependencies: OperatorDiscoveryDependencies, signal?: AbortSignal): Promise<InternalRunResult> {
   let partial = state.readTraversal().gaps.some(gap => ['failed', 'unrecognized'].includes(gap.cause) && gap.status !== 'resolved' && gap.status !== 'skipped');
   for (;;) {
     const current = state.readTraversal();
@@ -217,10 +214,8 @@ async function executeOperatorDiscovery(state: DurableState, fixture: ParsedSynt
       if (!fixture.observations[attempt.knownId]) throw new Error(`Missing fixture observation for ${attempt.knownId}`);
     }
 
-    const send: SyntheticSend = workId => discoveryTestOverrides?.send?.(workId) ?? { id: fixture.discoveries[workId]!.id };
-    const observe: SyntheticObserve = id => discoveryTestOverrides?.observe?.(id) ?? fixture.observations[id]!;
     try {
-      const next = executeDurableDiscovery(state, send, observe, 'isolated');
+      const next = executeDurableDiscovery(state, dependencies.send, dependencies.observe, 'isolated');
       if (next.gaps.some(gap => gap.cause === 'failed' || gap.cause === 'unrecognized')) partial = true;
     } catch (error) {
       if (error instanceof DurableStopError) return { kind: 'blocked', reason: error.reason === 'active-time-limit' ? 'active-time-limit' : 'recovery-pending', state: state.readTraversal() };
@@ -323,28 +318,19 @@ export function cancelCheckpoint(options: { checkpoint: string }): { version: 1;
   } finally { acquisition.close(); }
 }
 
-export async function start(options: OperatorStartOptions): Promise<OperatorRunResult> {
+export async function runOperatorWithDependencies(command: 'start' | 'resume', options: OperatorStartOptions | OperatorResumeOptions, dependencies: OperatorDiscoveryDependencies): Promise<OperatorRunResult> {
   const fixture = parseSyntheticFixture(readFileSync(options.fixture));
-  const config = validateOperatorConfig({ geometry: options.geometry, limits: options.limits });
-  if (typeof options.onPreflight !== 'function') throw new Error('Preflight callback is required');
-  options.onPreflight({ geometry: config.geometry, limits: config.limits });
-  const initial = createTraversal(config.geometry, config.limits);
-  DurableState.createBound(options.checkpoint, fixture.identity, initial);
-  const state = DurableState.openBound(options.checkpoint, fixture.identity);
-  try {
-    const result = await executeOperatorDiscovery(state, fixture, options.signal);
-    if (result.kind === 'blocked' && result.reason === 'cancelled') state.cancel();
-    state.releaseOwner();
-    return response('start', state.readTraversalSnapshot());
-  } finally { state.close(); }
-}
-
-export async function resume(options: OperatorResumeOptions): Promise<OperatorRunResult> {
-  const fixture = parseSyntheticFixture(readFileSync(options.fixture));
+  if (command === 'start') {
+    const startOptions = options as OperatorStartOptions;
+    const config = validateOperatorConfig({ geometry: startOptions.geometry, limits: startOptions.limits });
+    if (typeof dependencies.onPreflight !== 'function') throw new Error('Preflight callback is required');
+    dependencies.onPreflight({ geometry: config.geometry, limits: config.limits });
+    DurableState.createBound(startOptions.checkpoint, fixture.identity, createTraversal(config.geometry, config.limits));
+  }
   const state = DurableState.openBound(options.checkpoint, fixture.identity);
   try {
     const current = state.readTraversal();
-    const requested = options.limits ?? {};
+    const requested = command === 'resume' ? (options as OperatorResumeOptions).limits ?? {} : {};
     if (typeof requested !== 'object' || requested === null || Array.isArray(requested)) throw new Error('Invalid resume limits');
     const allowed = ['cells', 'submissions', 'activeTime'];
     if (Object.keys(requested).some(key => !allowed.includes(key))) throw new Error('Invalid resume limit name');
@@ -352,14 +338,32 @@ export async function resume(options: OperatorResumeOptions): Promise<OperatorRu
       const value = requested[key];
       if (typeof value !== 'number' || !Number.isFinite(value) || !Number.isSafeInteger(value) || value <= current.limits[key]) throw new Error(`Resume ${key} limit must strictly increase`);
     }
-    if (Object.keys(requested).length) {
+    if (command === 'resume' && Object.keys(requested).length) {
       const limits = { ...current.limits, ...requested };
       validateOperatorConfig({ geometry: current.geometry, limits });
       state.writeTraversal({ ...current, limits });
     }
-    const result = await executeOperatorDiscovery(state, fixture, options.signal);
+    const result = await executeOperatorDiscovery(state, fixture, dependencies, options.signal);
     if (result.kind === 'blocked' && result.reason === 'cancelled') state.cancel();
     state.releaseOwner();
-    return response('resume', state.readTraversalSnapshot());
+    return response(command, state.readTraversalSnapshot());
   } finally { state.close(); }
+}
+
+export async function start(options: OperatorStartOptions): Promise<OperatorRunResult> {
+  const fixture = parseSyntheticFixture(readFileSync(options.fixture));
+  return runOperatorWithDependencies('start', options, {
+    send: workId => ({ id: fixture.discoveries[workId]!.id }),
+    observe: id => fixture.observations[id]!,
+    onPreflight: options.onPreflight,
+  });
+}
+
+export async function resume(options: OperatorResumeOptions): Promise<OperatorRunResult> {
+  const fixture = parseSyntheticFixture(readFileSync(options.fixture));
+  return runOperatorWithDependencies('resume', options, {
+    send: workId => ({ id: fixture.discoveries[workId]!.id }),
+    observe: id => fixture.observations[id]!,
+    onPreflight: () => {},
+  });
 }
