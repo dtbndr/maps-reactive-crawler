@@ -136,7 +136,9 @@ for (const journalMode of ['DELETE', 'WAL']) {
         db.exec('PRAGMA cache_size=1; PRAGMA cache_spill=ON');
         if (process.argv[2] === 'WAL') {
           db.exec('PRAGMA wal_autocheckpoint=0; BEGIN IMMEDIATE');
-          db.prepare('UPDATE crash_pages SET payload=? WHERE id=1').run('committed-in-wal');
+          const traversal = JSON.parse(db.prepare('SELECT payload FROM traversal WHERE id=1').get().payload);
+          traversal.activeTime = 123;
+          db.prepare('UPDATE traversal SET payload=? WHERE id=1').run(JSON.stringify(traversal));
           db.exec('COMMIT');
         }
         db.exec('BEGIN IMMEDIATE');
@@ -178,13 +180,14 @@ for (const journalMode of ['DELETE', 'WAL']) {
       const recoveredBaseline = independentlyRecoverState(baselinePath);
       if (journalMode === 'DELETE') assert.notDeepEqual(readFileSync(baselinePath), mainFileBeforeRecovery, 'hot rollback recovery restores the modified main database pages');
       if (journalMode === 'WAL') {
-        assert.equal(mainOnlyState.crashPages[0].payload, 'baseline-' + String(0).padEnd(4000, 'x'));
-        assert.notDeepEqual(mainOnlyState, recoveredBaseline, 'committed WAL application data makes recovery differ from standalone main file');
-        assert.equal(recoveredBaseline.crashPages[0].payload, 'committed-in-wal');
+        assert.equal(JSON.parse(mainOnlyState.traversal).activeTime, 0);
+        assert.notDeepEqual(mainOnlyState.traversal, recoveredBaseline.traversal, 'committed crawler traversal state in WAL makes recovery differ from standalone main file');
+        assert.equal(JSON.parse(recoveredBaseline.traversal).activeTime, 123);
       }
       assert.equal(JSON.parse(recoveredBaseline.checkpoint).work.length, 0);
       const recoveredTraversal = JSON.parse(recoveredBaseline.traversal);
       assert.equal(recoveredTraversal.activeInterval, true);
+      assert.equal(recoveredTraversal.activeTime, journalMode === 'WAL' ? 123 : 0);
       assert.notEqual(recoveredTraversal.recoveryPending, true);
       assert.deepEqual(recoveredTraversal.limits, traversal().limits);
       assert.equal(recoveredBaseline.owner, 2147483647);
