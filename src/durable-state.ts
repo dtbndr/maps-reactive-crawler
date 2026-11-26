@@ -1,5 +1,5 @@
 import { DatabaseSync } from 'node:sqlite';
-import { closeSync, linkSync, mkdtempSync, openSync, rmSync, statSync } from 'node:fs';
+import { closeSync, linkSync, lstatSync, mkdtempSync, openSync, rmSync } from 'node:fs';
 import { join, basename, dirname } from 'node:path';
 import type { TraversalState } from './traversal.js';
 import { cellKey, isCellEligible, validateGeometry } from './index.js';
@@ -127,7 +127,7 @@ export class DurableState {
     const stagingPath = join(staging, 'checkpoint.db');
     try {
       for (const suffix of ['', '-journal', '-wal', '-shm']) {
-        try { statSync(`${path}${suffix}`); throw new Error(suffix ? 'Corrupt state: orphan SQLite sidecar without checkpoint' : 'Checkpoint already exists'); }
+        try { lstatSync(`${path}${suffix}`); throw new Error(suffix ? 'Corrupt state: orphan SQLite sidecar without checkpoint' : 'Checkpoint already exists'); }
         catch (error) {
           if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
         }
@@ -163,7 +163,7 @@ export class DurableState {
       }
       if (!exists) {
         for (const suffix of ['-journal', '-wal', '-shm']) {
-          try { statSync(`${path}${suffix}`); throw new Error('Corrupt state: orphan SQLite sidecar without checkpoint'); }
+          try { lstatSync(`${path}${suffix}`); throw new Error('Corrupt state: orphan SQLite sidecar without checkpoint'); }
           catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
         }
         const staged = new DatabaseSync(stagingPath);

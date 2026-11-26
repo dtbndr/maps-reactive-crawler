@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, lstatSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
@@ -73,6 +73,18 @@ test('orphan sidecars prevent bound publication and remain untouched', () => {
     assert.throws(() => DurableState.createBound(path, identity, traversal()), /orphan SQLite sidecar/i);
     assert.equal(existsSync(path), false);
     assert.equal(readFileSync(`${path}-wal`, 'utf8'), 'orphan');
+    assert.deepEqual(readdirSync(dir), ['state.db-wal']);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('dangling orphan sidecar symlink prevents bound publication and remains untouched', () => {
+  const { dir, path } = temp();
+  const sidecar = `${path}-wal`;
+  try {
+    symlinkSync(join(dir, 'missing-target'), sidecar);
+    assert.throws(() => DurableState.createBound(path, identity, traversal()), /orphan SQLite sidecar/i);
+    assert.equal(existsSync(path), false);
+    assert.equal(lstatSync(sidecar).isSymbolicLink(), true);
     assert.deepEqual(readdirSync(dir), ['state.db-wal']);
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });

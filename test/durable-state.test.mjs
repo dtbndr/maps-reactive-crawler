@@ -46,6 +46,23 @@ test('ownership remains exclusive when a contender opens after the owner read', 
     owner.close();
   } finally { setAfterOwnerReadForTest(undefined); rmSync(dir,{recursive:true,force:true}); }
 });
+test('SQLite writer-claim failure is distinct from application owner refusal', () => {
+  const {dir,path}=temp();
+  try {
+    const state=DurableState.open(path);
+    const writer=new DatabaseSync(path);
+    writer.exec('BEGIN IMMEDIATE');
+    try {
+      assert.throws(() => DurableState.open(path), error => {
+        assert.match(String(error), /locked|busy/i);
+        assert.doesNotMatch(String(error), /already owned/i);
+        return true;
+      });
+    } finally { writer.exec('ROLLBACK'); writer.close(); }
+    assert.throws(() => DurableState.open(path), /already owned/i);
+    state.close();
+  } finally { rmSync(dir,{recursive:true,force:true}); }
+});
 test('exclusive ownership rejects simultaneous contention and permits reacquisition after close', () => {
   const {dir,path}=temp();
   try { const owner=DurableState.open(path); assert.throws(()=>DurableState.open(path),/owned/); owner.close(); const reopened=DurableState.open(path); reopened.close(); }
