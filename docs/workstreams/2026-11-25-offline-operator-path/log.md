@@ -2,6 +2,9 @@
 
 Opt-ins: playback=on, external review=on
 
+## B3 acceptance
+B3 complete at 9b3a326 after independent behavioral review. The operator accepted a B3-specific exception for incomplete historical per-contract RED: retained preimplementation output contains two behavioral assertion failures (stub start outcome and equal cap rejection), not RED for all contracts. Later passing tests are GREEN evidence, not historical RED. Focused 9/9 and full 280/280 passed.
+
 ## B2 acceptance
 B2 complete at 9d45611 after clean independent review; focused 5/5 and full 271/271 passed. The report records two behavioral pre-implementation RED failures; standalone raw RED output is unavailable. Follow-up overlap tests are characterization, not historical RED.
 
