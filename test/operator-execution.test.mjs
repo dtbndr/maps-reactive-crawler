@@ -4,7 +4,7 @@ import * as operator from '../dist/operator.js';
 import * as publicOperator from '../dist/index.js';
 import { DurableState } from '../dist/durable-state.js';
 import { createTraversal } from '../dist/traversal.js';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -24,7 +24,15 @@ test('start validates and preflights before serial fixture-backed discovery, lea
     const bytes = fixture({ 'work:0,0': { id: 'job-0', observationId: 'job-0' } }, { 'job-0': { result: { status: 'success', candidates: [{ id: 'place', verifiedCanonicalKey: 'place-key' }] }, elapsed: 9999 } });
     saveFixture(files.fixture, bytes);
     let beforeSend;
-    const result = await operator.start({ checkpoint: files.checkpoint, fixture: files.fixture, geometry, limits: { ...limits, cells: 1 }, onPreflight: value => { beforeSend = value; } });
+    let sends = 0;
+    operator.setOperatorDiscoveryForTest({ send: workId => { sends++; return { id: operator.parseSyntheticFixture(bytes).discoveries[workId].id }; } });
+    const result = await operator.start({ checkpoint: files.checkpoint, fixture: files.fixture, geometry, limits: { ...limits, cells: 1 }, onPreflight: value => {
+      beforeSend = value;
+      assert.equal(existsSync(files.checkpoint), false);
+      assert.equal(sends, 0);
+    } });
+    operator.setOperatorDiscoveryForTest(undefined);
+    assert.equal(sends, 1);
     assert.deepEqual(beforeSend, { geometry, limits: { ...limits, cells: 1 } });
     assert.equal(result.kind, 'completed');
     const db = DurableState.openBound(files.checkpoint, operator.parseSyntheticFixture(bytes).identity);
@@ -36,7 +44,44 @@ test('start validates and preflights before serial fixture-backed discovery, lea
       assert.equal(state.detailWork[0].attempts.length, 0);
       assert.equal(state.activeTime < 9999, true);
     } finally { db.close(); }
-  } finally { rmSync(files.directory, { recursive: true, force: true }); }
+  } finally {
+    operator.setOperatorDiscoveryForTest(undefined);
+    rmSync(files.directory, { recursive: true, force: true });
+  }
+});
+
+test('submission-cap resume drains admitted queue without replay and preserves omitted active-time cap', async () => {
+  const files = temp();
+  const workIds = ['work:0,0', 'work:0,1', 'work:0,-1', 'work:1,0', 'work:-1,0'];
+  const discoveries = Object.fromEntries(workIds.map(workId => [workId, { id: workId, observationId: workId }]));
+  const observations = Object.fromEntries(workIds.map((workId, index) => [workId, {
+    result: index === 0 ? { status: 'success', candidates: [{ id: 'place' }] } : { status: 'empty' },
+    elapsed: index === 0 ? 17 : 0,
+  }]));
+  const bytes = fixture(discoveries, observations);
+  saveFixture(files.fixture, bytes);
+  const sends = [];
+  try {
+    operator.setOperatorDiscoveryForTest({ send: workId => { sends.push(workId); return { id: workId }; } });
+    const stopped = await operator.start({ checkpoint: files.checkpoint, fixture: files.fixture, geometry, limits: { cells: 5, submissions: 1, activeTime: 10000 }, onPreflight: preflight });
+    assert.equal(stopped.kind, 'completed');
+    assert.deepEqual(stopped.state.queue, ['0,1', '0,-1', '1,0', '-1,0']);
+    assert.deepEqual(stopped.state.admitted, ['0,0', '0,1', '0,-1', '1,0', '-1,0']);
+    assert.equal(stopped.state.submissions, 1);
+    assert.deepEqual(sends, ['work:0,0']);
+
+    const resumed = await operator.resume({ checkpoint: files.checkpoint, fixture: files.fixture, limits: { submissions: 5 } });
+    assert.equal(resumed.kind, 'completed');
+    assert.deepEqual(resumed.state.queue, []);
+    assert.equal(resumed.state.submissions, 5);
+    assert.equal(resumed.state.limits.submissions, 5);
+    assert.equal(resumed.state.limits.activeTime, 10000);
+    assert.deepEqual(sends, workIds);
+    assert.deepEqual(resumed.state.attempts.map(attempt => attempt.workId), workIds);
+  } finally {
+    operator.setOperatorDiscoveryForTest(undefined);
+    rmSync(files.directory, { recursive: true, force: true });
+  }
 });
 
 test('resume requires every supplied cap to strictly increase and rejects mixed updates atomically', async () => {
