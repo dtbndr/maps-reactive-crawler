@@ -3,6 +3,7 @@ import { closeSync, linkSync, lstatSync, mkdtempSync, openSync, rmSync } from 'n
 import { join, basename, dirname } from 'node:path';
 import type { TraversalState } from './traversal.js';
 import { cellKey, isCellEligible, validateGeometry } from './index.js';
+import { cancelTraversal } from './traversal.js';
 
 type Snapshot = { version: 1; work: { id: string; status: string }[]; observations: unknown[]; gaps: unknown[] };
 let afterOwnerReadForTest: (() => void) | undefined;
@@ -150,6 +151,48 @@ export class DurableState {
       }
       afterCreateForTest?.();
     } finally { rmSync(staging, { recursive: true, force: true }); }
+  }
+  static acquireCancelOnly(path: string): CancelOnlyAcquisition {
+    const db = new DatabaseSync(path);
+    try {
+      db.exec('BEGIN IMMEDIATE');
+      const tables = new Set(db.prepare("SELECT name FROM sqlite_master WHERE type='table'").all().map((row: any) => row.name));
+      if (!tables.has('checkpoint') || !tables.has('owner') || !tables.has('operator_binding') || !tables.has('traversal')) throw new Error('Corrupt state: missing bound checkpoint schema');
+      const checkpoint = db.prepare('SELECT version, payload FROM checkpoint WHERE id=1').get();
+      if (!checkpoint || checkpoint.version !== 1) throw new Error('Unsupported or missing checkpoint schema version');
+      validate(JSON.parse(String(checkpoint.payload)));
+      const binding = db.prepare('SELECT payload FROM operator_binding WHERE id=1').get();
+      if (!binding) throw new Error('Corrupt state: missing operator binding');
+      let parsedBinding: unknown;
+      try { parsedBinding = JSON.parse(String(binding.payload)); } catch { throw new Error('Corrupt state: invalid operator binding'); }
+      if (!parsedBinding || typeof parsedBinding !== 'object' || Array.isArray(parsedBinding) || Object.keys(parsedBinding).length !== 2 || (parsedBinding as any).version !== 1 || typeof (parsedBinding as any).fixtureIdentity !== 'string' || !/^[a-f0-9]{64}$/.test((parsedBinding as any).fixtureIdentity)) throw new Error('Corrupt state: invalid operator binding');
+      const traversalRow = db.prepare('SELECT payload FROM traversal WHERE id=1').get();
+      if (!traversalRow) throw new Error('Corrupt state: missing traversal');
+      const traversal = JSON.parse(String(traversalRow.payload));
+      validateTraversal(traversal);
+      if (traversal.timeUnit !== 'milliseconds') throw new Error('Durable traversal time unit is unmarked; explicit migration required');
+      const owner = db.prepare('SELECT pid FROM owner WHERE id=1').get();
+      let recoveredPreviousOwner = false;
+      afterOwnerReadForTest?.();
+      if (owner) {
+        const pid = owner.pid;
+        if (typeof pid !== 'number' || !Number.isSafeInteger(pid) || pid < 1 || pid > 2147483647) throw new Error('Corrupt state: invalid owner PID');
+        if (isAlive(pid)) throw new Error('Database is already owned');
+        recoveredPreviousOwner = true;
+      }
+      if (traversal.activeInterval === true || (recoveredPreviousOwner && !traversal.cleanPauseEvidence)) {
+        db.prepare('UPDATE traversal SET payload=? WHERE id=1').run(JSON.stringify({ ...traversal, recoveryPending: true, activeInterval: false }));
+      } else if (recoveredPreviousOwner) {
+        db.prepare('UPDATE traversal SET payload=? WHERE id=1').run(JSON.stringify({ ...traversal, recoveryPending: false }));
+      }
+      db.prepare('INSERT OR REPLACE INTO owner(id,pid) VALUES(1,?)').run(process.pid);
+      db.exec('COMMIT');
+      return new CancelOnlyAcquisition(db);
+    } catch (error) {
+      try { db.exec('ROLLBACK'); } catch { /* Preserve acquisition failure. */ }
+      try { db.close(); } catch { /* Preserve acquisition failure. */ }
+      throw error;
+    }
   }
   static openBound(path: string, fixtureIdentity: string): DurableState {
     if (typeof fixtureIdentity !== 'string' || !/^[a-f0-9]{64}$/.test(fixtureIdentity)) throw new Error('Invalid fixture identity');
@@ -339,6 +382,29 @@ export class DurableState {
       this.db.prepare('UPDATE traversal SET payload=? WHERE id=1').run(payload);
       afterTraversalWriteForTest?.();
       this.db.exec('COMMIT');
+    } catch (error) { this.db.exec('ROLLBACK'); throw error; }
+  }
+  close(): void { this.db.prepare('DELETE FROM owner WHERE id=1 AND pid=?').run(process.pid); this.db.close(); }
+}
+export class CancelOnlyAcquisition {
+  constructor(private readonly db: DatabaseSync) {}
+  snapshot(): TraversalState {
+    const row = this.db.prepare('SELECT payload FROM traversal WHERE id=1').get();
+    if (!row) throw new Error('Corrupt state: missing traversal');
+    const state = JSON.parse(String(row.payload));
+    validateTraversal(state);
+    return state;
+  }
+  cancel(): TraversalState {
+    this.db.exec('BEGIN IMMEDIATE');
+    try {
+      const state = this.snapshot();
+      if (state.activeInterval === true) throw new Error('Cannot control traversal during an active interval');
+      const next = cancelTraversal(state);
+      validateTraversal(next);
+      this.db.prepare('UPDATE traversal SET payload=? WHERE id=1').run(JSON.stringify(next));
+      this.db.exec('COMMIT');
+      return next;
     } catch (error) { this.db.exec('ROLLBACK'); throw error; }
   }
   close(): void { this.db.prepare('DELETE FROM owner WHERE id=1 AND pid=?').run(process.pid); this.db.close(); }

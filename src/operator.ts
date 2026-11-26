@@ -191,10 +191,11 @@ let discoveryTestOverrides: DiscoveryTestOverrides | undefined;
 /** Private-module test seam; it is intentionally not re-exported from the package entry point. */
 export function setOperatorDiscoveryForTest(overrides: DiscoveryTestOverrides | undefined): void { discoveryTestOverrides = overrides; }
 
-async function executeOperatorDiscovery(state: DurableState, fixture: ParsedSyntheticFixture): Promise<OperatorRunResult> {
+async function executeOperatorDiscovery(state: DurableState, fixture: ParsedSyntheticFixture, signal?: AbortSignal): Promise<OperatorRunResult> {
   let partial = state.readTraversal().gaps.some(gap => ['failed', 'unrecognized'].includes(gap.cause) && gap.status !== 'resolved' && gap.status !== 'skipped');
   for (;;) {
     const current = state.readTraversal();
+    if (signal?.aborted) return { kind: 'blocked', reason: 'cancelled', state: current };
     const decision = classifyOperatorEligibility(current);
     if (['cancelled', 'paused', 'recovery-pending', 'global-gap', 'parked-only-uncertainty', 'refuse-unknown-id', 'refuse-safe-retry'].includes(decision.kind)) {
       return { kind: 'blocked', reason: decision.kind as OperatorBlockReason, state: current };
@@ -223,7 +224,17 @@ async function executeOperatorDiscovery(state: DurableState, fixture: ParsedSynt
     }
     // Yield a macrotask between durable invocations so external work can run.
     await new Promise<void>(resolve => setImmediate(resolve));
+    if (signal?.aborted) return { kind: 'blocked', reason: 'cancelled', state: state.readTraversal() };
   }
+}
+
+function persistCancellation(checkpoint: string): import('./traversal.js').TraversalState {
+  const acquisition = DurableState.acquireCancelOnly(checkpoint);
+  try { return acquisition.cancel(); } finally { acquisition.close(); }
+}
+
+export function cancelCheckpoint(checkpoint: string): import('./traversal.js').TraversalState {
+  return persistCancellation(checkpoint);
 }
 
 export async function start(options: OperatorStartOptions): Promise<OperatorRunResult> {
@@ -234,12 +245,15 @@ export async function start(options: OperatorStartOptions): Promise<OperatorRunR
   const initial = createTraversal(config.geometry, config.limits);
   DurableState.createBound(options.checkpoint, fixture.identity, initial);
   const state = DurableState.openBound(options.checkpoint, fixture.identity);
-  try { return await executeOperatorDiscovery(state, fixture); } finally { state.close(); }
+  const result = await executeOperatorDiscovery(state, fixture, options.signal).finally(() => state.close());
+  if (result.kind === 'blocked' && result.reason === 'cancelled') return { ...result, state: persistCancellation(options.checkpoint) };
+  return result;
 }
 
 export async function resume(options: OperatorResumeOptions): Promise<OperatorRunResult> {
   const fixture = parseSyntheticFixture(readFileSync(options.fixture));
   const state = DurableState.openBound(options.checkpoint, fixture.identity);
+  let stateClosed = false;
   try {
     const current = state.readTraversal();
     const requested = options.limits ?? {};
@@ -255,6 +269,12 @@ export async function resume(options: OperatorResumeOptions): Promise<OperatorRu
       validateOperatorConfig({ geometry: current.geometry, limits });
       state.writeTraversal({ ...current, limits });
     }
-    return await executeOperatorDiscovery(state, fixture);
-  } finally { state.close(); }
+    const result = await executeOperatorDiscovery(state, fixture, options.signal);
+    if (result.kind === 'blocked' && result.reason === 'cancelled') {
+      state.close();
+      stateClosed = true;
+      return { ...result, state: persistCancellation(options.checkpoint) };
+    }
+    return result;
+  } finally { if (!stateClosed) state.close(); }
 }
