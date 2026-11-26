@@ -591,7 +591,7 @@ test('seed-expanded A and B survive process death at active-time cap and recover
       writeFileSync(ledgerPath, JSON.stringify(ledger));
       return { id };
     };
-    executeDurableDiscovery(durable, recordSend('seed-id'), () => ({ elapsed: 0, result: { status: 'success', candidates: [{ id: 'seed-result', coordinate: null }] } }), 'isolated');
+    executeDurableDiscovery(durable, recordSend('seed-id'), () => ({ elapsed: 0, result: { status: 'success', candidates: [{ id: 'seed-result', coordinate: null }] } }), 'isolated', undefined, { monotonicNow: () => 0 });
     let state = durable.readTraversal();
     const [keyA, keyB] = state.queue;
     assert.ok(keyA && keyB);
