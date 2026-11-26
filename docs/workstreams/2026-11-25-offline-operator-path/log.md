@@ -7,6 +7,9 @@ Release and snapshot failure handling now returns errors without retaining a suc
 
 Focused behavioral RED outputs were retained separately: `/tmp/b6-followup-red-release-20261126-01.log`, `/tmp/b6-followup-red-current-selection-20261126-01.log`, `/tmp/b6-followup-red-core-selection-20261126-01.log`, and `/tmp/b6-followup-red-exact-projection-20261126-01.log`. Passing characterization (not RED) for the already-correct real-process documents and reserved-boundary throw: `/tmp/b6-followup-characterization-process-20261126-02.log` and `/tmp/b6-followup-red-reserved-boundary-20261126-01.log`. Focused GREEN: `/tmp/b6-followup-focused-green-20261126-05.log` (20/20); full check raw output: `/tmp/b6-followup-full-check-20261126-01.log` (323/323). The earlier B6 historical RED exception remains separate and unchanged.
 
+## B6 acceptance
+B6 complete at 9899cf8 after independent review and a passing full check (324 tests). Applied the operator's preauthorized exception for incomplete original historical RED; a fixture setup failure was not behavioral RED. Later pre-fix failures for release, recovery selection and exact projection are distinct; reserved-boundary and final acceptance checks are characterization.
+
 ## B5 acceptance
 B5 complete at 438d667 after independent behavioral review, focused 6/6 and full 303/303. Applied the operator's preauthorized slice-specific exception for partial historical RED: six raw behavioral failures were retained, but early assertions masked other contracts; passing probes are GREEN evidence, not historical RED. No other gate was waived.
 
