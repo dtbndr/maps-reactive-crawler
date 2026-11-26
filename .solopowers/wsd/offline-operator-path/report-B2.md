@@ -21,3 +21,16 @@ Added `DurableStopError` with explicit `active-time-limit` and `recovery-pending
 - `git diff --check` — exit 0.
 
 Existing focused durable discovery coverage characterizes failed monotonic/transition settlement behavior and confirms the active interval remains true for explicit recovery. This slice does not enable shared operator execution, CLI or status projection. No external or paid actions were performed.
+
+## Independent review follow-up at `d4a8fe2`
+
+Added controlled-clock discovery characterization proving that a callback failure and an ordinary traversal-transition failure remain the same ordinary `Error` instances when cleanup accounting reaches the active-time cap. Added a boundary case where a typed active-time stop is pending but cleanup settlement fails: the settlement error is surfaced, the failed debit remains unapplied, and `activeInterval` remains true for explicit recovery. Existing discovery stop assertions now verify exported `DurableStopError` class identity as well as the reason.
+
+The detail-reservation active-time typed exit was removed. The supported operator path in this slice is discovery-only, and the immediately preceding version used an ordinary `Error` for this detail guard; retaining a newly typed detail exit was unnecessary scope. Discovery typed exits remain unchanged.
+
+- Focused baseline after adding the characterization assertions but before changing production source: build passed; 5/5 tests passed, establishing these are preserved-behavior tests rather than fabricated RED.
+- Focused verification after the minimal detail-exit revert: `mise exec -- npm run build && mise exec -- node --test test/operator-stop-boundary.test.mjs` — exit 0, 5/5 passed.
+- Full check: `mise exec -- npm run check` — exit 0, 271/271 tests, typecheck and build passed. Full output retained in `full-check-B2-followup.out`.
+- `git diff --check` — exit 0.
+
+The original B2 report above records the two assertion-level RED failures and their expected/actual outcomes. A separate raw/standalone original RED output was not found in the repository or available session artifacts; this follow-up does not recreate or represent a new run as historical RED. No shared execution or external/paid action was performed.
