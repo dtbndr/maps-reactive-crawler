@@ -1,0 +1,105 @@
+import { pathToFileURL } from 'node:url';
+import { cancelCheckpoint, resume, start, type OperatorResumeOptions, type OperatorStartOptions } from './operator.js';
+
+export type CliIo = { stdout: (text: string) => void; stderr: (text: string) => void };
+export type CliLibrary = {
+  start: (options: OperatorStartOptions) => Promise<unknown>;
+  resume: (options: OperatorResumeOptions) => Promise<unknown>;
+  cancelCheckpoint: (checkpoint: string) => unknown;
+};
+
+type ParsedCommand =
+  | { command: 'start'; options: Omit<OperatorStartOptions, 'onPreflight'> }
+  | { command: 'resume'; options: OperatorResumeOptions }
+  | { command: 'cancel'; checkpoint: string };
+
+const startOptions = new Set(['checkpoint', 'fixture', 'lat', 'lon', 'spacing-m', 'radius-m', 'bbox', 'cells', 'submissions', 'active-ms']);
+const resumeOptions = new Set(['checkpoint', 'fixture', 'cells', 'submissions', 'active-ms']);
+
+function strictNumber(value: string, flag: string): number {
+  if (!/^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?$/.test(value)) throw new Error(`Invalid number for --${flag}`);
+  const number = Number(value);
+  if (!Number.isFinite(number)) throw new Error(`Invalid number for --${flag}`);
+  return number;
+}
+
+function parseArgs(args: string[]): ParsedCommand {
+  const [command, ...tokens] = args;
+  if (command !== 'start' && command !== 'resume' && command !== 'cancel') throw new Error('Expected command: start, resume, or cancel');
+  const allowed = command === 'start' ? startOptions : command === 'resume' ? resumeOptions : new Set(['checkpoint']);
+  const values = new Map<string, string>();
+  for (let index = 0; index < tokens.length; index++) {
+    const token = tokens[index]!;
+    if (!token.startsWith('--') || token.length === 2) throw new Error(`Unexpected argument: ${token}`);
+    const name = token.slice(2);
+    if (!allowed.has(name)) throw new Error(`Unknown option: ${token}`);
+    if (values.has(name)) throw new Error(`Duplicate option: ${token}`);
+    const value = tokens[++index];
+    if (value === undefined || value.startsWith('--')) throw new Error(`Missing value for ${token}`);
+    values.set(name, value);
+  }
+  const required = (name: string): string => {
+    const value = values.get(name);
+    if (value === undefined || value.length === 0) throw new Error(`Missing required option --${name}`);
+    return value;
+  };
+  const optionalNumber = (name: string): number | undefined => values.has(name) ? strictNumber(values.get(name)!, name) : undefined;
+  const requiredNumber = (name: string): number => strictNumber(required(name), name);
+  const checkpoint = required('checkpoint');
+  if (command === 'cancel') return { command, checkpoint };
+  const fixture = required('fixture');
+  if (command === 'resume') {
+    const limits: NonNullable<OperatorResumeOptions['limits']> = {};
+    const cells = optionalNumber('cells');
+    const submissions = optionalNumber('submissions');
+    const activeTime = optionalNumber('active-ms');
+    if (cells !== undefined) limits.cells = cells;
+    if (submissions !== undefined) limits.submissions = submissions;
+    if (activeTime !== undefined) limits.activeTime = activeTime;
+    return { command, options: { checkpoint, fixture, ...(Object.keys(limits).length ? { limits } : {}) } };
+  }
+  const radius = values.has('radius-m');
+  const bbox = values.has('bbox');
+  if (radius === bbox) throw new Error('Specify exactly one of --radius-m or --bbox');
+  let area: OperatorStartOptions['geometry']['area'];
+  if (radius) area = { type: 'radius', radius: requiredNumber('radius-m') };
+  else {
+    const parts = required('bbox').split(',');
+    if (parts.length !== 4) throw new Error('Invalid --bbox; expected SOUTH,NORTH,WEST,EAST');
+    const [south, north, west, east] = parts.map((part, index) => strictNumber(part, `bbox[${index}]`));
+    area = { type: 'bbox', south: south!, north: north!, west: west!, east: east! };
+  }
+  return {
+    command,
+    options: {
+      checkpoint, fixture,
+      geometry: { seed: { latitude: requiredNumber('lat'), longitude: requiredNumber('lon') }, spacing: requiredNumber('spacing-m'), area },
+      limits: { cells: requiredNumber('cells'), submissions: requiredNumber('submissions'), activeTime: requiredNumber('active-ms') },
+    },
+  };
+}
+
+export async function runCli(args: string[], library: CliLibrary, io: CliIo): Promise<number> {
+  try {
+    const parsed = parseArgs(args);
+    let result: unknown;
+    if (parsed.command === 'start') {
+      result = await library.start({ ...parsed.options, onPreflight: configuration => {
+        io.stderr(`${JSON.stringify({ version: 1, type: 'preflight', geometry: configuration.geometry, limits: configuration.limits })}\n`);
+      } });
+    } else if (parsed.command === 'resume') result = await library.resume(parsed.options);
+    else result = library.cancelCheckpoint(parsed.checkpoint);
+    io.stdout(`${JSON.stringify(result)}\n`);
+    return 0;
+  } catch (error) {
+    io.stderr(`${error instanceof Error ? error.message : String(error)}\n`);
+    return 1;
+  }
+}
+
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  void runCli(process.argv.slice(2), { start, resume, cancelCheckpoint }, {
+    stdout: text => process.stdout.write(text),
+    stderr: text => process.stderr.write(text),
+  }).then(code => { process.exitCode = code; });
+}
