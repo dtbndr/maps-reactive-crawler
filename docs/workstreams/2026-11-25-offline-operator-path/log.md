@@ -2,6 +2,11 @@
 
 Opt-ins: playback=on, external review=on
 
+## 2026-11-26 — B6 review follow-up
+Release and snapshot failure handling now returns errors without retaining a successful response; ownership release verifies one deleted claim, and close attempts the connection close even when release fails. Eligibility and durable execution select recoverable known-ID work only from each cell's latest attempt, leaving superseded attempts as provenance; status v1 explicitly selects nested fields and sorts detail-gap ties by observation-ID sequence. Added independent full-document real-process assertions for blocked resume and clean successful cancel, a true thrown `reserved` boundary test, writer/execution status agreement across pause/cancel/caps/known-ID observation, and persisted provenance verification.
+
+Focused behavioral RED outputs were retained separately: `/tmp/b6-followup-red-release-20261126-01.log`, `/tmp/b6-followup-red-current-selection-20261126-01.log`, `/tmp/b6-followup-red-core-selection-20261126-01.log`, and `/tmp/b6-followup-red-exact-projection-20261126-01.log`. Passing characterization (not RED) for the already-correct real-process documents and reserved-boundary throw: `/tmp/b6-followup-characterization-process-20261126-02.log` and `/tmp/b6-followup-red-reserved-boundary-20261126-01.log`. Focused GREEN: `/tmp/b6-followup-focused-green-20261126-05.log` (20/20); full check raw output: `/tmp/b6-followup-full-check-20261126-01.log` (323/323). The earlier B6 historical RED exception remains separate and unchanged.
+
 ## B5 acceptance
 B5 complete at 438d667 after independent behavioral review, focused 6/6 and full 303/303. Applied the operator's preauthorized slice-specific exception for partial historical RED: six raw behavioral failures were retained, but early assertions masked other contracts; passing probes are GREEN evidence, not historical RED. No other gate was waived.
 

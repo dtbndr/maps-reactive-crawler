@@ -118,6 +118,7 @@ function validateTraversal(value: unknown): asserts value is TraversalState {
 
 /** Durable checkpoint foundation; this does not implement restartable discovery. */
 export class DurableState {
+  #ownerReleased = false;
   private constructor(private db: DatabaseSync) {}
   static createBound(path: string, fixtureIdentity: string, traversal: TraversalState): void {
     if (typeof fixtureIdentity !== 'string' || !/^[a-f0-9]{64}$/.test(fixtureIdentity)) throw new Error('Invalid fixture identity');
@@ -394,14 +395,25 @@ export class DurableState {
     } catch (error) { this.db.exec('ROLLBACK'); throw error; }
   }
   releaseOwner(): void {
+    if (this.#ownerReleased) return;
     this.db.exec('BEGIN IMMEDIATE');
-    try { this.db.prepare('DELETE FROM owner WHERE id=1 AND pid=?').run(process.pid); this.db.exec('COMMIT'); }
-    catch (error) { this.db.exec('ROLLBACK'); throw error; }
+    try {
+      const result = this.db.prepare('DELETE FROM owner WHERE id=1 AND pid=?').run(process.pid);
+      if (Number(result.changes) !== 1) throw new Error('Writer ownership was not released');
+      this.db.exec('COMMIT');
+      this.#ownerReleased = true;
+    } catch (error) { this.db.exec('ROLLBACK'); throw error; }
   }
-  close(): void { this.releaseOwner(); this.db.close(); }
+  close(): void {
+    let failure: unknown;
+    try { this.releaseOwner(); } catch (error) { failure = error; }
+    try { this.db.close(); } catch (error) { failure ??= error; }
+    if (failure !== undefined) throw failure;
+  }
 }
 export class CancelOnlyAcquisition {
   #db: DatabaseSync;
+  #ownerReleased = false;
   constructor(db: DatabaseSync) { this.#db = db; }
   #readTraversal(): TraversalState {
     const row = this.#db.prepare('SELECT payload FROM traversal WHERE id=1').get();
@@ -416,9 +428,14 @@ export class CancelOnlyAcquisition {
     catch (error) { this.#db.exec('ROLLBACK'); throw error; }
   }
   releaseOwner(): void {
+    if (this.#ownerReleased) return;
     this.#db.exec('BEGIN IMMEDIATE');
-    try { this.#db.prepare('DELETE FROM owner WHERE id=1 AND pid=?').run(process.pid); this.#db.exec('COMMIT'); }
-    catch (error) { this.#db.exec('ROLLBACK'); throw error; }
+    try {
+      const result = this.#db.prepare('DELETE FROM owner WHERE id=1 AND pid=?').run(process.pid);
+      if (Number(result.changes) !== 1) throw new Error('Writer ownership was not released');
+      this.#db.exec('COMMIT');
+      this.#ownerReleased = true;
+    } catch (error) { this.#db.exec('ROLLBACK'); throw error; }
   }
   cancel(): TraversalState {
     this.#db.exec('BEGIN IMMEDIATE');
@@ -432,6 +449,11 @@ export class CancelOnlyAcquisition {
       return next;
     } catch (error) { this.#db.exec('ROLLBACK'); throw error; }
   }
-  close(): void { this.releaseOwner(); this.#db.close(); }
+  close(): void {
+    let failure: unknown;
+    try { this.releaseOwner(); } catch (error) { failure = error; }
+    try { this.#db.close(); } catch (error) { failure ??= error; }
+    if (failure !== undefined) throw failure;
+  }
 }
 function isAlive(pid: number): boolean { try { process.kill(pid, 0); return true; } catch (error) { const code = (error as NodeJS.ErrnoException).code; if (code === 'EPERM') return true; if (code === 'ESRCH') return false; throw new Error(`Cannot establish owner PID status: ${code ?? error}`); } }

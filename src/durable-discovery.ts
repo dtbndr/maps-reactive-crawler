@@ -124,7 +124,10 @@ function executeDurableDiscoveryImpl(state: DurableState, send: SyntheticSend, o
   let running = targetKey ?? Object.entries(current.cells).find(([, cell]) => cell.outcome === 'running')?.[0];
   const latestAttempt = current.attempts.at(-1);
   const latestUncertain = latestAttempt?.status === 'uncertain' ? latestAttempt : undefined;
-  const recoverable = current.attempts.findLast(item => ['uncertain', 'dispatched', 'observing'].includes(item.status) && item.knownId)
+  const latestAttemptByCell = new Map<string, typeof current.attempts[number]>();
+  for (const item of current.attempts) latestAttemptByCell.set(item.cellKey, item);
+  const currentAttempts = current.attempts.filter(item => latestAttemptByCell.get(item.cellKey) === item);
+  const recoverable = currentAttempts.findLast(item => ['uncertain', 'dispatched', 'observing'].includes(item.status) && item.knownId)
     ?? (latestUncertain && !latestUncertain.knownId && latestUncertain.safeRetryAuthorization ? latestUncertain : undefined);
   if (!targetKey && recoverable && !current.paused && (current.activeTime >= current.limits.activeTime || current.submissions >= current.limits.submissions || (!running && current.queue.length === 0) || (running && !current.attempts.some(item => item.cellKey === running && ['reserved', 'dispatched', 'observing'].includes(item.status))))) {
     const previousRunning = running;

@@ -29,7 +29,10 @@ export function classifyOperatorEligibility(state: import('./traversal.js').Trav
   if (hasGlobalGap) return decide({ kind: 'global-gap' });
 
   const running = Object.entries(state.cells).find(([, cell]) => cell.outcome === 'running')?.[0];
-  const knownIdAttempt = state.attempts.findLast(attempt => ['dispatched', 'observing', 'uncertain'].includes(attempt.status) && attempt.knownId);
+  const latestAttemptByCell = new Map<string, typeof state.attempts[number]>();
+  for (const attempt of state.attempts) latestAttemptByCell.set(attempt.cellKey, attempt);
+  const currentAttempts = state.attempts.filter(attempt => latestAttemptByCell.get(attempt.cellKey) === attempt);
+  const knownIdAttempt = currentAttempts.findLast(attempt => ['dispatched', 'observing', 'uncertain'].includes(attempt.status) && attempt.knownId);
   const unknownSafeRetry = state.attempts.at(-1)?.status === 'uncertain' && !state.attempts.at(-1)?.knownId && state.attempts.at(-1)?.safeRetryAuthorization ? state.attempts.at(-1) : undefined;
   const recoverableAttempt = knownIdAttempt ?? unknownSafeRetry;
   const preferRecoverable = Boolean(recoverableAttempt && (state.activeTime >= state.limits.activeTime || state.submissions >= state.limits.submissions || (!running && state.queue.length === 0) || (running && !state.attempts.some(attempt => attempt.cellKey === running && ['reserved', 'dispatched', 'observing'].includes(attempt.status)))));
@@ -42,7 +45,7 @@ export function classifyOperatorEligibility(state: import('./traversal.js').Trav
     return decide({ kind: 'observe-known-id', cellKey: key, workId: selected.workId, attemptId: selected.id });
   }
 
-  const parkedUnknown = state.attempts.findLast(attempt => attempt.status === 'uncertain' && !attempt.knownId && state.cells[attempt.cellKey]?.outcome === 'parked');
+  const parkedUnknown = currentAttempts.findLast(attempt => attempt.status === 'uncertain' && !attempt.knownId && state.cells[attempt.cellKey]?.outcome === 'parked');
   const hasOtherWork = Boolean(running || state.queue.length || knownIdAttempt);
   if (parkedUnknown && !hasOtherWork) return decide({ kind: 'parked-only-uncertainty', cellKey: parkedUnknown.cellKey, workId: parkedUnknown.workId, attemptId: parkedUnknown.id });
 
@@ -246,6 +249,13 @@ export type OperatorStatus = {
 
 const lexical = (a: string, b: string): number => a < b ? -1 : a > b ? 1 : 0;
 const nullableLexical = (a: string | null, b: string | null): number => a === null ? b === null ? 0 : -1 : b === null ? 1 : lexical(a, b);
+const compareStringArrays = (a: string[], b: string[]): number => {
+  for (let index = 0; index < Math.min(a.length, b.length); index++) {
+    const compared = lexical(a[index]!, b[index]!);
+    if (compared) return compared;
+  }
+  return a.length - b.length;
+};
 
 export function projectOperatorStatus(state: import('./traversal.js').TraversalState): OperatorStatus {
   const decision = classifyOperatorEligibility(state);
@@ -280,13 +290,20 @@ export function projectOperatorStatus(state: import('./traversal.js').TraversalS
   const outputState = state.recoveryPending || state.activeInterval === true ? 'potentially_interrupted' : state.cancelled ? 'cancelled' : state.paused ? 'paused' : 'idle';
   return {
     version: 1, state: outputState, headline, conditions: sortedConditions,
-    geometry: state.geometry, limits: state.limits,
+    geometry: {
+      seed: { latitude: state.geometry.seed.latitude, longitude: state.geometry.seed.longitude },
+      spacing: state.geometry.spacing,
+      area: state.geometry.area.type === 'bbox'
+        ? { type: 'bbox', south: state.geometry.area.south, north: state.geometry.area.north, west: state.geometry.area.west, east: state.geometry.area.east }
+        : { type: 'radius', radius: state.geometry.area.radius },
+    },
+    limits: { cells: state.limits.cells, submissions: state.limits.submissions, activeTime: state.limits.activeTime },
     counters: { admitted: state.admitted.length, submissions: state.submissions, activeTime: state.activeTime },
     frontier: { queued, running, parked, blocked, discoveryExhausted },
     discoveryGaps: state.gaps.map(gap => ({ id: gap.id ?? null, cellKey: gap.cellKey, cause: gap.cause, scope: gap.scope ?? null, status: gap.status ?? null }))
       .sort((a, b) => lexical(a.cellKey, b.cellKey) || nullableLexical(a.id, b.id) || lexical(a.cause, b.cause) || nullableLexical(a.scope, b.scope) || nullableLexical(a.status, b.status)),
-    detailGaps: (state.detailGaps ?? []).map(gap => ({ ...gap, observationIds: [...gap.observationIds].sort() }))
-      .sort((a, b) => lexical(a.workId, b.workId) || lexical(a.identity, b.identity) || lexical(a.status, b.status)),
+    detailGaps: (state.detailGaps ?? []).map(gap => ({ workId: gap.workId, identity: gap.identity, observationIds: [...gap.observationIds].sort(), status: gap.status }))
+      .sort((a, b) => lexical(a.workId, b.workId) || lexical(a.identity, b.identity) || lexical(a.status, b.status) || compareStringArrays(a.observationIds, b.observationIds)),
     pendingDetails: (state.detailWork ?? []).filter(work => !['completed', 'skipped'].includes(work.status)).map(work => ({ id: work.id, identity: work.identity, observationIds: [...work.observationIds].sort(), status: work.status }))
       .sort((a, b) => lexical(a.id, b.id)),
     coverage: { cellCenterEligibility: true, returnedPlacesFiltered: false, exhaustive: false, detailComplete: false },
