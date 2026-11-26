@@ -27,6 +27,46 @@ const runWithDependencies = (command, options, overrides = {}) => {
   });
 };
 
+test('start binds and executes the same fixture bytes when preflight replaces the fixture file', async () => {
+  const files = temp();
+  const original = fixture({ 'work:0,0': { id: 'same-work', observationId: 'same-work' } }, { 'same-work': { result: { status: 'empty' }, elapsed: 0 } });
+  const replacement = fixture({ 'work:0,0': { id: 'same-work', observationId: 'same-work' } }, { 'same-work': { result: { status: 'success', candidates: [{ id: 'replacement' }] }, elapsed: 0 } });
+  try {
+    saveFixture(files.fixture, original);
+    const result = await operator.start({ checkpoint: files.checkpoint, fixture: files.fixture, geometry, limits: { ...limits, cells: 1 }, onPreflight: () => saveFixture(files.fixture, replacement) });
+    assert.equal(result.status.counters.submissions, 1);
+    const expectedIdentity = operator.parseSyntheticFixture(original).identity;
+    const durable = DurableState.openBound(files.checkpoint, expectedIdentity);
+    try {
+      const state = durable.readTraversal();
+      assert.equal(state.cells['0,0'].outcome, 'empty');
+      assert.deepEqual(state.candidates, []);
+    } finally { durable.close(); }
+  } finally { rmSync(files.directory, { recursive: true, force: true }); }
+});
+
+test('start preflight cannot mutate nested validated configuration used to initialize traversal', async () => {
+  const files = temp();
+  try {
+    const bytes = fixture({ 'work:0,0': { id: 'seed', observationId: 'seed' } }, { seed: { result: { status: 'empty' }, elapsed: 0 } });
+    saveFixture(files.fixture, bytes);
+    const originalGeometry = structuredClone(geometry);
+    const originalLimits = { ...limits, cells: 2 };
+    await operator.start({ checkpoint: files.checkpoint, fixture: files.fixture, geometry: originalGeometry, limits: originalLimits, onPreflight: configuration => {
+      configuration.geometry.seed.latitude = 22;
+      configuration.geometry.area.radius = 1;
+      configuration.limits.cells = 99;
+    } });
+    const durable = DurableState.openBound(files.checkpoint, operator.parseSyntheticFixture(bytes).identity);
+    try {
+      const state = durable.readTraversal();
+      assert.deepEqual(state.geometry.seed, { latitude: 0, longitude: 0 });
+      assert.deepEqual(state.geometry.area, { type: 'radius', radius: 300 });
+      assert.equal(state.limits.cells, 2);
+    } finally { durable.close(); }
+  } finally { rmSync(files.directory, { recursive: true, force: true }); }
+});
+
 test('start validates and preflights before serial fixture-backed discovery, leaving detail pending', async () => {
   const files = temp();
   try {

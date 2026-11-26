@@ -346,13 +346,20 @@ export function cancelCheckpoint(options: { checkpoint: string }): { version: 1;
   } finally { acquisition.close(); }
 }
 
-export async function runOperatorWithDependencies(command: 'start' | 'resume', options: OperatorStartOptions | OperatorResumeOptions, dependencies: OperatorDiscoveryDependencies): Promise<OperatorRunResult> {
-  const fixture = parseSyntheticFixture(readFileSync(options.fixture));
+export async function runOperatorWithDependencies(command: 'start' | 'resume', options: OperatorStartOptions | OperatorResumeOptions, dependencies: OperatorDiscoveryDependencies, parsedFixture?: ParsedSyntheticFixture): Promise<OperatorRunResult> {
+  const fixture = parsedFixture ?? parseSyntheticFixture(readFileSync(options.fixture));
   if (command === 'start') {
     const startOptions = options as OperatorStartOptions;
     const config = validateOperatorConfig({ geometry: startOptions.geometry, limits: startOptions.limits });
     if (typeof dependencies.onPreflight !== 'function') throw new Error('Preflight callback is required');
-    dependencies.onPreflight({ geometry: config.geometry, limits: config.limits });
+    dependencies.onPreflight({
+      geometry: {
+        seed: { ...config.geometry.seed },
+        spacing: config.geometry.spacing,
+        area: { ...config.geometry.area },
+      },
+      limits: { ...config.limits },
+    });
     DurableState.createBound(startOptions.checkpoint, fixture.identity, createTraversal(config.geometry, config.limits));
   }
   const state = DurableState.openBound(options.checkpoint, fixture.identity);
@@ -384,7 +391,7 @@ export async function start(options: OperatorStartOptions): Promise<OperatorRunR
     send: workId => ({ id: fixture.discoveries[workId]!.id }),
     observe: id => fixture.observations[id]!,
     onPreflight: options.onPreflight,
-  });
+  }, fixture);
 }
 
 export async function resume(options: OperatorResumeOptions): Promise<OperatorRunResult> {
@@ -393,5 +400,5 @@ export async function resume(options: OperatorResumeOptions): Promise<OperatorRu
     send: workId => ({ id: fixture.discoveries[workId]!.id }),
     observe: id => fixture.observations[id]!,
     onPreflight: () => {},
-  });
+  }, fixture);
 }
