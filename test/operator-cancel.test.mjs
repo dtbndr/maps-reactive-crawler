@@ -233,12 +233,66 @@ test('cancel-only acquisition rejects an unbound checkpoint', () => {
   } finally { rmSync(files.directory, { recursive: true, force: true }); }
 });
 
-test('cancel-only acquisition interface has no unrestricted mutation or callback controls', () => {
+test('resume abort cancellation uses the retained writer lease', async () => {
+  const files = setup();
+  const controller = new AbortController();
+  const originalAcquire = DurableState.acquireCancelOnly;
+  try {
+    DurableState.createBound(files.checkpoint, operator.parseSyntheticFixture(fixture).identity, createTraversal(geometry, { ...limits, cells: 1 }));
+    operator.setOperatorDiscoveryForTest({ send: id => { setTimeout(() => controller.abort(), 0); return { id: id.slice(5) }; } });
+    DurableState.acquireCancelOnly = () => { throw new Error('must retain the original writer lease'); };
+    const result = await operator.resume({ checkpoint: files.checkpoint, fixture: files.fixturePath, signal: controller.signal });
+    assert.equal(result.state.cancelled, true);
+    assert.equal(result.state.activeInterval, false);
+    assert.equal(result.state.activeTime > 0, true);
+  } finally {
+    DurableState.acquireCancelOnly = originalAcquire;
+    operator.setOperatorDiscoveryForTest(undefined);
+    rmSync(files.directory, { recursive: true, force: true });
+  }
+});
+
+test('cancel-only acquisition has runtime-private writer storage', () => {
   const files = setup();
   try {
     DurableState.createBound(files.checkpoint, operator.parseSyntheticFixture(fixture).identity, createTraversal(geometry, { cells: 1, submissions: 1, activeTime: 100 }));
     const acquisition = DurableState.acquireCancelOnly(files.checkpoint);
-    try { assert.deepEqual(Object.getOwnPropertyNames(Object.getPrototypeOf(acquisition)).sort(), ['cancel', 'close', 'constructor', 'snapshot']); }
-    finally { acquisition.close(); }
+    try {
+      assert.deepEqual(Object.getOwnPropertyNames(Object.getPrototypeOf(acquisition)).sort(), ['cancel', 'close', 'constructor', 'snapshot']);
+      assert.deepEqual(Object.getOwnPropertyNames(acquisition), []);
+      assert.equal('db' in acquisition, false);
+    } finally { acquisition.close(); }
   } finally { rmSync(files.directory, { recursive: true, force: true }); }
+});
+
+test('cancel-only acquisition cannot bypass the guarded traversal transition', () => {
+  const files = setup();
+  try {
+    const identity = operator.parseSyntheticFixture(fixture).identity;
+    DurableState.createBound(files.checkpoint, identity, createTraversal(geometry, { cells: 1, submissions: 1, activeTime: 100 }));
+    const acquisition = DurableState.acquireCancelOnly(files.checkpoint);
+    const exposedWriter = acquisition.db;
+    if (exposedWriter) exposedWriter.prepare('UPDATE traversal SET payload=? WHERE id=1').run(JSON.stringify({ ...acquisition.snapshot(), cancelled: true }));
+    acquisition.close();
+    const check = DurableState.openBound(files.checkpoint, identity);
+    try { assert.equal(check.readTraversal().cancelled, false); } finally { check.close(); }
+  } finally { rmSync(files.directory, { recursive: true, force: true }); }
+});
+
+test('in-run abort cancellation uses the retained writer lease', async () => {
+  const files = setup();
+  const controller = new AbortController();
+  const originalAcquire = DurableState.acquireCancelOnly;
+  try {
+    operator.setOperatorDiscoveryForTest({ send: id => { setTimeout(() => controller.abort(), 0); return { id: id.slice(5) }; } });
+    DurableState.acquireCancelOnly = () => { throw new Error('must retain the original writer lease'); };
+    const result = await operator.start({ checkpoint: files.checkpoint, fixture: files.fixturePath, geometry, limits: { ...limits, cells: 1 }, onPreflight() {}, signal: controller.signal });
+    assert.equal(result.state.cancelled, true);
+    assert.equal(result.state.activeInterval, false);
+    assert.equal(result.state.activeTime > 0, true);
+  } finally {
+    DurableState.acquireCancelOnly = originalAcquire;
+    operator.setOperatorDiscoveryForTest(undefined);
+    rmSync(files.directory, { recursive: true, force: true });
+  }
 });

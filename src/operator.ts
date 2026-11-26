@@ -222,8 +222,8 @@ async function executeOperatorDiscovery(state: DurableState, fixture: ParsedSynt
       if (error instanceof DurableStopError) return { kind: 'blocked', reason: error.reason === 'active-time-limit' ? 'active-time-limit' : 'recovery-pending', state: state.readTraversal() };
       throw error;
     }
-    // Yield a macrotask between durable invocations so external work can run.
-    await new Promise<void>(resolve => setImmediate(resolve));
+    // Let zero-delay timers scheduled by this invocation abort before another operation.
+    await new Promise<void>(resolve => setTimeout(resolve, 0));
     if (signal?.aborted) return { kind: 'blocked', reason: 'cancelled', state: state.readTraversal() };
   }
 }
@@ -245,15 +245,16 @@ export async function start(options: OperatorStartOptions): Promise<OperatorRunR
   const initial = createTraversal(config.geometry, config.limits);
   DurableState.createBound(options.checkpoint, fixture.identity, initial);
   const state = DurableState.openBound(options.checkpoint, fixture.identity);
-  const result = await executeOperatorDiscovery(state, fixture, options.signal).finally(() => state.close());
-  if (result.kind === 'blocked' && result.reason === 'cancelled') return { ...result, state: persistCancellation(options.checkpoint) };
-  return result;
+  try {
+    const result = await executeOperatorDiscovery(state, fixture, options.signal);
+    if (result.kind === 'blocked' && result.reason === 'cancelled') return { ...result, state: state.cancel() };
+    return result;
+  } finally { state.close(); }
 }
 
 export async function resume(options: OperatorResumeOptions): Promise<OperatorRunResult> {
   const fixture = parseSyntheticFixture(readFileSync(options.fixture));
   const state = DurableState.openBound(options.checkpoint, fixture.identity);
-  let stateClosed = false;
   try {
     const current = state.readTraversal();
     const requested = options.limits ?? {};
@@ -270,11 +271,7 @@ export async function resume(options: OperatorResumeOptions): Promise<OperatorRu
       state.writeTraversal({ ...current, limits });
     }
     const result = await executeOperatorDiscovery(state, fixture, options.signal);
-    if (result.kind === 'blocked' && result.reason === 'cancelled') {
-      state.close();
-      stateClosed = true;
-      return { ...result, state: persistCancellation(options.checkpoint) };
-    }
+    if (result.kind === 'blocked' && result.reason === 'cancelled') return { ...result, state: state.cancel() };
     return result;
-  } finally { if (!stateClosed) state.close(); }
+  } finally { state.close(); }
 }

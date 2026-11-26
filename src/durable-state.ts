@@ -367,6 +367,10 @@ export class DurableState {
       return { ...value, activeInterval: false };
     });
   }
+  cancel(): TraversalState {
+    this.transitionTraversal(value => cancelTraversal(value));
+    return this.readTraversal();
+  }
   transitionTraversal(change: (state: TraversalState) => TraversalState): void {
     this.db.exec('BEGIN IMMEDIATE');
     try {
@@ -387,26 +391,27 @@ export class DurableState {
   close(): void { this.db.prepare('DELETE FROM owner WHERE id=1 AND pid=?').run(process.pid); this.db.close(); }
 }
 export class CancelOnlyAcquisition {
-  constructor(private readonly db: DatabaseSync) {}
+  #db: DatabaseSync;
+  constructor(db: DatabaseSync) { this.#db = db; }
   snapshot(): TraversalState {
-    const row = this.db.prepare('SELECT payload FROM traversal WHERE id=1').get();
+    const row = this.#db.prepare('SELECT payload FROM traversal WHERE id=1').get();
     if (!row) throw new Error('Corrupt state: missing traversal');
     const state = JSON.parse(String(row.payload));
     validateTraversal(state);
     return state;
   }
   cancel(): TraversalState {
-    this.db.exec('BEGIN IMMEDIATE');
+    this.#db.exec('BEGIN IMMEDIATE');
     try {
       const state = this.snapshot();
       if (state.activeInterval === true) throw new Error('Cannot control traversal during an active interval');
       const next = cancelTraversal(state);
       validateTraversal(next);
-      this.db.prepare('UPDATE traversal SET payload=? WHERE id=1').run(JSON.stringify(next));
-      this.db.exec('COMMIT');
+      this.#db.prepare('UPDATE traversal SET payload=? WHERE id=1').run(JSON.stringify(next));
+      this.#db.exec('COMMIT');
       return next;
-    } catch (error) { this.db.exec('ROLLBACK'); throw error; }
+    } catch (error) { this.#db.exec('ROLLBACK'); throw error; }
   }
-  close(): void { this.db.prepare('DELETE FROM owner WHERE id=1 AND pid=?').run(process.pid); this.db.close(); }
+  close(): void { this.#db.prepare('DELETE FROM owner WHERE id=1 AND pid=?').run(process.pid); this.#db.close(); }
 }
 function isAlive(pid: number): boolean { try { process.kill(pid, 0); return true; } catch (error) { const code = (error as NodeJS.ErrnoException).code; if (code === 'EPERM') return true; if (code === 'ESRCH') return false; throw new Error(`Cannot establish owner PID status: ${code ?? error}`); } }
