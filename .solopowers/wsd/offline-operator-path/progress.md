@@ -8,8 +8,8 @@ Slice A1: ⚠️ resolved — original per-contract historical RED unavailable �
 
 Slice A1: complete — review clean at 7331380, 0 P0/P1; fresh reviewer reported nonblocking P2 test quality findings in p2p3.md.
 
-Slice A2: blocked — no substantiated platform/filesystem support criterion for all required lock and publication guarantees; see report-A2.md. A3 execution was explicitly approved as continuation at 82f9b93.
+Slice A2: complete at `15c6071`; operator accepted the documented exception for missing historical no-replace and post-publication completeness RED evidence. This exception is limited to A2 and does not waive A3's RED gate.
 
-Slice A3: characterization complete — added genuine killed-process DELETE hot-journal and WAL mismatch fixtures, clean-pause bound-recovery coverage, and logical-state comparison against separately recovered copies. Focused operator-binding suite passed 8/8; full `mise exec -- npm run check` passed (249 tests). No historical RED was established because the behavior already passed; no production code change was required. See report-A3.md. Scoped commit pending.
+Slice A3: production acquisition added at `82f9b93`; review follow-up corrects coverage in `test/operator-binding.test.mjs`. Tests use a genuine hot DELETE journal and uncommitted WAL frames, actual clean-pause production path, and distinct on-disk fixture paths with identical bytes opening the same checkpoint. No original pre-implementation A3 RED capture was found in the available repository or session artifacts; corrected tests are characterization, not reconstructed historical RED. See `report-A3.md` for evidence and remaining gate status.
 
-A1 complete; A2 remains blocked on its support-policy decision. A3 does not authorize connected operator execution acceptance; A4 remains required.
+A1 and A2 complete. A3 test behavior is corrected, but the required historical RED evidence remains unavailable; A3 does not authorize connected operator execution acceptance. A4 remains required.
