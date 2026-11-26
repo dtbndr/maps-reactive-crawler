@@ -23,6 +23,8 @@ export function classifyOperatorEligibility(state: import('./traversal.js').Trav
   if (state.paused) return decide({ kind: 'paused' });
   if (state.recoveryPending) return decide({ kind: 'recovery-pending' });
 
+  if (hasGlobalGap) return decide({ kind: 'global-gap' });
+
   const running = Object.entries(state.cells).find(([, cell]) => cell.outcome === 'running')?.[0];
   const knownIdAttempt = state.attempts.findLast(attempt => ['dispatched', 'observing', 'uncertain'].includes(attempt.status) && attempt.knownId);
   const unknownSafeRetry = state.attempts.at(-1)?.status === 'uncertain' && !state.attempts.at(-1)?.knownId && state.attempts.at(-1)?.safeRetryAuthorization ? state.attempts.at(-1) : undefined;
@@ -33,7 +35,6 @@ export function classifyOperatorEligibility(state: import('./traversal.js').Trav
   if (selected?.status === 'reserved' && !selected.knownId) return decide({ kind: 'refuse-unknown-id', cellKey: key, workId: selected.workId, attemptId: selected.id });
   if (selected?.status === 'dispatched' && !selected.knownId) return decide({ kind: 'refuse-unknown-id', cellKey: key, workId: selected.workId, attemptId: selected.id });
   if (selected?.status === 'uncertain' && !selected.knownId && selected.safeRetryAuthorization) return decide({ kind: 'refuse-safe-retry', cellKey: key, workId: selected.workId, attemptId: selected.id });
-  if (hasGlobalGap) return decide({ kind: 'global-gap' });
   if (selected && ['dispatched', 'observing', 'uncertain'].includes(selected.status) && selected.knownId) {
     return decide({ kind: 'observe-known-id', cellKey: key, workId: selected.workId, attemptId: selected.id });
   }

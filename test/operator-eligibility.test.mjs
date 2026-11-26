@@ -60,6 +60,60 @@ test('known-ID continuation remains eligible across caps and attempt states', ()
   }
 });
 
+test('global blockers take precedence over refused running attempts', () => {
+  const reserved = { id: 'reserved', workId: 'work:0,0', cellKey: '0,0', status: 'reserved' };
+  const value = state({ queue: [], cells: { '0,0': { outcome: 'running' } }, attempts: [reserved], detailGaps: [{ workId: 'detail:known', identity: 'known', observationIds: [], status: 'unresolved' }] });
+  const decision = operator.classifyOperatorEligibility(value);
+  assert.equal(decision.kind, 'global-gap');
+  assert.equal(decision.recoveryPending, false);
+  assert.equal(decision.globalGap, true);
+});
+
+test('running recovery work is selected before queued work while paused and cancelled flags stay independent', () => {
+  const runningAttempt = { id: 'running', workId: 'work:0,0', cellKey: '0,0', status: 'reserved' };
+  const queuedAttempt = { id: 'queued', workId: 'work:1,0', cellKey: '1,0', status: 'reserved' };
+  const competing = state({ queue: ['1,0'], cells: { '0,0': { outcome: 'running' }, '1,0': { outcome: 'queued' } }, admitted: ['0,0', '1,0'], attempts: [runningAttempt, queuedAttempt] });
+  const selected = operator.classifyOperatorEligibility(competing);
+  assert.equal(selected.kind, 'refuse-unknown-id');
+  assert.equal(selected.cellKey, '0,0');
+  const recoveryBeforeRunning = state({ queue: ['1,0'], admitted: ['0,0', '1,0'], cells: { '0,0': { outcome: 'running' }, '1,0': { outcome: 'queued' } }, attempts: [runningAttempt, { id: 'known', workId: 'work:1,0', cellKey: '1,0', status: 'uncertain', knownId: 'persisted-id' }], submissions: 3 });
+  const selectedRecovery = operator.classifyOperatorEligibility(recoveryBeforeRunning);
+  assert.equal(selectedRecovery.kind, 'observe-known-id');
+  assert.equal(selectedRecovery.cellKey, '1,0');
+  assert.equal(operator.classifyOperatorEligibility({ ...competing, paused: true, recoveryPending: true }).kind, 'paused');
+  assert.equal(operator.classifyOperatorEligibility({ ...competing, paused: true, recoveryPending: true }).recoveryPending, true);
+  assert.equal(operator.classifyOperatorEligibility({ ...competing, cancelled: true, recoveryPending: true }).kind, 'cancelled');
+  assert.equal(operator.classifyOperatorEligibility({ ...competing, cancelled: true, recoveryPending: true }).recoveryPending, true);
+});
+
+test('persisted known-ID observation consumes delay at both caps without sending or retry policy', () => {
+  const directory = mkdtempSync(join(tmpdir(), 'operator-known-observation-'));
+  const db = DurableState.open(join(directory, 'state.db'));
+  try {
+    const observationFixture = operator.parseSyntheticFixture(Buffer.from(JSON.stringify({ version: 1, discoveries: {}, observations: { 'known-place': { result: { status: 'empty' }, elapsed: 0 } } })));
+    const initial = createTraversal(geometry, { cells: 1, submissions: 1, activeTime: 100 });
+    db.writeTraversal({ ...initial, queue: [], cells: { '0,0': { outcome: 'running' } }, attempts: [{ id: 'persisted', workId: 'work:0,0', cellKey: '0,0', status: 'observing', knownId: 'known-place', retryOrdinal: 1, observationRetryCeiling: 2, observationRetryPendingDelayMs: 1 }], submissions: 1, activeTime: 100 });
+    let sends = 0;
+    let observations = 0;
+    const result = executeDurableDiscovery(db, () => { sends++; throw new Error('unexpected send'); }, id => {
+      observations++;
+      assert.equal(id, 'known-place');
+      assert.equal(db.readTraversal().attempts[0].observationRetryPendingDelayMs, undefined);
+      return observationFixture.observations[id];
+    }, 'isolated', undefined, { monotonicNow: () => 0 });
+    assert.equal(observations, 1);
+    assert.equal(sends, 0);
+    assert.equal(result.submissions, 1);
+    assert.equal(result.activeTime, 100);
+    assert.equal(result.attempts[0].status, 'observed');
+    assert.equal(result.attempts[0].observationRetryPendingDelayMs, undefined);
+    assert.deepEqual(Object.keys(observationFixture.discoveries), []);
+  } finally {
+    db.close();
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
 test('parked-only uncertainty blocks alone but not other queued work', () => {
   const parked = { id: 'a', workId: 'work:0,0', cellKey: '0,0', status: 'uncertain' };
   const only = state({ queue: [], cells: { '0,0': { outcome: 'parked' } }, attempts: [parked], gaps: [{ cellKey: '0,0', cause: 'uncertain', scope: 'isolated', status: 'unresolved' }] });
