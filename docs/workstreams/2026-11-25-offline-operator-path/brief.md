@@ -1,7 +1,7 @@
 # Offline Operator Path Workstream Brief
 
 **Date**: 2026-11-25
-**Status**: Approved
+**Status**: Draft — awaiting operator approval
 
 ## Why
 Connect the tested offline traversal and durable recovery into a reproducible operator path without implying live-provider readiness.
@@ -14,13 +14,13 @@ Connect the tested offline traversal and durable recovery into a reproducible op
 
 ## Key decisions
 - Thin shared library and CLI — one operator contract avoids divergent execution paths.
-- Atomically bind fixture identity to each checkpoint — restart cannot silently switch synthetic evidence.
-- Read-only consistent status and export — inspection must not acquire a writer lease or modify recovery state; the exclusive cooperating lock returns busy while a writer or publisher is active.
-- Serial durable execution and cooperative cancellation — preserve existing recovery and accounting without promising interruption of synchronous callbacks.
+- Start atomically stages a fully initialized, fixture-bound database and publishes with same-directory hard-link no-replace; an existing destination is rejected. Validate fixture identity on the same connection before application mutations. Preserve SQLite writer claims/transactions, conservative live-PID refusal (including PID reuse), existing interrupted recovery and no-blind-resend behavior.
+- Idle read-only status and export — inspection uses a SQLite read-only snapshot and changes no application state; commands are strictly sequential, with no concurrent command supported.
+- One operator, one stable local checkpoint path, one command at a time — no concurrent commands, network/synced mounts, or active path moves. The local filesystem must support SQLite locking and same-directory hard-link no-replace publication; no separate coordination lock, native addon or runtime filesystem certification.
 - Report blocked frontier and all concurrent conditions independently — a cap edit does not promote blocked cells and a headline alone can mislead.
 
 ## Sizing
-This plan has 12 slices (A1–A3, B1–B7, C and D), rescaled from the milestone's provisional 3–4 to cover coordination, binding and operator-contract safeguards.
+A1 is complete; A2 and later slices are blocked pending approval of this revised brief. The remaining slices cover publication, binding and the operator contract, not concurrent access.
 
 ## Open questions
 - None.
