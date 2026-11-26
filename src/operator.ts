@@ -10,6 +10,54 @@ export type SyntheticFixture = {
 };
 export type ParsedSyntheticFixture = SyntheticFixture & { identity: string };
 
+export type OperatorEligibility = { kind: 'submit' | 'observe-known-id' | 'parked-only-uncertainty' | 'refuse-unknown-id' | 'refuse-safe-retry' | 'recovery-pending' | 'global-gap' | 'paused' | 'cancelled' | 'submission-cap' | 'active-time-cap' | 'exhausted'; cellKey?: string; workId?: string; attemptId?: string; recoveryPending: boolean; globalGap: boolean };
+
+/** Core-aligned eligibility decision; it reads persisted state and never mutates it. */
+export function classifyOperatorEligibility(state: import('./traversal.js').TraversalState): OperatorEligibility {
+  const blockedUnknownDetail = state.detailWork?.some(work => ['reserved', 'dispatched', 'uncertain'].includes(work.status) && !work.attempts.at(-1)?.knownId);
+  const hasGlobalGap = state.gaps.some(gap => gap.scope === 'global' && gap.status !== 'resolved' && gap.status !== 'skipped')
+    || state.detailGaps?.some(gap => gap.status === 'unresolved')
+    || blockedUnknownDetail;
+  const decide = (value: Omit<OperatorEligibility, 'recoveryPending' | 'globalGap'>): OperatorEligibility => ({ ...value, recoveryPending: state.recoveryPending === true, globalGap: Boolean(hasGlobalGap) });
+  if (state.cancelled) return decide({ kind: 'cancelled' });
+  if (state.paused) return decide({ kind: 'paused' });
+  if (state.recoveryPending) return decide({ kind: 'recovery-pending' });
+
+  const running = Object.entries(state.cells).find(([, cell]) => cell.outcome === 'running')?.[0];
+  const knownIdAttempt = state.attempts.findLast(attempt => ['dispatched', 'observing', 'uncertain'].includes(attempt.status) && attempt.knownId);
+  const unknownSafeRetry = state.attempts.at(-1)?.status === 'uncertain' && !state.attempts.at(-1)?.knownId && state.attempts.at(-1)?.safeRetryAuthorization ? state.attempts.at(-1) : undefined;
+  const recoverableAttempt = knownIdAttempt ?? unknownSafeRetry;
+  const preferRecoverable = Boolean(recoverableAttempt && (state.activeTime >= state.limits.activeTime || state.submissions >= state.limits.submissions || (!running && state.queue.length === 0) || (running && !state.attempts.some(attempt => attempt.cellKey === running && ['reserved', 'dispatched', 'observing'].includes(attempt.status)))));
+  const key = preferRecoverable ? recoverableAttempt?.cellKey : running;
+  const selected = key ? state.attempts.findLast(attempt => attempt.cellKey === key) : undefined;
+  if (selected?.status === 'reserved' && !selected.knownId) return decide({ kind: 'refuse-unknown-id', cellKey: key, workId: selected.workId, attemptId: selected.id });
+  if (selected?.status === 'dispatched' && !selected.knownId) return decide({ kind: 'refuse-unknown-id', cellKey: key, workId: selected.workId, attemptId: selected.id });
+  if (selected?.status === 'uncertain' && !selected.knownId && selected.safeRetryAuthorization) return decide({ kind: 'refuse-safe-retry', cellKey: key, workId: selected.workId, attemptId: selected.id });
+  if (hasGlobalGap) return decide({ kind: 'global-gap' });
+  if (selected && ['dispatched', 'observing', 'uncertain'].includes(selected.status) && selected.knownId) {
+    return decide({ kind: 'observe-known-id', cellKey: key, workId: selected.workId, attemptId: selected.id });
+  }
+
+  const parkedUnknown = state.attempts.findLast(attempt => attempt.status === 'uncertain' && !attempt.knownId && state.cells[attempt.cellKey]?.outcome === 'parked');
+  const hasOtherWork = Boolean(running || state.queue.length || knownIdAttempt);
+  if (parkedUnknown && !hasOtherWork) return decide({ kind: 'parked-only-uncertainty', cellKey: parkedUnknown.cellKey, workId: parkedUnknown.workId, attemptId: parkedUnknown.id });
+
+  const cellKey = running ?? state.queue[0];
+  if (!cellKey) return decide({ kind: 'exhausted' });
+  const attemptForCell = state.attempts.findLast(attempt => attempt.cellKey === cellKey);
+  if (attemptForCell?.status === 'uncertain' && !attemptForCell.knownId) return decide({ kind: 'parked-only-uncertainty', cellKey, workId: attemptForCell.workId, attemptId: attemptForCell.id });
+  if (state.submissions >= state.limits.submissions) return decide({ kind: 'submission-cap', cellKey, workId: `work:${cellKey}` });
+  if (state.activeTime >= state.limits.activeTime) return decide({ kind: 'active-time-cap', cellKey, workId: `work:${cellKey}` });
+  return decide({ kind: 'submit', cellKey, workId: `work:${cellKey}` });
+}
+
+/** Check a selected submission fixture entry only after eligibility permits a new submission. */
+export function precheckOperatorFixture(decision: OperatorEligibility, hasDiscovery: (workId: string) => boolean): string | undefined {
+  if (decision.kind !== 'submit' || !decision.workId) return undefined;
+  if (!hasDiscovery(decision.workId)) throw new Error(`Missing fixture discovery for ${decision.workId}`);
+  return decision.workId;
+}
+
 function exactObject(value: unknown, keys: string[], label: string): asserts value is Record<string, unknown> {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) throw new Error(`Invalid ${label}`);
   const actual = Object.keys(value);
