@@ -1,4 +1,7 @@
 import { createHash } from 'node:crypto';
+import { readFileSync } from 'node:fs';
+import { DurableState } from './durable-state.js';
+import { DurableStopError, executeDurableDiscovery, type SyntheticObserve, type SyntheticSend } from './durable-discovery.js';
 import { validateGeometry, type GeometryInput } from './index.js';
 import { createTraversal, type DiscoveryResult, type TraversalLimits } from './traversal.js';
 
@@ -176,4 +179,82 @@ export function parseSyntheticFixture(bytes: Uint8Array): ParsedSyntheticFixture
     if (typeof observationId !== 'string') throw new Error('Invalid observation ID');
   }
   return { version: 1, discoveries: discoveries as SyntheticFixture['discoveries'], observations: observations as SyntheticFixture['observations'], identity: createHash('sha256').update(bytes).digest('hex') };
+}
+
+export type OperatorBlockReason = 'cancelled' | 'paused' | 'recovery-pending' | 'global-gap' | 'parked-only-uncertainty' | 'refuse-unknown-id' | 'refuse-safe-retry' | 'active-time-limit';
+export type OperatorRunResult = { kind: 'completed' | 'partial'; state: import('./traversal.js').TraversalState } | { kind: 'blocked'; reason: OperatorBlockReason; state: import('./traversal.js').TraversalState };
+export type OperatorStartOptions = OperatorConfig & { checkpoint: string; fixture: string; onPreflight: (configuration: OperatorConfig) => void; signal?: AbortSignal };
+export type OperatorResumeOptions = { checkpoint: string; fixture: string; limits?: Partial<TraversalLimits>; signal?: AbortSignal };
+
+type DiscoveryTestOverrides = { send?: SyntheticSend; observe?: SyntheticObserve };
+let discoveryTestOverrides: DiscoveryTestOverrides | undefined;
+/** Private-module test seam; it is intentionally not re-exported from the package entry point. */
+export function setOperatorDiscoveryForTest(overrides: DiscoveryTestOverrides | undefined): void { discoveryTestOverrides = overrides; }
+
+async function executeOperatorDiscovery(state: DurableState, fixture: ParsedSyntheticFixture): Promise<OperatorRunResult> {
+  let partial = state.readTraversal().gaps.some(gap => ['failed', 'unrecognized'].includes(gap.cause) && gap.status !== 'resolved' && gap.status !== 'skipped');
+  for (;;) {
+    const current = state.readTraversal();
+    const decision = classifyOperatorEligibility(current);
+    if (['cancelled', 'paused', 'recovery-pending', 'global-gap', 'parked-only-uncertainty', 'refuse-unknown-id', 'refuse-safe-retry'].includes(decision.kind)) {
+      return { kind: 'blocked', reason: decision.kind as OperatorBlockReason, state: current };
+    }
+    if (['submission-cap', 'active-time-cap', 'exhausted'].includes(decision.kind)) return { kind: partial ? 'partial' : 'completed', state: current };
+    if (decision.kind !== 'submit' && decision.kind !== 'observe-known-id') return { kind: 'blocked', reason: 'recovery-pending', state: current };
+
+    if (decision.kind === 'submit') {
+      precheckOperatorFixture(decision, workId => Object.hasOwn(fixture.discoveries, workId));
+      const discovery = fixture.discoveries[decision.workId!];
+      if (!fixture.observations[discovery.observationId]) throw new Error(`Missing fixture observation for ${discovery.observationId}`);
+    } else {
+      const attempt = current.attempts.find(item => item.id === decision.attemptId);
+      if (!attempt?.knownId) return { kind: 'blocked', reason: 'refuse-unknown-id', state: current };
+      if (!fixture.observations[attempt.knownId]) throw new Error(`Missing fixture observation for ${attempt.knownId}`);
+    }
+
+    const send: SyntheticSend = workId => discoveryTestOverrides?.send?.(workId) ?? { id: fixture.discoveries[workId]!.id };
+    const observe: SyntheticObserve = id => discoveryTestOverrides?.observe?.(id) ?? fixture.observations[id]!;
+    try {
+      const next = executeDurableDiscovery(state, send, observe, 'isolated');
+      if (next.gaps.some(gap => gap.cause === 'failed' || gap.cause === 'unrecognized')) partial = true;
+    } catch (error) {
+      if (error instanceof DurableStopError) return { kind: 'blocked', reason: error.reason === 'active-time-limit' ? 'active-time-limit' : 'recovery-pending', state: state.readTraversal() };
+      throw error;
+    }
+    // Yield a macrotask between durable invocations so external work can run.
+    await new Promise<void>(resolve => setImmediate(resolve));
+  }
+}
+
+export async function start(options: OperatorStartOptions): Promise<OperatorRunResult> {
+  const fixture = parseSyntheticFixture(readFileSync(options.fixture));
+  const config = validateOperatorConfig({ geometry: options.geometry, limits: options.limits });
+  if (typeof options.onPreflight !== 'function') throw new Error('Preflight callback is required');
+  options.onPreflight({ geometry: config.geometry, limits: config.limits });
+  const initial = createTraversal(config.geometry, config.limits);
+  DurableState.createBound(options.checkpoint, fixture.identity, initial);
+  const state = DurableState.openBound(options.checkpoint, fixture.identity);
+  try { return await executeOperatorDiscovery(state, fixture); } finally { state.close(); }
+}
+
+export async function resume(options: OperatorResumeOptions): Promise<OperatorRunResult> {
+  const fixture = parseSyntheticFixture(readFileSync(options.fixture));
+  const state = DurableState.openBound(options.checkpoint, fixture.identity);
+  try {
+    const current = state.readTraversal();
+    const requested = options.limits ?? {};
+    if (typeof requested !== 'object' || requested === null || Array.isArray(requested)) throw new Error('Invalid resume limits');
+    const allowed = ['cells', 'submissions', 'activeTime'];
+    if (Object.keys(requested).some(key => !allowed.includes(key))) throw new Error('Invalid resume limit name');
+    for (const key of Object.keys(requested) as (keyof TraversalLimits)[]) {
+      const value = requested[key];
+      if (typeof value !== 'number' || !Number.isFinite(value) || !Number.isSafeInteger(value) || value <= current.limits[key]) throw new Error(`Resume ${key} limit must strictly increase`);
+    }
+    if (Object.keys(requested).length) {
+      const limits = { ...current.limits, ...requested };
+      validateOperatorConfig({ geometry: current.geometry, limits });
+      state.writeTraversal({ ...current, limits });
+    }
+    return await executeOperatorDiscovery(state, fixture);
+  } finally { state.close(); }
 }

@@ -72,7 +72,7 @@ export function neighbors(_geometry: Geometry, column: number, row: number): [nu
   return [[column,row+1],[column,row-1],[column+1,row],[column-1,row]];
 }
 
-export { validateOperatorConfig, parseSyntheticFixture } from './operator.js';
-export type { OperatorConfig, SyntheticFixture, ParsedSyntheticFixture } from './operator.js';
+export { validateOperatorConfig, parseSyntheticFixture, start, resume } from './operator.js';
+export type { OperatorConfig, SyntheticFixture, ParsedSyntheticFixture, OperatorRunResult, OperatorStartOptions, OperatorResumeOptions } from './operator.js';
 export { createTraversal, admitNextCell, applyDiscoveryResult, reserveSubmission, dispatchSubmission, debitActiveTime, markUncertain, observeKnownId, cancelTraversal, reportTraversal, skipAttempt, authorizeResend, retryKnownIdObservation, pauseTraversal, resumeTraversal, updateTraversalLimits } from './traversal.js';
 export type { TraversalState, DiscoveryResult, CellOutcome, CandidateObservation, TraversalReport } from './traversal.js';
