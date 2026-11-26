@@ -7,3 +7,4 @@ Accepted BLK-1 and IC-1, IC-3, IC-4; accepted IC-2 as an unproven coordination c
 
 Isolation: branch — branch ws/offline-operator-path
 Pre-flight: findings — corrected approval marker and moved recovery and response assertions to the slices that deliver them.
+Slice A1: complete — review clean at 7331380; focused 10/10 and full 232/232. Nonblocking test-quality findings tracked for follow-up.
