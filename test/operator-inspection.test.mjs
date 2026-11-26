@@ -181,6 +181,27 @@ test('status reports an exact live-owner interrupted snapshot without recovery m
   } finally { rmSync(directory, { recursive: true, force: true }); }
 });
 
+test('read-only export rejects duplicate observation IDs without detail work', async () => {
+  const directory = mkdtempSync(join(tmpdir(), 'inspection-duplicate-observation-'));
+  const checkpoint = join(directory, 'state.db');
+  const fixturePath = join(directory, 'fixture.json');
+  try {
+    writeFileSync(fixturePath, JSON.stringify({ version: 1, discoveries: { 'work:0,0': { id: 'seed', observationId: 'seed' } }, observations: { seed: { result: { status: 'success', candidates: [
+      { id: 'first', verifiedCanonicalKey: 'first-key' },
+      { id: 'second', verifiedCanonicalKey: 'second-key' },
+    ] }, elapsed: 0 } } }));
+    await operator.start({ checkpoint, fixture: fixturePath, geometry, limits: { cells: 1, submissions: 1, activeTime: 100 }, onPreflight() {} });
+    const db = new DatabaseSync(checkpoint);
+    const state = JSON.parse(db.prepare('SELECT payload FROM traversal WHERE id=1').get().payload);
+    delete state.detailWork;
+    delete state.detailGaps;
+    state.candidates[1].observationId = state.candidates[0].observationId;
+    db.prepare('UPDATE traversal SET payload=? WHERE id=1').run(JSON.stringify(state));
+    db.close();
+    assert.throws(() => operator.exportResults({ checkpoint }), /Corrupt traversal checkpoint/);
+  } finally { rmSync(directory, { recursive: true, force: true }); }
+});
+
 test('read-only export preserves occurrence provenance and classifies a live-appearing owner', async () => {
   const directory = mkdtempSync(join(tmpdir(), 'inspection-export-'));
   const checkpoint = join(directory, 'state.db');

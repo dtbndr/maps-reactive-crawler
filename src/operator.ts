@@ -321,18 +321,17 @@ export type OperatorExport = { version: 1; status: OperatorStatus; verifiedPlace
 export function exportResults(options: { checkpoint: string }): OperatorExport {
   const snapshot = readOnlyCheckpointSnapshot(options.checkpoint);
   const state = snapshot.traversal;
-  const occurrences: OperatorOccurrence[] = state.candidates.map(candidate => {
+  const occurrences = state.candidates.map(candidate => {
     const attempt = state.attempts.find(item => item.id === candidate.attemptId);
     if (!attempt) throw new Error('Corrupt traversal checkpoint: occurrence attempt is missing');
-    return { id: candidate.id, coordinate: candidate.coordinate ?? null, classification: candidate.classification, sourceCell: candidate.sourceCell, workId: attempt.workId, attemptId: candidate.attemptId, observationId: candidate.observationId, occurrence: candidate.occurrence };
-  }).sort((a, b) => lexical(a.observationId, b.observationId));
+    return { occurrence: { id: candidate.id, coordinate: candidate.coordinate ?? null, classification: candidate.classification, sourceCell: candidate.sourceCell, workId: attempt.workId, attemptId: candidate.attemptId, observationId: candidate.observationId, occurrence: candidate.occurrence }, canonicalKey: candidate.verifiedCanonicalKey };
+  }).sort((a, b) => lexical(a.occurrence.observationId, b.occurrence.observationId));
   const groups = new Map<string, OperatorOccurrence[]>();
   const unverifiedObservations: OperatorOccurrence[] = [];
-  for (const occurrence of occurrences) {
-    const candidate = state.candidates.find(item => item.observationId === occurrence.observationId)!;
-    if (candidate.verifiedCanonicalKey) {
-      const group = groups.get(candidate.verifiedCanonicalKey) ?? [];
-      group.push(occurrence); groups.set(candidate.verifiedCanonicalKey, group);
+  for (const { occurrence, canonicalKey } of occurrences) {
+    if (canonicalKey) {
+      const group = groups.get(canonicalKey) ?? [];
+      group.push(occurrence); groups.set(canonicalKey, group);
     } else unverifiedObservations.push(occurrence);
   }
   return { version: 1, status: projectOperatorStatus(state, { pid: snapshot.ownerPid, alive: snapshot.ownerAlive }), verifiedPlaces: [...groups].sort(([a], [b]) => lexical(a, b)).map(([canonicalKey, observations]) => ({ canonicalKey, observations })), unverifiedObservations };

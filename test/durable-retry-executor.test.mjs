@@ -203,8 +203,8 @@ test('resumed observation exhausts remaining 1 of 2 retries and pauses globally'
 test('zero observation allowance survives reopen and cannot be widened',()=>{
  const dir=mkdtempSync(join(tmpdir(),'zero-allowance-')),path=join(dir,'state.db');let sends=0,polls=0;
  try{let d=DurableState.open(path);d.writeTraversal(createTraversal(geo,{cells:1,submissions:1,activeTime:10}));const send=()=>{sends++;return{id:'known'}};const observe=()=>{polls++;throw Error('safe')};
- assert.throws(()=>executeDurableDiscovery(d,send,observe,'isolated',{observationCeiling:0,knownSafeObservationError:()=>true}),/safe/);assert.equal(d.readTraversal().attempts[0].observationRetryCeiling,0);d.close();
- d=DurableState.open(path);assert.throws(()=>executeDurableDiscovery(d,send,observe,'isolated',{observationCeiling:2,knownSafeObservationError:()=>true}),/safe/);assert.equal(sends,1);assert.equal(polls,2);assert.equal(d.readTraversal().submissions,1);d.close();
+ assert.throws(()=>executeDurableDiscovery(d,send,observe,'isolated',{observationCeiling:0,knownSafeObservationError:()=>true},{monotonicNow:()=>0}),/safe/);assert.equal(d.readTraversal().attempts[0].observationRetryCeiling,0);d.close();
+ d=DurableState.open(path);assert.throws(()=>executeDurableDiscovery(d,send,observe,'isolated',{observationCeiling:2,knownSafeObservationError:()=>true},{monotonicNow:()=>0}),/safe/);assert.equal(sends,1);assert.equal(polls,2);assert.equal(d.readTraversal().submissions,1);d.close();
  }finally{rmSync(dir,{recursive:true,force:true})}
 });
 

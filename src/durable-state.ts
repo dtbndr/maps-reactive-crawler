@@ -35,10 +35,9 @@ function validateTraversal(value: unknown): asserts value is TraversalState {
   if (!resendAttempts.every((attempt: any, index: number) => attempt.resendOrdinal === index + 1 && attempt.resendCeiling === s.resendCeiling)) throw new Error('Corrupt traversal checkpoint');
   if (!s.attempts.every((a: any) => a.observationRetryPendingDelayMs === undefined || (Number.isSafeInteger(a.observationRetryPendingDelayMs) && a.observationRetryPendingDelayMs >= 0 && a.status === 'observing' && typeof a.knownId === 'string' && a.retryOrdinal > 0 && a.observationRetryCeiling >= a.retryOrdinal))) throw new Error('Corrupt traversal checkpoint');
   if (!s.attempts.every((a: any) => a.safeRetryAuthorization === undefined || (a.safeRetryAuthorization && Number.isSafeInteger(a.safeRetryAuthorization.ordinal) && a.safeRetryAuthorization.ordinal > 0 && Number.isSafeInteger(a.safeRetryAuthorization.ceiling) && a.safeRetryAuthorization.ceiling >= a.safeRetryAuthorization.ordinal && (a.safeRetryAuthorization.delayMs === undefined || (Number.isSafeInteger(a.safeRetryAuthorization.delayMs) && a.safeRetryAuthorization.delayMs >= 0)) && a.safeRetryAuthorization.ordinal === (a.submissionRetryOrdinal ?? 0) + 1))) throw new Error('Corrupt traversal checkpoint');
-  if (!s.gaps.every((g: any) => g && typeof g.cellKey === 'string' && Object.hasOwn(s.cells, g.cellKey)) || !s.candidates.every((c: any) => c && Object.hasOwn(s.cells, c.sourceCell) && s.attempts.some((a: any) => a.id === c.attemptId && a.cellKey === c.sourceCell))) throw new Error('Corrupt traversal checkpoint');
+  if (!s.gaps.every((g: any) => g && typeof g.cellKey === 'string' && Object.hasOwn(s.cells, g.cellKey)) || !s.candidates.every((c: any) => c && Object.hasOwn(s.cells, c.sourceCell) && s.attempts.some((a: any) => a.id === c.attemptId && a.cellKey === c.sourceCell)) || new Set(s.candidates.map((c: any) => c.observationId)).size !== s.candidates.length) throw new Error('Corrupt traversal checkpoint');
   if (s.detailWork !== undefined) {
     const observationById = new Map(s.candidates.map((c: any) => [c.observationId, c]));
-    if (observationById.size !== s.candidates.length) throw new Error('Corrupt traversal checkpoint');
     const workIds = new Set<string>();
     const linkedObservations = new Set<string>();
     if (!Array.isArray(s.detailWork) || !s.detailWork.every((work: any) => {
