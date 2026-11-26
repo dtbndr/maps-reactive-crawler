@@ -1,7 +1,7 @@
 # Offline Operator Path Workstream Brief
 
 **Date**: 2026-11-25
-**Status**: Draft — awaiting operator approval
+**Status**: Approved
 
 ## Why
 Connect the tested offline traversal and durable recovery into a reproducible operator path without implying live-provider readiness.
@@ -20,7 +20,7 @@ Connect the tested offline traversal and durable recovery into a reproducible op
 - Report blocked frontier and all concurrent conditions independently — a cap edit does not promote blocked cells and a headline alone can mislead.
 
 ## Sizing
-A1 is complete; Slice A4, its targeted candidate-validation follow-up, must pass before B3 enables execution. A2 and later slices are blocked pending approval of this revised brief. The remaining slices cover publication, binding and the operator contract, not concurrent access.
+A1 is complete; Slice A4, its targeted candidate-validation follow-up, must pass before B3 enables execution. A2 and later slices follow this approved revised brief. The remaining slices cover publication, binding and the operator contract, not concurrent access.
 
 ## Open questions
 - None.
