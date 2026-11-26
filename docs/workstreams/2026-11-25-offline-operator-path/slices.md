@@ -114,8 +114,8 @@ Before editing affected durable behavior, inspect existing tests and add and run
 
 ### Slice A4: Fixture candidate validation gate
 **Goal**: Close the externally reviewed A1 validation gap before execution, without reopening A1's completed record.
-- [ ] Reject blank or whitespace-only `verifiedCanonicalKey` values and candidate coordinates outside inclusive latitude [-90, 90] and longitude [-180, 180] before checkpoint mutation or sends. Accept boundary coordinates and valid coordinates outside the crawl area; do not filter returned places.
-- [ ] Add focused fixture regressions for each invalid class, inclusive boundaries and valid outside-area candidates; demonstrate RED, build, run `mise exec -- node --test test/operator-fixture.test.mjs`, and run the full check. This gate must pass before B3 enables execution.
+- [x] Reject blank or whitespace-only `verifiedCanonicalKey` values and candidate coordinates outside inclusive latitude [-90, 90] and longitude [-180, 180] before checkpoint mutation or sends. Accept boundary coordinates and valid coordinates outside the crawl area; do not filter returned places.
+- [x] Add focused fixture regressions for each invalid class, inclusive boundaries and valid outside-area candidates; demonstrate RED, build, run `mise exec -- node --test test/operator-fixture.test.mjs`, and run the full check. This gate must pass before B3 enables execution.
 
 ### Slice B1: Pre-invocation eligibility prerequisite
 **Goal**: Independently establish eligibility decisions without enabling shared operator execution.
