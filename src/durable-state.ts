@@ -393,17 +393,18 @@ export class DurableState {
 export class CancelOnlyAcquisition {
   #db: DatabaseSync;
   constructor(db: DatabaseSync) { this.#db = db; }
-  snapshot(): TraversalState {
+  #readTraversal(): TraversalState {
     const row = this.#db.prepare('SELECT payload FROM traversal WHERE id=1').get();
     if (!row) throw new Error('Corrupt state: missing traversal');
     const state = JSON.parse(String(row.payload));
     validateTraversal(state);
     return state;
   }
+  snapshot(): TraversalState { return this.#readTraversal(); }
   cancel(): TraversalState {
     this.#db.exec('BEGIN IMMEDIATE');
     try {
-      const state = this.snapshot();
+      const state = this.#readTraversal();
       if (state.activeInterval === true) throw new Error('Cannot control traversal during an active interval');
       const next = cancelTraversal(state);
       validateTraversal(next);

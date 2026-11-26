@@ -265,6 +265,29 @@ test('cancel-only acquisition has runtime-private writer storage', () => {
   } finally { rmSync(files.directory, { recursive: true, force: true }); }
 });
 
+test('cancel-only cancellation trusts stored state rather than a replaced snapshot method', () => {
+  const files = setup();
+  try {
+    const identity = operator.parseSyntheticFixture(fixture).identity;
+    DurableState.createBound(files.checkpoint, identity, createTraversal(geometry, { cells: 1, submissions: 1, activeTime: 100 }));
+    const acquisition = DurableState.acquireCancelOnly(files.checkpoint);
+    const stored = acquisition.snapshot();
+    const active = { ...stored, activeInterval: true };
+    const db = new DatabaseSync(files.checkpoint);
+    db.prepare('UPDATE traversal SET payload=? WHERE id=1').run(JSON.stringify(active));
+    db.close();
+    acquisition.snapshot = () => ({ ...stored, limits: { ...stored.limits, cells: stored.limits.cells + 1 } });
+    try {
+      assert.throws(() => acquisition.cancel(), /active interval/);
+      const check = new DatabaseSync(files.checkpoint);
+      try {
+        const row = check.prepare('SELECT payload FROM traversal WHERE id=1').get();
+        assert.deepEqual(JSON.parse(String(row.payload)), active);
+      } finally { check.close(); }
+    } finally { acquisition.close(); }
+  } finally { rmSync(files.directory, { recursive: true, force: true }); }
+});
+
 test('cancel-only acquisition cannot bypass the guarded traversal transition', () => {
   const files = setup();
   try {
