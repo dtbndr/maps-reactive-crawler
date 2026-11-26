@@ -7,6 +7,9 @@ Release and snapshot failure handling now returns errors without retaining a suc
 
 Focused behavioral RED outputs were retained separately: `/tmp/b6-followup-red-release-20261126-01.log`, `/tmp/b6-followup-red-current-selection-20261126-01.log`, `/tmp/b6-followup-red-core-selection-20261126-01.log`, and `/tmp/b6-followup-red-exact-projection-20261126-01.log`. Passing characterization (not RED) for the already-correct real-process documents and reserved-boundary throw: `/tmp/b6-followup-characterization-process-20261126-02.log` and `/tmp/b6-followup-red-reserved-boundary-20261126-01.log`. Focused GREEN: `/tmp/b6-followup-focused-green-20261126-05.log` (20/20); full check raw output: `/tmp/b6-followup-full-check-20261126-01.log` (323/323). The earlier B6 historical RED exception remains separate and unchanged.
 
+## B7 acceptance
+B7 complete at 3413850 after independent review; focused 61/61, full 329/329 and pack dry run passed. Applied the operator's preauthorized exception for missing original assertion-level RED; migration scaffolding errors are not behavioral RED. A previous full check failed a real-clock retry test and its cause was not established; later passes do not prove elimination. The harness witness covers preflight and discovery sends, not detail sends.
+
 ## B6 acceptance
 B6 complete at 9899cf8 after independent review and a passing full check (324 tests). Applied the operator's preauthorized exception for incomplete original historical RED; a fixture setup failure was not behavioral RED. Later pre-fix failures for release, recovery selection and exact projection are distinct; reserved-boundary and final acceptance checks are characterization.
 
