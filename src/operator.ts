@@ -93,9 +93,10 @@ function validateDiscoveryResult(result: unknown): asserts result is DiscoveryRe
       const coordinate = value.coordinate as Record<string, unknown>;
       if (!coordinate || typeof coordinate !== 'object' || Array.isArray(coordinate)) throw new Error('Invalid candidate coordinate');
       exactObject(coordinate, ['latitude', 'longitude'], 'candidate coordinate');
-      if (!Number.isFinite(coordinate.latitude) || !Number.isFinite(coordinate.longitude)) throw new Error('Invalid candidate coordinate');
+      const { latitude, longitude } = coordinate;
+      if (typeof latitude !== 'number' || !Number.isFinite(latitude) || latitude < -90 || latitude > 90 || typeof longitude !== 'number' || !Number.isFinite(longitude) || longitude < -180 || longitude > 180) throw new Error('Invalid candidate coordinate');
     }
-    if (value.verifiedCanonicalKey !== undefined && typeof value.verifiedCanonicalKey !== 'string') throw new Error('Invalid verified candidate key');
+    if (value.verifiedCanonicalKey !== undefined && (typeof value.verifiedCanonicalKey !== 'string' || !value.verifiedCanonicalKey.trim())) throw new Error('Invalid verified candidate key');
   }
 }
 

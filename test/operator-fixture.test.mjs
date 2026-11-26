@@ -60,6 +60,36 @@ test('rejects unknown candidate coordinate fields and array coordinates', () => 
   }
 });
 
+for (const verifiedCanonicalKey of ['', '  ', '\t\n']) {
+  test(`rejects verified candidate key ${JSON.stringify(verifiedCanonicalKey)}`, () => {
+    const fixture = { version: 1, discoveries: {}, observations: { x: { result: { status: 'success', candidates: [{ id: 'place', verifiedCanonicalKey }] }, elapsed: 0 } } };
+    assert.throws(() => parseSyntheticFixture(Buffer.from(JSON.stringify(fixture))), /Invalid verified candidate key/);
+  });
+}
+
+for (const [label, coordinate] of [
+  ['latitude below minimum', { latitude: -90.01, longitude: 0 }],
+  ['latitude above maximum', { latitude: 90.01, longitude: 0 }],
+  ['longitude below minimum', { latitude: 0, longitude: -180.01 }],
+  ['longitude above maximum', { latitude: 0, longitude: 180.01 }],
+]) {
+  test(`rejects candidate coordinate with ${label}`, () => {
+    const fixture = { version: 1, discoveries: {}, observations: { x: { result: { status: 'success', candidates: [{ id: 'place', coordinate }] }, elapsed: 0 } } };
+    assert.throws(() => parseSyntheticFixture(Buffer.from(JSON.stringify(fixture))), /Invalid candidate coordinate/);
+  });
+}
+
+test('[preservation] accepts inclusive coordinate boundaries and valid candidates outside crawl area', () => {
+  const candidates = [
+    { id: 'south-west', coordinate: { latitude: -90, longitude: -180 } },
+    { id: 'north-east', coordinate: { latitude: 90, longitude: 180 } },
+    { id: 'outside-area', coordinate: { latitude: 40, longitude: 40 }, verifiedCanonicalKey: 'canonical-place' },
+  ];
+  const fixture = { version: 1, discoveries: {}, observations: { x: { result: { status: 'success', candidates }, elapsed: 0 } } };
+  const parsed = parseSyntheticFixture(Buffer.from(JSON.stringify(fixture)));
+  assert.deepEqual(JSON.parse(JSON.stringify(parsed.observations.x.result)), { status: 'success', candidates });
+});
+
 test('rejects array-valued failure scope', () => {
   const fixture = { version: 1, discoveries: {}, observations: { x: { result: { status: 'failed', scope: ['global'] }, elapsed: 0 } } };
   assert.throws(() => parseSyntheticFixture(Buffer.from(JSON.stringify(fixture))));
