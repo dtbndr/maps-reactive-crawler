@@ -98,7 +98,7 @@ test('persisted submission retry ceiling cannot be widened by a later caller pol
 test('observation ceiling zero makes no retry call',()=>{
  const dir=mkdtempSync(join(tmpdir(),'retry-zero-'));const db=DurableState.open(join(dir,'state.db'));let polls=0;
  try {db.writeTraversal(createTraversal(geo,{cells:1,submissions:1,activeTime:10}));
- assert.throws(()=>executeDurableDiscovery(db,()=>({id:'synthetic'}),()=>{polls++;throw Object.assign(Error('safe'),{safe:true})},'isolated',{observationCeiling:0,knownSafeObservationError:e=>e.safe}),/safe/);
+ assert.throws(()=>executeDurableDiscovery(db,()=>({id:'synthetic'}),()=>{polls++;throw Object.assign(Error('safe'),{safe:true})},'isolated',{observationCeiling:0,knownSafeObservationError:e=>e.safe},{monotonicNow:()=>0}),/safe/);
  assert.equal(polls,1);assert.equal(db.readTraversal().attempts[0].retryOrdinal,undefined);
  } finally {db.close();rmSync(dir,{recursive:true,force:true})}
 });
@@ -116,7 +116,7 @@ test('legacy retryCeiling bounds submission ordinal and never authorizes observa
 test('caller ceiling widening during a send does not permit another submission retry',()=>{
  const dir=mkdtempSync(join(tmpdir(),'retry-widen-'));const db=DurableState.open(join(dir,'state.db'));let sends=0,polls=0;const policy={submissionCeiling:1,observationCeiling:0,knownSafeSubmissionError:()=>true,knownSafeObservationError:()=>true};
  try {db.writeTraversal(createTraversal(geo,{cells:1,submissions:5,activeTime:10}));
-  assert.throws(()=>executeDurableDiscovery(db,()=>{sends++;if(sends===2)policy.submissionCeiling=2;throw Error('synthetic send failure')},()=>{polls++;throw Error('synthetic observe failure')},'isolated',policy),/synthetic send failure/);
+  assert.throws(()=>executeDurableDiscovery(db,()=>{sends++;if(sends===2)policy.submissionCeiling=2;throw Error('synthetic send failure')},()=>{polls++;throw Error('synthetic observe failure')},'isolated',policy,{monotonicNow:()=>0}),/synthetic send failure/);
   assert.equal(sends,2);assert.equal(polls,0);
  } finally {db.close();rmSync(dir,{recursive:true,force:true})}
 });

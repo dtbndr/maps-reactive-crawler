@@ -477,18 +477,18 @@ test('executor observation failure persists known ID; isolated resumes A after B
       initial = { ...initial, queue: [nextKey], admitted: [...initial.admitted, nextKey], cells: { ...initial.cells, [nextKey]: { outcome: 'queued' } } };
       durable.writeTraversal(initial);
       let sends = 0;
-      assert.throws(() => executeDurableDiscovery(durable, () => { sends++; return { id: 'persisted-A-id' }; }, () => { throw new Error('observe boundary'); }, scope), /observe boundary/);
+      assert.throws(() => executeDurableDiscovery(durable, () => { sends++; return { id: 'persisted-A-id' }; }, () => { throw new Error('observe boundary'); }, scope, undefined, { monotonicNow: () => 0 }), /observe boundary/);
       assert.equal(durable.readTraversal().attempts[0].knownId, 'persisted-A-id');
       assert.equal(durable.readTraversal().cells[key].outcome, 'parked');
       if (scope === 'global') {
-        assert.throws(() => executeDurableDiscovery(durable, () => { sends++; return { id: 'B-id' }; }, () => ({ elapsed: 0, result: { status: 'empty' } })), /Traversal is paused/);
+        assert.throws(() => executeDurableDiscovery(durable, () => { sends++; return { id: 'B-id' }; }, () => ({ elapsed: 0, result: { status: 'empty' } }), 'global', undefined, { monotonicNow: () => 0 }), /Traversal is paused/);
         assert.equal(sends, 1);
       } else {
-        executeDurableDiscovery(durable, () => { sends++; return { id: 'B-id' }; }, () => ({ elapsed: 0, result: { status: 'empty' } }), 'isolated');
+        executeDurableDiscovery(durable, () => { sends++; return { id: 'B-id' }; }, () => ({ elapsed: 0, result: { status: 'empty' } }), 'isolated', undefined, { monotonicNow: () => 0 });
         const result = executeDurableDiscovery(durable, () => { sends++; return { id: 'duplicate' }; }, id => {
           assert.equal(id, 'persisted-A-id');
           return { elapsed: 1, result: { status: 'empty' } };
-        }, 'isolated');
+        }, 'isolated', undefined, { monotonicNow: () => 0 });
         assert.equal(sends, 2);
         assert.equal(result.cells[key].outcome, 'empty');
         assert.equal(result.cells[nextKey].outcome, 'empty');
