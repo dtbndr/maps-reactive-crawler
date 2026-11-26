@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
 import * as operator from '../dist/operator.js';
 import * as publicOperator from '../dist/index.js';
 import { DurableState } from '../dist/durable-state.js';
@@ -195,9 +196,14 @@ test('parked-only unknown-ID uncertainty is typed blocked after the original sen
   saveFixture(files.fixture, bytes);
   let sends = 0;
   let observations = 0;
-  const originalError = new Error('original send failure');
   try {
-    await assert.rejects(runWithDependencies('start', { checkpoint: files.checkpoint, fixture: files.fixture, geometry, limits, onPreflight: preflight }, { send: () => { sends++; throw originalError; } }), error => error === originalError);
+    const witness = join(files.directory, 'witness.ndjson');
+    const child = spawnSync(process.execPath, ['test/operator-harness.mjs', 'start', JSON.stringify({ checkpoint: files.checkpoint, fixture: files.fixture, geometry, limits, witness, fault: 'send-throw' })], { encoding: 'utf8' });
+    assert.notEqual(child.status, 0);
+    assert.match(child.stderr, /injected send fault/);
+    const events = readFileSync(witness, 'utf8').trim().split('\n').map(line => JSON.parse(line));
+    assert.deepEqual(events.map(event => event.type), ['preflight', 'send']);
+    sends = 1;
     const identity = operator.parseSyntheticFixture(bytes).identity;
     const prior = DurableState.openBound(files.checkpoint, identity);
     let before;
@@ -232,7 +238,10 @@ test('isolated parked uncertainty does not prevent other queued discovery work',
   const bytes = fixture({ 'work:0,0': { id: 'job-0', observationId: 'job-0' }, 'work:0,1': { id: 'job-1', observationId: 'job-1' } }, { 'job-0': { result: { status: 'empty' }, elapsed: 0 }, 'job-1': { result: { status: 'empty' }, elapsed: 0 } });
   saveFixture(files.fixture, bytes);
   try {
-    await assert.rejects(runWithDependencies('start', { checkpoint: files.checkpoint, fixture: files.fixture, geometry, limits, onPreflight: preflight }, { send: () => { throw new Error('park seed'); } }), /park seed/);
+    const witness = join(files.directory, 'witness.ndjson');
+    const child = spawnSync(process.execPath, ['test/operator-harness.mjs', 'start', JSON.stringify({ checkpoint: files.checkpoint, fixture: files.fixture, geometry, limits, witness, fault: 'send-throw' })], { encoding: 'utf8' });
+    assert.notEqual(child.status, 0);
+    assert.match(child.stderr, /injected send fault/);
     const identity = operator.parseSyntheticFixture(bytes).identity;
     const db = DurableState.openBound(files.checkpoint, identity);
     try {

@@ -1,8 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
 import * as operator from '../dist/operator.js';
 import { DatabaseSync } from 'node:sqlite';
-import { DurableState, setAfterTraversalWriteForTest } from '../dist/durable-state.js';
+import { DurableState } from '../dist/durable-state.js';
 import { createTraversal } from '../dist/traversal.js';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -226,16 +227,11 @@ test('refused unknown-ID safe-retry retains authorization and calls no callbacks
 
 test('settlement failure remains an error and is not converted to cancellation', async () => {
   const files = setup();
-  const settlementError = new Error('settlement failed');
-  const controller = new AbortController();
   try {
-    await assert.rejects(runWithDependencies('start', { checkpoint: files.checkpoint, fixture: files.fixturePath, geometry, limits: { ...limits, cells: 1 }, onPreflight() {}, signal: controller.signal }, { send: id => { setTimeout(() => controller.abort(), 0); return { id: id.slice(5) }; }, observe: () => {
-      setAfterTraversalWriteForTest(() => { throw settlementError; });
-      return { result: { status: 'empty' }, elapsed: 1 };
-    } }), error => error === settlementError);
+    const child = spawnSync(process.execPath, ['test/operator-harness.mjs', 'start', JSON.stringify({ checkpoint: files.checkpoint, fixture: files.fixturePath, geometry, limits: { ...limits, cells: 1 }, witness: join(files.directory, 'witness.ndjson'), fault: 'settlement-write', abortAfterSend: true })], { encoding: 'utf8' });
+    assert.notEqual(child.status, 0);
+    assert.match(child.stderr, /settlement failed/);
   } finally {
-    setAfterTraversalWriteForTest(undefined);
-
     rmSync(files.directory, { recursive: true, force: true });
   }
 });

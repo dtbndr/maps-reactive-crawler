@@ -9,7 +9,7 @@ import * as operator from '../dist/operator.js';
 import * as publicApi from '../dist/index.js';
 import { DurableState } from '../dist/durable-state.js';
 import { createTraversal } from '../dist/traversal.js';
-import { executeDurableDiscovery, setDurableDiscoveryBoundaryHookForTest } from '../dist/durable-discovery.js';
+import { executeDurableDiscovery } from '../dist/durable-discovery.js';
 
 const geometry = { seed: { latitude: 0, longitude: 0 }, spacing: 100, area: { type: 'radius', radius: 300 } };
 const limits = { cells: 5, submissions: 10, activeTime: 10000 };
@@ -159,14 +159,14 @@ test('reserved-boundary throw persists reservation from the actual writer invoca
   const files = createFiles(); fixture(files.fixture);
   try {
     DurableState.createBound(files.checkpoint, operator.parseSyntheticFixture(bytes).identity, createTraversal(geometry, limits));
-    setDurableDiscoveryBoundaryHookForTest(boundary => { if (boundary === 'reserved') throw new Error('reserved boundary fault'); });
-    await assert.rejects(operator.resume({ checkpoint: files.checkpoint, fixture: files.fixture }), /reserved boundary fault/);
+    const child = spawnSync(process.execPath, ['test/operator-harness.mjs', 'resume', JSON.stringify({ checkpoint: files.checkpoint, fixture: files.fixture, witness: join(files.directory, 'witness.ndjson'), fault: 'reserved-boundary' })], { encoding: 'utf8' });
+    assert.notEqual(child.status, 0);
+    assert.match(child.stderr, /reserved boundary fault/);
     const state = DurableState.openBound(files.checkpoint, operator.parseSyntheticFixture(bytes).identity);
     const persisted = state.readTraversal();
     assert.deepEqual(persisted.attempts.map(({ status, cellKey }) => ({ status, cellKey })), [{ status: 'reserved', cellKey: '0,0' }]);
     assert.equal(persisted.submissions, 1);
     state.close();
-    setDurableDiscoveryBoundaryHookForTest(undefined);
     const blockedDocument = await operator.resume({ checkpoint: files.checkpoint, fixture: files.fixture });
     const verification = DurableState.openBound(files.checkpoint, operator.parseSyntheticFixture(bytes).identity);
     let activeTime;
@@ -176,7 +176,7 @@ test('reserved-boundary throw persists reservation from the actual writer invoca
       counters: { admitted: 1, submissions: 1, activeTime },
       frontier: { queued: [], running: ['0,0'], parked: [], blocked: [], discoveryExhausted: false },
     })));
-  } finally { setDurableDiscoveryBoundaryHookForTest(undefined); rmSync(files.directory, { recursive: true, force: true }); }
+  } finally { rmSync(files.directory, { recursive: true, force: true }); }
 });
 
 test('writer execution and response agree for flags, both caps and known-ID observation', async () => {

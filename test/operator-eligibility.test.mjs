@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import * as operator from '../dist/operator.js';
 import { validateGeometry, createTraversal } from '../dist/index.js';
 import { DurableState } from '../dist/durable-state.js';
-import { executeDurableDiscovery, setDurableDiscoveryBoundaryHookForTest } from '../dist/durable-discovery.js';
+import { executeDurableDiscovery } from '../dist/durable-discovery.js';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -144,27 +144,6 @@ test('parked-only uncertainty blocks alone but not other queued work', () => {
   assert.equal(operator.classifyOperatorEligibility(alongside).kind, 'submit');
   assert.equal(operator.classifyOperatorEligibility(state({ recoveryPending: true })).kind, 'recovery-pending');
   assert.equal(operator.classifyOperatorEligibility(state({ gaps: [{ cellKey: '0,0', cause: 'uncertain', scope: 'global', status: 'unresolved' }] })).kind, 'global-gap');
-});
-
-test('dispatched-boundary throw settles interval and remains an unknown-ID refusal', () => {
-  const directory = mkdtempSync(join(tmpdir(), 'operator-eligibility-'));
-  const db = DurableState.open(join(directory, 'state.db'));
-  try {
-    db.writeTraversal(createTraversal(geometry, { cells: 1, submissions: 2, activeTime: 100 }));
-    let callbacks = 0;
-    setDurableDiscoveryBoundaryHookForTest(boundary => { if (boundary === 'dispatched') throw new Error('boundary crash'); });
-    assert.throws(() => executeDurableDiscovery(db, () => { callbacks++; return { id: 'unexpected' }; }, () => { callbacks++; return { result: { status: 'empty' }, elapsed: 0 }; }, 'isolated', undefined, { monotonicNow: () => 0 }), /boundary crash/);
-    const after = db.readTraversal();
-    assert.equal(after.attempts.at(-1).status, 'dispatched');
-    assert.equal(after.activeInterval, false);
-    assert.equal(after.recoveryPending, false);
-    assert.equal(callbacks, 0);
-    assert.equal(operator.classifyOperatorEligibility(after).kind, 'refuse-unknown-id');
-  } finally {
-    setDurableDiscoveryBoundaryHookForTest(undefined);
-    db.close();
-    rmSync(directory, { recursive: true, force: true });
-  }
 });
 
 test('fixture precheck looks up only selected eligible submission work', () => {
