@@ -8,6 +8,23 @@ import { spawn, spawnSync } from 'node:child_process';
 import { DurableState, setAfterCreateForTest, setAfterOwnerReadForTest, setBeforePublishForTest } from '../dist/durable-state.js';
 
 const temp = () => { const dir = mkdtempSync(join(tmpdir(), 'crawler-state-')); return { dir, path: join(dir, 'state.db') }; };
+test('public DurableState.open rejects bound checkpoints before application mutation', () => {
+  const {dir,path}=temp();
+  try {
+    const db=new DatabaseSync(path);
+    db.exec('CREATE TABLE checkpoint (id INTEGER PRIMARY KEY CHECK(id=1), version INTEGER NOT NULL, payload TEXT NOT NULL); CREATE TABLE owner (id INTEGER PRIMARY KEY CHECK(id=1), pid INTEGER NOT NULL); CREATE TABLE operator_binding (id INTEGER PRIMARY KEY CHECK(id=1), payload TEXT NOT NULL);');
+    db.prepare('INSERT INTO checkpoint VALUES(1,1,?)').run(JSON.stringify({version:1,work:[],observations:[],gaps:[]}));
+    db.prepare("INSERT INTO operator_binding VALUES(1,'bound')").run();
+    db.close();
+    assert.throws(() => DurableState.open(path), /operator-bound|bound checkpoint/i);
+    const verify=new DatabaseSync(path);
+    try {
+      assert.equal(verify.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='traversal'").get(), undefined);
+      assert.equal(verify.prepare('SELECT pid FROM owner WHERE id=1').get(), undefined);
+    } finally { verify.close(); }
+  } finally { rmSync(dir,{recursive:true,force:true}); }
+});
+
 test('durable state persists atomic transitions and can be reopened', () => {
   const {dir,path}=temp();
   try { const state=DurableState.open(path); assert.deepEqual(state.read(), {version:1,work:[],observations:[],gaps:[]}); state.transition(s=>({...s,work:[{id:'work-1',status:'pending'}]})); state.close(); const reopened=DurableState.open(path); assert.equal(reopened.read().work[0].status,'pending'); reopened.close(); }

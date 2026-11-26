@@ -118,6 +118,39 @@ function validateTraversal(value: unknown): asserts value is TraversalState {
 /** Durable checkpoint foundation; this does not implement restartable discovery. */
 export class DurableState {
   private constructor(private db: DatabaseSync) {}
+  static createBound(path: string, fixtureIdentity: string, traversal: TraversalState): void {
+    if (typeof fixtureIdentity !== 'string' || !/^[a-f0-9]{64}$/.test(fixtureIdentity)) throw new Error('Invalid fixture identity');
+    const serializedTraversal = JSON.stringify(traversal);
+    validateTraversal(JSON.parse(serializedTraversal));
+    if (traversal.timeUnit !== 'milliseconds') throw new Error('Durable traversal time unit is unmarked; explicit migration required');
+    const staging = mkdtempSync(join(dirname(path), `.${basename(path)}.init-`));
+    const stagingPath = join(staging, 'checkpoint.db');
+    try {
+      for (const suffix of ['', '-journal', '-wal', '-shm']) {
+        try { statSync(`${path}${suffix}`); throw new Error(suffix ? 'Corrupt state: orphan SQLite sidecar without checkpoint' : 'Checkpoint already exists'); }
+        catch (error) {
+          if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+        }
+      }
+      const staged = new DatabaseSync(stagingPath);
+      try {
+        staged.exec('PRAGMA journal_mode=DELETE; CREATE TABLE checkpoint (id INTEGER PRIMARY KEY CHECK(id=1), version INTEGER NOT NULL, payload TEXT NOT NULL); CREATE TABLE owner (id INTEGER PRIMARY KEY CHECK(id=1), pid INTEGER NOT NULL); CREATE TABLE operator_binding (id INTEGER PRIMARY KEY CHECK(id=1), payload TEXT NOT NULL); CREATE TABLE traversal (id INTEGER PRIMARY KEY CHECK(id=1), payload TEXT NOT NULL);');
+        staged.prepare('INSERT INTO checkpoint VALUES(1,1,?)').run('{"version":1,"work":[],"observations":[],"gaps":[]}');
+        staged.prepare('INSERT INTO operator_binding VALUES(1,?)').run(JSON.stringify({ version: 1, fixtureIdentity }));
+        staged.prepare('INSERT INTO traversal VALUES(1,?)').run(serializedTraversal);
+        staged.close();
+      } catch (error) {
+        try { staged.close(); } catch { /* Preserve the staging failure. */ }
+        throw error;
+      }
+      beforePublishForTest?.();
+      try { linkSync(stagingPath, path); } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === 'EEXIST') throw new Error('Checkpoint already exists');
+        throw error;
+      }
+      afterCreateForTest?.();
+    } finally { rmSync(staging, { recursive: true, force: true }); }
+  }
   static open(path: string): DurableState {
     let db: DatabaseSync;
     const staging = mkdtempSync(join(dirname(path), `.${basename(path)}.init-`));
@@ -145,6 +178,8 @@ export class DurableState {
     afterCreateForTest?.();
     db = new DatabaseSync(path);
     try {
+      const bound = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='operator_binding'").get();
+      if (bound) throw new Error('DurableState.open cannot open an operator-bound checkpoint');
       db.exec('PRAGMA journal_mode=WAL; CREATE TABLE IF NOT EXISTS traversal (id INTEGER PRIMARY KEY CHECK(id=1), payload TEXT NOT NULL); BEGIN IMMEDIATE');
       const tables = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name IN ('checkpoint','owner')").all().map((r: any) => r.name);
       if (!tables.includes('checkpoint') || !tables.includes('owner')) throw new Error('Corrupt state: missing required table');
