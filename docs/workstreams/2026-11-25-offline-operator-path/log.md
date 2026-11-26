@@ -2,6 +2,9 @@
 
 Opt-ins: playback=on, external review=on
 
+## B4 acceptance
+B4 complete at bece11f after independent behavioral review and full 297/297 check. The operator accepted a B4-specific exception for incomplete original historical RED: original timer-abort RED observed five sends instead of one; later pre-fix RED for private storage, retained lease and snapshot substitution concerns those follow-up fixes, not original remaining B4 contracts. An earlier full-check failure's raw output was overwritten; its cause remains unverified. Three separately approved retry-test clocks were made deterministic and independently reviewed.
+
 ## B3 acceptance
 B3 complete at 9b3a326 after independent behavioral review. The operator accepted a B3-specific exception for incomplete historical per-contract RED: retained preimplementation output contains two behavioral assertion failures (stub start outcome and equal cap rejection), not RED for all contracts. Later passing tests are GREEN evidence, not historical RED. Focused 9/9 and full 280/280 passed.
 
