@@ -2,6 +2,9 @@
 
 Opt-ins: playback=on, external review=on
 
+## B2 acceptance
+B2 complete at 9d45611 after clean independent review; focused 5/5 and full 271/271 passed. The report records two behavioral pre-implementation RED failures; standalone raw RED output is unavailable. Follow-up overlap tests are characterization, not historical RED.
+
 ## B1 acceptance
 B1 complete at 81ac0be: independently reviewed behavioral acceptance, focused 9/9 and full 266/266 passed. The operator accepted a B1-specific exception for incomplete historical per-contract RED; recorded RED and passing characterization are distinguished. An earlier full-check failure was not retained, so its cause remains unknown; later passing checks do not prove intermittent baseline failures eliminated. Four scoped test-clock changes remove verified real-clock sensitivity without changing production timing.
 

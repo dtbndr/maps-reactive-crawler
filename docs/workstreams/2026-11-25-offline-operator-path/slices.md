@@ -129,8 +129,8 @@ Before editing affected durable behavior, inspect existing tests and add and run
 
 ### Slice B2: Timed execution and stop classification prerequisite
 **Goal**: Independently establish typed execution exits and monotonic settlement without enabling shared operator execution.
-- [ ] Adapt the core boundary for explicit typed expected stops at time and recovery boundaries; characterize existing accounting first. Test controlled monotonic settlement, simultaneous gap/limit, and callback, clock, transition or settlement exceptions; arbitrary failures remain errors and failed settlement retains its recovery marker. Preserve known-ID observation eligibility and existing recovery behavior.
-- [ ] Demonstrate focused RED, build and run `mise exec -- node --test test/operator-stop-boundary.test.mjs`, then full check as above; record RED and GREEN.
+- [x] Adapt the core boundary for explicit typed expected stops at time and recovery boundaries; characterize existing accounting first. Test controlled monotonic settlement, simultaneous gap/limit, and callback, clock, transition or settlement exceptions; arbitrary failures remain errors and failed settlement retains its recovery marker. Preserve known-ID observation eligibility and existing recovery behavior.
+- [x] Demonstrate focused RED, build and run `mise exec -- node --test test/operator-stop-boundary.test.mjs`, then full check as above; record RED and GREEN.
 
 **Carry-forward:** Tested timed boundary and typed stop signals only; no enabled shared run path.
 
