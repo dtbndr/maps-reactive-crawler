@@ -1,6 +1,6 @@
 # Maps Reactive Crawler
 
-An early-stage operator-run, open-source Google Maps spatial crawler. The offline bounded reactive traversal core and synthetic SQLite durable recovery/result-identity behavior are implemented and tested with fixtures; **the end-to-end crawler, CLI, and live-provider integration are not implemented yet.** Synthetic identity tests do not establish live-provider identity or behavior. The intended first release starts from one location and expands to neighboring cells based on results, within explicit geographic and work limits.
+An early-stage operator-run, open-source Google Maps spatial crawler. The bounded offline traversal and synthetic SQLite recovery path have an operator CLI; **live-provider crawling and location resolution are not implemented.** Synthetic fixture identity tests do not establish live-provider identity or behavior. The intended first release starts from one location and expands to neighboring cells based on results, within explicit geographic and work limits.
 
 ## First-release direction
 
@@ -23,6 +23,22 @@ mise exec -- npm run check
 ```
 
 `mise.toml` pins Node 26.13.1, the latest LTS release verified at setup. Run commands under `mise exec --` or enable the mise shell integration. Tests are offline and require no Bright Data credentials. They cover geometry, traversal, work limits, and synthetic SQLite durable recovery and result identity across fresh-process restarts. They do not validate a live provider or its identity, retry, billing, lookup, or cancellation contracts.
+
+## Offline operator CLI
+
+Build the CLI and run it with a local versioned synthetic fixture and checkpoint:
+
+```sh
+mise exec -- npm run build
+mise exec -- node dist/cli.js start --checkpoint ./crawl.db --fixture ./fixture.json --lat 37.77 --lon -122.42 --spacing-m 500 --radius-m 1000 --cells 20 --submissions 20 --active-ms 60000
+mise exec -- node dist/cli.js status --checkpoint ./crawl.db
+mise exec -- node dist/cli.js resume --checkpoint ./crawl.db --fixture ./fixture.json --submissions 40
+mise exec -- node dist/cli.js export --checkpoint ./crawl.db
+```
+
+`start` requires one coordinate, spacing, exactly one radius or bounding box, and independent cell, submission and active-time limits. `resume` requires the same fixture and only accepts explicitly increased limits; it does not change geometry. `status` and `export` inspect an existing checkpoint. The CLI is offline and fixture-backed: no provider or geocoder is called. Keep fixture and checkpoint files local and synthetic.
+
+Coverage is heuristic, not exhaustive. In status, `cells` means neighbors were blocked when results were expanded; it does not necessarily mean the cell limit was reached. Raising a limit does not promote neighbors blocked at expansion. Pending detail work is recorded but is not executed by this path. Export preserves source provenance and separates unverified observations from fixture-verified identity groups; this is not a claim about real-provider identity. See [the happy path](docs/happy-path.md) for further boundaries.
 
 The example environment file contains a placeholder, not a working integration. Never commit credentials, provider data or checkpoint files. Live provider calls may incur charges and require explicit operator approval.
 
