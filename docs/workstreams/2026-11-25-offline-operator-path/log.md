@@ -7,6 +7,9 @@ Release and snapshot failure handling now returns errors without retaining a suc
 
 Focused behavioral RED outputs were retained separately: `/tmp/b6-followup-red-release-20261126-01.log`, `/tmp/b6-followup-red-current-selection-20261126-01.log`, `/tmp/b6-followup-red-core-selection-20261126-01.log`, and `/tmp/b6-followup-red-exact-projection-20261126-01.log`. Passing characterization (not RED) for the already-correct real-process documents and reserved-boundary throw: `/tmp/b6-followup-characterization-process-20261126-02.log` and `/tmp/b6-followup-red-reserved-boundary-20261126-01.log`. Focused GREEN: `/tmp/b6-followup-focused-green-20261126-05.log` (20/20); full check raw output: `/tmp/b6-followup-full-check-20261126-01.log` (323/323). The earlier B6 historical RED exception remains separate and unchanged.
 
+## Slice D acceptance
+Slice D complete at c64f17d after independent review, focused 7/7 and full 346/346. Applied the operator's preauthorized exception for missing original historical RED; current acceptance evidence is not historical RED. Public CLI durability evidence, harness discovery witness and direct detail-boundary checks remain distinct.
+
 ## Slice C acceptance
 Slice C complete at 24115a1 after independent review, focused 61/61 and full 339/339. Applied the operator's preauthorized exception for missing original preimplementation behavioral RED. The duplicate-observation regression has separately retained pre-fix behavioral RED; failed loader setup attempts do not count as RED.
 
