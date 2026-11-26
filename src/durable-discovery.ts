@@ -7,6 +7,14 @@ export type SyntheticDetailSend = (workId: string) => { id: string };
 export type SyntheticDetailObserve = (id: string) => { elapsed: number };
 export type DurableDetailBoundary = 'reserved' | 'dispatched' | 'sent' | 'id-persisted' | 'retry-consumed';
 
+export type DurableStopReason = 'active-time-limit' | 'recovery-pending';
+export class DurableStopError extends Error {
+  constructor(readonly reason: DurableStopReason, message: string) {
+    super(message);
+    this.name = 'DurableStopError';
+  }
+}
+
 function readDetailElapsed(observed: unknown): number | undefined {
   try {
     if (typeof observed !== 'object' || observed === null) return undefined;
@@ -64,7 +72,7 @@ export function executeDurableDetail(state: DurableState, workId: string, send: 
     }
     if (current.gaps.some(gap => gap.scope === 'global' && gap.status !== 'resolved' && gap.status !== 'skipped') || current.detailGaps?.some(gap => gap.status === 'unresolved') || current.detailWork?.some(item => item.id !== workId && ['reserved', 'dispatched', 'uncertain'].includes(item.status) && !item.attempts.at(-1)?.knownId)) throw new Error('Global uncertainty blocks new detail work');
     settle();
-    if (state.readTraversal().activeTime >= state.readTraversal().limits.activeTime) throw new Error('Active-time limit reached before detail reservation');
+    if (state.readTraversal().activeTime >= state.readTraversal().limits.activeTime) throw new DurableStopError('active-time-limit', 'Active-time limit reached before detail reservation');
     state.transitionTraversal(value => reserveDetailSubmission(value, workId));
     detailBoundaryHook?.('reserved');
     state.transitionTraversal(value => dispatchDetailSubmission(value, workId));
@@ -110,7 +118,7 @@ export function setDurableDiscoveryBoundaryHookForTest(hook: ((boundary: Durable
 /** Reserve before send; known IDs are re-observed on restart without another submission. */
 function executeDurableDiscoveryImpl(state: DurableState, send: SyntheticSend, observe: SyntheticObserve, uncertaintyScope: 'isolated' | 'global', retryPolicy: DurableRetryPolicy | undefined, reservedRetryId?: string, targetKey?: string, settle?: (change?: (value: TraversalState) => TraversalState) => void): TraversalState {
   let current = state.readTraversal();
-  if (current.recoveryPending) throw new Error('Recovery accounting is unresolved');
+  if (current.recoveryPending) throw new DurableStopError('recovery-pending', 'Recovery accounting is unresolved');
   if (current.paused || current.cancelled) throw new Error(current.paused ? 'Traversal is paused' : 'Traversal is cancelled');
   if (current.gaps.some(gap => gap.scope === 'global' && gap.status !== 'resolved' && gap.status !== 'skipped') || current.detailGaps?.some(gap => gap.status === 'unresolved') || current.detailWork?.some(work => ['reserved', 'dispatched', 'uncertain'].includes(work.status) && !work.attempts.at(-1)?.knownId)) throw new Error('Global uncertainty blocks new discovery work');
   let running = targetKey ?? Object.entries(current.cells).find(([, cell]) => cell.outcome === 'running')?.[0];
@@ -130,12 +138,12 @@ function executeDurableDiscoveryImpl(state: DurableState, send: SyntheticSend, o
   if (!running) {
     settle?.();
     current = state.readTraversal();
-    if (current.activeTime >= current.limits.activeTime) throw new Error('Active-time limit reached before cell admission');
+    if (current.activeTime >= current.limits.activeTime) throw new DurableStopError('active-time-limit', 'Active-time limit reached before cell admission');
     state.transitionTraversal(value => admitNextCell(value));
     boundaryHook?.('dequeued');
     settle?.();
     current = state.readTraversal();
-    if (current.activeTime >= current.limits.activeTime) throw new Error('Active-time limit reached after cell dequeue');
+    if (current.activeTime >= current.limits.activeTime) throw new DurableStopError('active-time-limit', 'Active-time limit reached after cell dequeue');
     running = Object.entries(current.cells).find(([, cell]) => cell.outcome === 'running')![0];
   }
   const latestForCell = current.attempts.findLast(item => item.cellKey === running);
@@ -143,7 +151,7 @@ function executeDurableDiscoveryImpl(state: DurableState, send: SyntheticSend, o
     const auth = latestForCell.safeRetryAuthorization;
     waitForRetry(retryPolicy, auth.delayMs ?? 0);
     settle?.();
-    if (state.readTraversal().activeTime >= state.readTraversal().limits.activeTime) throw new Error('Active-time limit reached before retry reservation');
+    if (state.readTraversal().activeTime >= state.readTraversal().limits.activeTime) throw new DurableStopError('active-time-limit', 'Active-time limit reached before retry reservation');
     state.transitionTraversal(value => authorizeSafeRetryReservation(value, running!, auth.ordinal, auth.ceiling));
     return executeDurableDiscoveryImpl(state, send, observe, uncertaintyScope, retryPolicy, state.readTraversal().attempts.at(-1)!.id, undefined, settle);
   }
@@ -158,7 +166,7 @@ function executeDurableDiscoveryImpl(state: DurableState, send: SyntheticSend, o
   let reservedThisInvocation = false;
   if (!current.attempts.some(item => item.cellKey === running && ['reserved', 'dispatched', 'observing', 'observed', 'uncertain'].includes(item.status))) {
     settle?.();
-    if (state.readTraversal().activeTime >= state.readTraversal().limits.activeTime) throw new Error('Active-time limit reached before reservation');
+    if (state.readTraversal().activeTime >= state.readTraversal().limits.activeTime) throw new DurableStopError('active-time-limit', 'Active-time limit reached before reservation');
     state.transitionTraversal(value => reserveSubmission(value, running!));
     reservedThisInvocation = true;
     boundaryHook?.('reserved');
@@ -176,7 +184,7 @@ function executeDurableDiscoveryImpl(state: DurableState, send: SyntheticSend, o
     settle?.();
     if (state.readTraversal().activeTime >= state.readTraversal().limits.activeTime) {
       settle?.(value => confirmNoSend(value, running!));
-      throw new Error('Active-time limit reached before dispatch');
+      throw new DurableStopError('active-time-limit', 'Active-time limit reached before dispatch');
     }
     state.transitionTraversal(value => dispatchSubmission(value, running!));
     boundaryHook?.('dispatched');
@@ -188,7 +196,7 @@ function executeDurableDiscoveryImpl(state: DurableState, send: SyntheticSend, o
     }
     if (current.activeTime >= current.limits.activeTime) {
       settle?.(value => confirmNoSend(value, running!));
-      throw new Error('Active-time limit reached after dispatch');
+      throw new DurableStopError('active-time-limit', 'Active-time limit reached after dispatch');
     }
     attempt = current.attempts.findLast(item => item.cellKey === running)!;
   }
@@ -322,7 +330,7 @@ function executeTimed(state: DurableState, operation: (settle: (change?: (value:
 
 export function executeDurableDiscovery(state: DurableState, send: SyntheticSend, observe: SyntheticObserve, uncertaintyScope: 'isolated' | 'global' = 'global', retryPolicy?: DurableRetryPolicy, clock: { monotonicNow: () => number } = { monotonicNow: () => Number(process.hrtime.bigint()) / 1_000_000 }): TraversalState {
   const current = state.readTraversal();
-  if (current.recoveryPending) throw new Error('Recovery accounting is unresolved');
+  if (current.recoveryPending) throw new DurableStopError('recovery-pending', 'Recovery accounting is unresolved');
   const hasRecoverableKnownId = current.attempts.some(item => ['uncertain', 'dispatched', 'observing'].includes(item.status) && item.knownId);
   if (current.paused || current.cancelled || (!current.queue.length && !Object.values(current.cells).some(cell => cell.outcome === 'running') && !hasRecoverableKnownId)) return executeDurableDiscoveryImpl(state, send, observe, uncertaintyScope, retryPolicy);
   return executeTimed(state, settle => executeDurableDiscoveryImpl(state, send, observe, uncertaintyScope, retryPolicy, undefined, undefined, settle), clock);
