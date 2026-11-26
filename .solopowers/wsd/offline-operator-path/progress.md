@@ -1,6 +1,10 @@
 # Workstream: docs/workstreams/2026-11-25-offline-operator-path/slices.md
 
 # Offline operator path progress
+End smoke: pending — required-check set recorded in end-smoke-report.md; approved brief specifies None.
+End smoke: skipped
+End: final review fix wave (commits 5d9627a..66b6514)
+End: operator-authorized second targeted final review fix wave (commits 66b6514..0eb4992)
 Workspace: offline-operator-path
 Isolation: branch ws/offline-operator-path
 Slice A1: in progress — base 6d401bf, tip 7331380; initial review issues, fix rounds through 7331380, fresh re-review pending.
