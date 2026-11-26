@@ -23,11 +23,19 @@ test('shared eligibility classifies caps, known-ID recovery and refusal before i
   const known = state({ queue: [], cells: { '0,0': { outcome: 'running' } }, attempts: [{ id: 'a', workId: 'work:0,0', cellKey: '0,0', status: 'observing', knownId: 'known' }] , submissions: 3, activeTime: 100 });
   assert.equal(decide(known).kind, 'observe-known-id');
   const capped = state({ submissions: 3 });
+  const cappedBefore = structuredClone(capped);
   assert.equal(decide(capped).kind, 'submission-cap');
+  assert.deepEqual(capped, cappedBefore);
+  assert.equal(decide(state({ activeTime: 100 })).kind, 'active-time-cap');
+  assert.equal(decide(state({ queue: [], cells: {} })).kind, 'exhausted');
   const reserved = state({ queue: [], cells: { '0,0': { outcome: 'running' } }, attempts: [{ id: 'a', workId: 'work:0,0', cellKey: '0,0', status: 'reserved' }] });
   assert.equal(decide(reserved).kind, 'refuse-unknown-id');
-  assert.equal(decide(state({ ...reserved, paused: true })).kind, 'paused');
-  assert.equal(decide(state({ ...reserved, cancelled: true })).kind, 'cancelled');
+  const paused = decide(state({ ...reserved, paused: true, cancelled: false }));
+  assert.equal(paused.kind, 'paused');
+  assert.equal(paused.recoveryPending, false);
+  const cancelled = decide(state({ ...reserved, paused: false, cancelled: true }));
+  assert.equal(cancelled.kind, 'cancelled');
+  assert.equal(cancelled.recoveryPending, false);
   assert.equal(decide(state({ ...reserved, paused: true, recoveryPending: true, gaps: [{ cellKey: '0,0', cause: 'uncertain', scope: 'global', status: 'unresolved' }] })).kind, 'paused');
   const independent = decide(state({ ...reserved, cancelled: true, recoveryPending: true, gaps: [{ cellKey: '0,0', cause: 'uncertain', scope: 'global', status: 'unresolved' }] }));
   assert.equal(independent.recoveryPending, true);
@@ -52,7 +60,7 @@ test('persisted unknown-ID attempts refuse selection without changing authorizat
   assert.equal(operator.classifyOperatorEligibility({ ...uncertain, cancelled: true }).kind, 'cancelled');
 });
 
-test('known-ID continuation remains eligible across caps and attempt states', () => {
+test('known-ID continuation across caps and attempt states characterizes existing behavior', () => {
   for (const status of ['dispatched', 'observing', 'uncertain']) {
     const value = state({ queue: [], cells: { '0,0': { outcome: 'running' } }, attempts: [{ id: `a-${status}`, workId: 'work:0,0', cellKey: '0,0', status, knownId: 'known', observationRetryPendingDelayMs: 99 }], submissions: 3, activeTime: 100 });
     assert.equal(operator.classifyOperatorEligibility(value).kind, 'observe-known-id');
@@ -86,7 +94,7 @@ test('running recovery work is selected before queued work while paused and canc
   assert.equal(operator.classifyOperatorEligibility({ ...competing, cancelled: true, recoveryPending: true }).recoveryPending, true);
 });
 
-test('persisted known-ID observation consumes delay at both caps without sending or retry policy', () => {
+test('persisted known-ID observation behavior is characterized at both caps without retry policy', () => {
   const directory = mkdtempSync(join(tmpdir(), 'operator-known-observation-'));
   const db = DurableState.open(join(directory, 'state.db'));
   try {
@@ -152,8 +160,11 @@ test('fixture precheck looks up only selected eligible submission work', () => {
   const lookup = workId => { lookups++; return workId === 'work:0,0'; };
   assert.equal(operator.precheckOperatorFixture(decide(state()), lookup), 'work:0,0');
   assert.equal(lookups, 1);
-  assert.equal(operator.precheckOperatorFixture(decide(state({ submissions: 3 })), lookup), undefined);
+  const capped = state({ submissions: 3 });
+  const cappedBefore = structuredClone(capped);
+  assert.equal(operator.precheckOperatorFixture(decide(capped), lookup), undefined);
   assert.equal(lookups, 1);
+  assert.deepEqual(capped, cappedBefore);
   const knownId = state({ queue: [], cells: { '0,0': { outcome: 'running' } }, attempts: [{ id: 'a', workId: 'work:0,0', cellKey: '0,0', status: 'observing', knownId: 'known' }], submissions: 3, activeTime: 100 });
   assert.equal(operator.precheckOperatorFixture(decide(knownId), () => { lookups++; return false; }), undefined);
   assert.equal(lookups, 1);
