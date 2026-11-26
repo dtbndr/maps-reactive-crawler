@@ -45,6 +45,31 @@ test('start binds and executes the same fixture bytes when preflight replaces th
   } finally { rmSync(files.directory, { recursive: true, force: true }); }
 });
 
+test('start preflight closure cannot mutate caller configuration used to initialize traversal or captured log', async () => {
+  const files = temp();
+  try {
+    const bytes = fixture({ 'work:0,0': { id: 'seed', observationId: 'seed' } }, { seed: { result: { status: 'empty' }, elapsed: 0 } });
+    saveFixture(files.fixture, bytes);
+    const callerGeometry = structuredClone(geometry);
+    const callerLimits = { ...limits, cells: 2 };
+    let capturedLog;
+    await operator.start({ checkpoint: files.checkpoint, fixture: files.fixture, geometry: callerGeometry, limits: callerLimits, onPreflight: configuration => {
+      capturedLog = structuredClone(configuration);
+      callerGeometry.seed.latitude = 22;
+      callerGeometry.area.radius = 1;
+      callerLimits.cells = 99;
+    } });
+    assert.deepEqual(capturedLog, { geometry, limits: { ...limits, cells: 2 } });
+    const durable = DurableState.openBound(files.checkpoint, operator.parseSyntheticFixture(bytes).identity);
+    try {
+      const state = durable.readTraversal();
+      assert.deepEqual(state.geometry.seed, { latitude: 0, longitude: 0 });
+      assert.deepEqual(state.geometry.area, { type: 'radius', radius: 300 });
+      assert.equal(state.limits.cells, 2);
+    } finally { durable.close(); }
+  } finally { rmSync(files.directory, { recursive: true, force: true }); }
+});
+
 test('start preflight cannot mutate nested validated configuration used to initialize traversal', async () => {
   const files = temp();
   try {

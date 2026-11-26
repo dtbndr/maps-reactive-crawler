@@ -350,7 +350,15 @@ export async function runOperatorWithDependencies(command: 'start' | 'resume', o
   const fixture = parsedFixture ?? parseSyntheticFixture(readFileSync(options.fixture));
   if (command === 'start') {
     const startOptions = options as OperatorStartOptions;
-    const config = validateOperatorConfig({ geometry: startOptions.geometry, limits: startOptions.limits });
+    const validated = validateOperatorConfig({ geometry: startOptions.geometry, limits: startOptions.limits });
+    const config: OperatorConfig = {
+      geometry: {
+        seed: { ...validated.geometry.seed },
+        spacing: validated.geometry.spacing,
+        area: { ...validated.geometry.area },
+      },
+      limits: { ...validated.limits },
+    };
     if (typeof dependencies.onPreflight !== 'function') throw new Error('Preflight callback is required');
     dependencies.onPreflight({
       geometry: {
