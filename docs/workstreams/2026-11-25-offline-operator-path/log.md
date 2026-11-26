@@ -2,6 +2,9 @@
 
 Opt-ins: playback=on, external review=on
 
+## B1 acceptance
+B1 complete at 81ac0be: independently reviewed behavioral acceptance, focused 9/9 and full 266/266 passed. The operator accepted a B1-specific exception for incomplete historical per-contract RED; recorded RED and passing characterization are distinguished. An earlier full-check failure was not retained, so its cause remains unknown; later passing checks do not prove intermittent baseline failures eliminated. Four scoped test-clock changes remove verified real-clock sensitivity without changing production timing.
+
 ## 2026-11-27 — B1 review follow-up RED
 Added behavioral regression coverage before changing implementation. Exact baseline command: `mise exec -- npm run build && mise exec -- node --test test/operator-eligibility.test.mjs` — build passed; focused tests 8/9 passed and 1 failed. The failing assertion at `test/operator-eligibility.test.mjs:67` observed `refuse-unknown-id` where core-precedence contract expects `global-gap`, for a running unknown-ID reservation plus unresolved detail gap. Other added tests passed at baseline: running over queued refused work, persisted known-ID observation with pending delay at submission/time caps and no send, and paused/cancelled flags with independent recovery flag. No RED is claimed for those already-working behaviors. This records historical evidence for this follow-up only and does not alter the separately documented missing historical per-contract RED for A2/A3. No public execution path is enabled.
 
