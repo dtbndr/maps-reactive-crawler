@@ -124,7 +124,7 @@ test('caller ceiling widening during a send does not permit another submission r
 test('successful submission retry is observed even when observation retry ceiling is zero',()=>{
  const dir=mkdtempSync(join(tmpdir(),'retry-zero-observe-'));const db=DurableState.open(join(dir,'state.db'));let sends=0,polls=0;
  try {db.writeTraversal(createTraversal(geo,{cells:1,submissions:5,activeTime:10}));
-  assert.throws(()=>executeDurableDiscovery(db,()=>{sends++;if(sends===2)return{id:'retry-id'};throw Object.assign(Error('synthetic send failure'),{safe:true})},()=>{polls++;throw Error('synthetic observe failure')},'isolated',{submissionCeiling:1,observationCeiling:0,knownSafeSubmissionError:e=>e.safe,knownSafeObservationError:()=>true}),/synthetic observe failure/);
+  assert.throws(()=>executeDurableDiscovery(db,()=>{sends++;if(sends===2)return{id:'retry-id'};throw Object.assign(Error('synthetic send failure'),{safe:true})},()=>{polls++;throw Error('synthetic observe failure')},'isolated',{submissionCeiling:1,observationCeiling:0,knownSafeSubmissionError:e=>e.safe,knownSafeObservationError:()=>true},{monotonicNow:()=>0}),/synthetic observe failure/);
   assert.equal(sends,2);assert.equal(polls,1);
  } finally {db.close();rmSync(dir,{recursive:true,force:true})}
 });

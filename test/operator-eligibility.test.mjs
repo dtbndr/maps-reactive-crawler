@@ -36,7 +36,9 @@ test('shared eligibility classifies caps, known-ID recovery and refusal before i
   const cancelled = decide(state({ ...reserved, paused: false, cancelled: true }));
   assert.equal(cancelled.kind, 'cancelled');
   assert.equal(cancelled.recoveryPending, false);
-  assert.equal(decide(state({ ...reserved, paused: true, recoveryPending: true, gaps: [{ cellKey: '0,0', cause: 'uncertain', scope: 'global', status: 'unresolved' }] })).kind, 'paused');
+  const pausedGlobalGap = decide(state({ ...reserved, paused: true, recoveryPending: true, gaps: [{ cellKey: '0,0', cause: 'uncertain', scope: 'global', status: 'unresolved' }] }));
+  assert.equal(pausedGlobalGap.kind, 'paused');
+  assert.equal(pausedGlobalGap.globalGap, true);
   const independent = decide(state({ ...reserved, cancelled: true, recoveryPending: true, gaps: [{ cellKey: '0,0', cause: 'uncertain', scope: 'global', status: 'unresolved' }] }));
   assert.equal(independent.recoveryPending, true);
   assert.equal(independent.globalGap, true);
@@ -49,15 +51,27 @@ test('persisted unknown-ID attempts refuse selection without changing authorizat
     const before = structuredClone(value);
     assert.equal(operator.classifyOperatorEligibility(value).kind, 'refuse-unknown-id');
     assert.deepEqual(value, before);
-    assert.equal(operator.classifyOperatorEligibility({ ...value, paused: true }).kind, 'paused');
-    assert.equal(operator.classifyOperatorEligibility({ ...value, cancelled: true }).kind, 'cancelled');
+    const paused = operator.classifyOperatorEligibility({ ...value, paused: true });
+    assert.equal(paused.kind, 'paused');
+    assert.equal(paused.attemptId, undefined);
+    assert.equal(paused.recoveryPending, false);
+    const cancelled = operator.classifyOperatorEligibility({ ...value, cancelled: true });
+    assert.equal(cancelled.kind, 'cancelled');
+    assert.equal(cancelled.attemptId, undefined);
+    assert.equal(cancelled.recoveryPending, false);
   }
   const authorization = { ordinal: 2, ceiling: 4, delayMs: 17 };
   const uncertain = state({ queue: [], cells: { '0,0': { outcome: 'parked' } }, attempts: [{ id: 'a', workId: 'work:0,0', cellKey: '0,0', status: 'uncertain', safeRetryAuthorization: authorization }] });
   assert.equal(operator.classifyOperatorEligibility(uncertain).kind, 'refuse-safe-retry');
   assert.deepEqual(uncertain.attempts[0].safeRetryAuthorization, authorization);
-  assert.equal(operator.classifyOperatorEligibility({ ...uncertain, paused: true }).kind, 'paused');
-  assert.equal(operator.classifyOperatorEligibility({ ...uncertain, cancelled: true }).kind, 'cancelled');
+  const paused = operator.classifyOperatorEligibility({ ...uncertain, paused: true });
+  assert.equal(paused.kind, 'paused');
+  assert.equal(paused.attemptId, undefined);
+  assert.equal(paused.recoveryPending, false);
+  const cancelled = operator.classifyOperatorEligibility({ ...uncertain, cancelled: true });
+  assert.equal(cancelled.kind, 'cancelled');
+  assert.equal(cancelled.attemptId, undefined);
+  assert.equal(cancelled.recoveryPending, false);
 });
 
 test('known-ID continuation across caps and attempt states characterizes existing behavior', () => {
@@ -162,7 +176,9 @@ test('fixture precheck looks up only selected eligible submission work', () => {
   assert.equal(lookups, 1);
   const capped = state({ submissions: 3 });
   const cappedBefore = structuredClone(capped);
-  assert.equal(operator.precheckOperatorFixture(decide(capped), lookup), undefined);
+  let cappedLookups = 0;
+  assert.equal(operator.precheckOperatorFixture(decide(capped), _workId => { cappedLookups++; return false; }), undefined);
+  assert.equal(cappedLookups, 0);
   assert.equal(lookups, 1);
   assert.deepEqual(capped, cappedBefore);
   const knownId = state({ queue: [], cells: { '0,0': { outcome: 'running' } }, attempts: [{ id: 'a', workId: 'work:0,0', cellKey: '0,0', status: 'observing', knownId: 'known' }], submissions: 3, activeTime: 100 });
