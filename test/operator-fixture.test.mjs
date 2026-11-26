@@ -43,6 +43,32 @@ test('rejects malformed, non-v1, duplicate-key, and unknown-field fixture data',
   ]) assert.throws(() => parseSyntheticFixture(bytes));
 });
 
+test('rejects prototype-key fixture fields and discovery keys', () => {
+  for (const bytes of [
+    Buffer.from('{"version":1,"discoveries":{},"observations":{},"__proto__":true}'),
+    Buffer.from('{"version":1,"discoveries":{"w":{"id":"x","observationId":"x","__proto__":true}},"observations":{"x":{"result":{"status":"empty"},"elapsed":0}}}'),
+  ]) assert.throws(() => parseSyntheticFixture(bytes));
+});
+
+test('rejects unknown candidate coordinate fields and array coordinates', () => {
+  for (const coordinate of [
+    { latitude: 1, longitude: 2, extra: true },
+    [],
+  ]) {
+    const fixture = { version: 1, discoveries: {}, observations: { x: { result: { status: 'success', candidates: [{ id: 'place', coordinate }] }, elapsed: 0 } } };
+    assert.throws(() => parseSyntheticFixture(Buffer.from(JSON.stringify(fixture))));
+  }
+});
+
+test('rejects array-valued failure scope', () => {
+  const fixture = { version: 1, discoveries: {}, observations: { x: { result: { status: 'failed', scope: ['global'] }, elapsed: 0 } } };
+  assert.throws(() => parseSyntheticFixture(Buffer.from(JSON.stringify(fixture))));
+});
+
+test('rejects non-JSON whitespace between values', () => {
+  assert.throws(() => parseSyntheticFixture(Buffer.from('{"version":1,\v"discoveries":{},"observations":{}}')));
+});
+
 test('rejects invalid references, duplicate IDs per work, whitespace IDs and invalid observations', () => {
   const invalidFixtures = [
     { version: 1, discoveries: { w: { id: 'missing', observationId: 'missing' } }, observations: {} },

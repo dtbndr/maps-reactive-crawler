@@ -35,7 +35,7 @@ type JsonValue = null | boolean | number | string | JsonValue[] | { [key: string
 // while delegating primitive/string decoding to its strict JSON grammar.
 function parseUniqueJson(source: string): JsonValue {
   let offset = 0;
-  const whitespace = (): void => { while (/\s/.test(source[offset] ?? '') && offset < source.length) offset++; };
+  const whitespace = (): void => { while (offset < source.length && /[ \t\n\r]/.test(source[offset]!)) offset++; };
   const string = (): string => {
     const start = offset++;
     while (offset < source.length) {
@@ -47,7 +47,7 @@ function parseUniqueJson(source: string): JsonValue {
   const value = (): JsonValue => {
     whitespace();
     if (source[offset] === '{') {
-      offset++; whitespace(); const object: { [key: string]: JsonValue } = {}; 
+      offset++; whitespace(); const object: { [key: string]: JsonValue } = Object.create(null) as { [key: string]: JsonValue };
       if (source[offset] === '}') { offset++; return object; }
       for (;;) {
         whitespace(); if (source[offset] !== '"') throw new Error('Malformed JSON object key');
@@ -65,7 +65,7 @@ function parseUniqueJson(source: string): JsonValue {
     }
     if (source[offset] === '"') return string();
     const start = offset;
-    while (offset < source.length && !/[\s,}\]]/.test(source[offset]!)) offset++;
+    while (offset < source.length && !/[ \t\n\r,}\]]/.test(source[offset]!)) offset++;
     if (start === offset) throw new Error('Malformed JSON value');
     return JSON.parse(source.slice(start, offset)) as JsonValue;
   };
@@ -81,7 +81,7 @@ function validateDiscoveryResult(result: unknown): asserts result is DiscoveryRe
     exactObject(item, ['status'], 'discovery result'); return;
   }
   if (item.status === 'failed') {
-    if (Object.keys(item).some(key => !['status', 'cause', 'scope'].includes(key)) || !['isolated', 'global'].includes(String(item.scope)) || (item.cause !== undefined && typeof item.cause !== 'string')) throw new Error('Invalid failed discovery result');
+  if (Object.keys(item).some(key => !['status', 'cause', 'scope'].includes(key)) || typeof item.scope !== 'string' || !['isolated', 'global'].includes(item.scope) || (item.cause !== undefined && typeof item.cause !== 'string')) throw new Error('Invalid failed discovery result');
     return;
   }
   if (item.status !== 'success' || Object.keys(item).some(key => !['status', 'candidates'].includes(key)) || !Array.isArray(item.candidates)) throw new Error('Invalid discovery result');
@@ -91,7 +91,9 @@ function validateDiscoveryResult(result: unknown): asserts result is DiscoveryRe
     if (Object.keys(value).some(key => !['id', 'coordinate', 'verifiedCanonicalKey'].includes(key)) || typeof value.id !== 'string' || !value.id.trim()) throw new Error('Invalid discovery candidate');
     if (value.coordinate !== undefined && value.coordinate !== null) {
       const coordinate = value.coordinate as Record<string, unknown>;
-      if (!coordinate || typeof coordinate !== 'object' || !Number.isFinite(coordinate.latitude) || !Number.isFinite(coordinate.longitude)) throw new Error('Invalid candidate coordinate');
+      if (!coordinate || typeof coordinate !== 'object' || Array.isArray(coordinate)) throw new Error('Invalid candidate coordinate');
+      exactObject(coordinate, ['latitude', 'longitude'], 'candidate coordinate');
+      if (!Number.isFinite(coordinate.latitude) || !Number.isFinite(coordinate.longitude)) throw new Error('Invalid candidate coordinate');
     }
     if (value.verifiedCanonicalKey !== undefined && typeof value.verifiedCanonicalKey !== 'string') throw new Error('Invalid verified candidate key');
   }
