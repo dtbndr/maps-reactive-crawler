@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
-import { DurableState } from './durable-state.js';
+import { DurableState, readOnlyCheckpointSnapshot } from './durable-state.js';
 import { DurableStopError, executeDurableDiscovery, type SyntheticObserve, type SyntheticSend } from './durable-discovery.js';
 import { validateGeometry, type GeometryInput } from './index.js';
 import { createTraversal, type DiscoveryResult, type TraversalLimits } from './traversal.js';
@@ -252,13 +252,15 @@ const compareStringArrays = (a: string[], b: string[]): number => {
   return a.length - b.length;
 };
 
-export function projectOperatorStatus(state: import('./traversal.js').TraversalState): OperatorStatus {
+export function projectOperatorStatus(state: import('./traversal.js').TraversalState, owner: { pid: number | null; alive: boolean } = { pid: null, alive: false }): OperatorStatus {
   const decision = classifyOperatorEligibility(state);
+  const staleOwnerWithoutCleanPause = owner.pid !== null && !owner.alive && !state.cleanPauseEvidence;
+  const ownerInterrupted = owner.alive || staleOwnerWithoutCleanPause;
   const conditions = new Set<string>();
   if (state.blocked.length) conditions.add('cells');
   if (state.submissions >= state.limits.submissions) conditions.add('submissions');
   if (state.activeTime >= state.limits.activeTime) conditions.add('active_time');
-  if (state.recoveryPending || state.activeInterval === true || ['refuse-unknown-id', 'refuse-safe-retry', 'parked-only-uncertainty'].includes(decision.kind)) conditions.add('recovery_pending');
+  if (state.recoveryPending || state.activeInterval === true || ownerInterrupted || ['refuse-unknown-id', 'refuse-safe-retry', 'parked-only-uncertainty'].includes(decision.kind)) conditions.add('recovery_pending');
   if (decision.globalGap) conditions.add('global_gap');
   if (state.cancelled) conditions.add('cancelled');
   if (state.paused) conditions.add('paused');
@@ -282,7 +284,7 @@ export function projectOperatorStatus(state: import('./traversal.js').TraversalS
             : conditions.has('active_time') ? 'active_time'
               : conditions.has('cells') ? 'cells'
                 : discoveryExhausted ? 'discovery_exhausted' : 'ready';
-  const outputState = state.recoveryPending || state.activeInterval === true ? 'potentially_interrupted' : state.cancelled ? 'cancelled' : state.paused ? 'paused' : 'idle';
+  const outputState = state.recoveryPending || state.activeInterval === true || ownerInterrupted ? 'potentially_interrupted' : state.cancelled ? 'cancelled' : state.paused || (owner.pid !== null && !!state.cleanPauseEvidence) ? 'paused' : 'idle';
   return {
     version: 1, state: outputState, headline, conditions: sortedConditions,
     geometry: {
@@ -307,6 +309,33 @@ export function projectOperatorStatus(state: import('./traversal.js').TraversalS
 
 function response<T extends 'start' | 'resume' | 'cancel'>(command: T, snapshot: import('./traversal.js').TraversalState): { version: 1; command: T; status: OperatorStatus } {
   return { version: 1, command, status: projectOperatorStatus(snapshot) };
+}
+
+export function status(options: { checkpoint: string }): OperatorStatus {
+  const snapshot = readOnlyCheckpointSnapshot(options.checkpoint);
+  return projectOperatorStatus(snapshot.traversal, { pid: snapshot.ownerPid, alive: snapshot.ownerAlive });
+}
+
+export type OperatorOccurrence = { id: string; coordinate: { latitude: number; longitude: number } | null; classification: string; sourceCell: string; workId: string; attemptId: string; observationId: string; occurrence: number };
+export type OperatorExport = { version: 1; status: OperatorStatus; verifiedPlaces: { canonicalKey: string; observations: OperatorOccurrence[] }[]; unverifiedObservations: OperatorOccurrence[] };
+export function exportResults(options: { checkpoint: string }): OperatorExport {
+  const snapshot = readOnlyCheckpointSnapshot(options.checkpoint);
+  const state = snapshot.traversal;
+  const occurrences: OperatorOccurrence[] = state.candidates.map(candidate => {
+    const attempt = state.attempts.find(item => item.id === candidate.attemptId);
+    if (!attempt) throw new Error('Corrupt traversal checkpoint: occurrence attempt is missing');
+    return { id: candidate.id, coordinate: candidate.coordinate ?? null, classification: candidate.classification, sourceCell: candidate.sourceCell, workId: attempt.workId, attemptId: candidate.attemptId, observationId: candidate.observationId, occurrence: candidate.occurrence };
+  }).sort((a, b) => lexical(a.observationId, b.observationId));
+  const groups = new Map<string, OperatorOccurrence[]>();
+  const unverifiedObservations: OperatorOccurrence[] = [];
+  for (const occurrence of occurrences) {
+    const candidate = state.candidates.find(item => item.observationId === occurrence.observationId)!;
+    if (candidate.verifiedCanonicalKey) {
+      const group = groups.get(candidate.verifiedCanonicalKey) ?? [];
+      group.push(occurrence); groups.set(candidate.verifiedCanonicalKey, group);
+    } else unverifiedObservations.push(occurrence);
+  }
+  return { version: 1, status: projectOperatorStatus(state, { pid: snapshot.ownerPid, alive: snapshot.ownerAlive }), verifiedPlaces: [...groups].sort(([a], [b]) => lexical(a, b)).map(([canonicalKey, observations]) => ({ canonicalKey, observations })), unverifiedObservations };
 }
 
 export function cancelCheckpoint(options: { checkpoint: string }): { version: 1; command: 'cancel'; status: OperatorStatus } {

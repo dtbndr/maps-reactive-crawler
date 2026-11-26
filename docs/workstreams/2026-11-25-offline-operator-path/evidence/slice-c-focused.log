@@ -1,0 +1,17 @@
+✔ status and export reject a missing checkpoint without creating it (1.958875ms)
+✔ CLI exposes status and export and rejects missing checkpoints with empty stdout (83.895959ms)
+✔ read-only status reports the exact document for a stale owner with genuine clean-pause evidence (11.236875ms)
+✔ CLI emits successful status and export documents for an existing checkpoint (91.603666ms)
+✔ read-only inspection rejects unsupported and corrupt checkpoints without repairing them (6.070833ms)
+✔ status reports every simultaneous v1 condition with the required headline precedence (48.203042ms)
+✔ export retains exact bbox-boundary and outside occurrences without filtering (16.077125ms)
+✔ status reports an exact live-owner interrupted snapshot without recovery mutation (54.946166ms)
+✔ read-only export preserves occurrence provenance and classifies a live-appearing owner (19.927292ms)
+ℹ tests 9
+ℹ suites 0
+ℹ pass 9
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 396.619125

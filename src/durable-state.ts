@@ -117,6 +117,38 @@ function validateTraversal(value: unknown): asserts value is TraversalState {
 }
 
 /** Durable checkpoint foundation; this does not implement restartable discovery. */
+export type ReadOnlyCheckpointSnapshot = { traversal: TraversalState; ownerPid: number | null; ownerAlive: boolean };
+
+export function readOnlyCheckpointSnapshot(path: string): ReadOnlyCheckpointSnapshot {
+  const db = new DatabaseSync(path, { readOnly: true });
+  try {
+    db.exec('BEGIN');
+    const tables = new Set(db.prepare("SELECT name FROM sqlite_master WHERE type='table'").all().map((row: any) => row.name));
+    if (!tables.has('checkpoint') || !tables.has('owner') || !tables.has('operator_binding') || !tables.has('traversal')) throw new Error('Corrupt state: missing bound checkpoint schema');
+    const checkpoint = db.prepare('SELECT version, payload FROM checkpoint WHERE id=1').get();
+    if (!checkpoint || checkpoint.version !== 1) throw new Error('Unsupported or missing checkpoint schema version');
+    validate(JSON.parse(String(checkpoint.payload)));
+    const binding = db.prepare('SELECT payload FROM operator_binding WHERE id=1').get();
+    if (!binding) throw new Error('Corrupt state: missing operator binding');
+    const parsedBinding = JSON.parse(String(binding.payload));
+    if (!parsedBinding || typeof parsedBinding !== 'object' || Array.isArray(parsedBinding) || Object.keys(parsedBinding).length !== 2 || parsedBinding.version !== 1 || typeof parsedBinding.fixtureIdentity !== 'string' || !/^[a-f0-9]{64}$/.test(parsedBinding.fixtureIdentity)) throw new Error('Corrupt state: invalid operator binding');
+    const row = db.prepare('SELECT payload FROM traversal WHERE id=1').get();
+    if (!row) throw new Error('Corrupt state: missing traversal');
+    const traversal = JSON.parse(String(row.payload));
+    validateTraversal(traversal);
+    if (traversal.timeUnit !== 'milliseconds') throw new Error('Durable traversal time unit is unmarked; explicit migration required');
+    const owner = db.prepare('SELECT pid FROM owner WHERE id=1').get();
+    const ownerPid = owner ? Number(owner.pid) : null;
+    if (ownerPid !== null && (!Number.isSafeInteger(ownerPid) || ownerPid < 1 || ownerPid > 2147483647)) throw new Error('Corrupt state: invalid owner PID');
+    const ownerAlive = ownerPid === null ? false : isAlive(ownerPid);
+    db.exec('COMMIT');
+    return { traversal, ownerPid, ownerAlive };
+  } catch (error) {
+    try { db.exec('ROLLBACK'); } catch { /* Preserve snapshot error. */ }
+    throw error;
+  } finally { db.close(); }
+}
+
 export class DurableState {
   #ownerReleased = false;
   private constructor(private db: DatabaseSync) {}

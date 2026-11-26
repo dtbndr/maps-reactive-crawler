@@ -1,17 +1,19 @@
 import { pathToFileURL } from 'node:url';
-import { cancelCheckpoint, resume, start, type OperatorResumeOptions, type OperatorStartOptions } from './operator.js';
+import { cancelCheckpoint, exportResults, resume, start, status, type OperatorResumeOptions, type OperatorStartOptions } from './operator.js';
 
 export type CliIo = { stdout: (text: string) => void; stderr: (text: string) => void };
 export type CliLibrary = {
   start: (options: OperatorStartOptions) => Promise<unknown>;
   resume: (options: OperatorResumeOptions) => Promise<unknown>;
   cancelCheckpoint: (options: { checkpoint: string }) => unknown;
+  status: (options: { checkpoint: string }) => unknown;
+  exportResults: (options: { checkpoint: string }) => unknown;
 };
 
 type ParsedCommand =
   | { command: 'start'; options: Omit<OperatorStartOptions, 'onPreflight'> }
   | { command: 'resume'; options: OperatorResumeOptions }
-  | { command: 'cancel'; checkpoint: string };
+  | { command: 'cancel' | 'status' | 'export'; checkpoint: string };
 
 const startOptions = new Set(['checkpoint', 'fixture', 'lat', 'lon', 'spacing-m', 'radius-m', 'bbox', 'cells', 'submissions', 'active-ms']);
 const resumeOptions = new Set(['checkpoint', 'fixture', 'cells', 'submissions', 'active-ms']);
@@ -25,7 +27,7 @@ function strictNumber(value: string, flag: string): number {
 
 function parseArgs(args: string[]): ParsedCommand {
   const [command, ...tokens] = args;
-  if (command !== 'start' && command !== 'resume' && command !== 'cancel') throw new Error('Expected command: start, resume, or cancel');
+  if (command !== 'start' && command !== 'resume' && command !== 'cancel' && command !== 'status' && command !== 'export') throw new Error('Expected command: start, resume, cancel, status, or export');
   const allowed = command === 'start' ? startOptions : command === 'resume' ? resumeOptions : new Set(['checkpoint']);
   const values = new Map<string, string>();
   for (let index = 0; index < tokens.length; index++) {
@@ -46,7 +48,7 @@ function parseArgs(args: string[]): ParsedCommand {
   const optionalNumber = (name: string): number | undefined => values.has(name) ? strictNumber(values.get(name)!, name) : undefined;
   const requiredNumber = (name: string): number => strictNumber(required(name), name);
   const checkpoint = required('checkpoint');
-  if (command === 'cancel') return { command, checkpoint };
+  if (command === 'cancel' || command === 'status' || command === 'export') return { command, checkpoint };
   const fixture = required('fixture');
   if (command === 'resume') {
     const limits: NonNullable<OperatorResumeOptions['limits']> = {};
@@ -88,7 +90,9 @@ export async function runCli(args: string[], library: CliLibrary, io: CliIo): Pr
         io.stderr(`${JSON.stringify({ version: 1, type: 'preflight', geometry: configuration.geometry, limits: configuration.limits })}\n`);
       } });
     } else if (parsed.command === 'resume') result = await library.resume(parsed.options);
-    else result = library.cancelCheckpoint({ checkpoint: parsed.checkpoint });
+    else if (parsed.command === 'cancel') result = library.cancelCheckpoint({ checkpoint: parsed.checkpoint });
+    else if (parsed.command === 'status') result = library.status({ checkpoint: parsed.checkpoint });
+    else result = library.exportResults({ checkpoint: parsed.checkpoint });
     io.stdout(`${JSON.stringify(result)}\n`);
     return 0;
   } catch (error) {
@@ -98,7 +102,7 @@ export async function runCli(args: string[], library: CliLibrary, io: CliIo): Pr
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
-  void runCli(process.argv.slice(2), { start, resume, cancelCheckpoint }, {
+  void runCli(process.argv.slice(2), { start, resume, cancelCheckpoint, status, exportResults }, {
     stdout: text => process.stdout.write(text),
     stderr: text => process.stderr.write(text),
   }).then(code => { process.exitCode = code; });
