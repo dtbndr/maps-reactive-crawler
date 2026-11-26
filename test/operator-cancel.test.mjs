@@ -15,6 +15,10 @@ const fixture = Buffer.from(JSON.stringify({
   discoveries: Object.fromEntries(['0,0', '0,1', '0,-1', '1,0', '-1,0'].map(key => [`work:${key}`, { id: key, observationId: key }])),
   observations: Object.fromEntries(['0,0', '0,1', '0,-1', '1,0', '-1,0'].map(key => [key, { result: { status: key === '0,0' ? 'success' : 'empty', ...(key === '0,0' ? { candidates: [{ id: 'place' }] } : {}) }, elapsed: 4 }]))
 }));
+const traversalFromDb = path => {
+  const db = new DatabaseSync(path);
+  try { return JSON.parse(db.prepare('SELECT payload FROM traversal WHERE id=1').get().payload); } finally { db.close(); }
+};
 const setup = () => {
   const directory = mkdtempSync(join(tmpdir(), 'operator-cancel-'));
   const checkpoint = join(directory, 'state.db');
@@ -36,15 +40,15 @@ test('timer abort from first send runs before second eligible operation and sett
     const result = await operator.start({ checkpoint: files.checkpoint, fixture: files.fixturePath, geometry, limits, onPreflight() {}, signal: controller.signal });
     assert.equal(sent.length, 1);
     assert.deepEqual(observed, ['0,0']);
-    assert.equal(result.state.cancelled, true);
-    assert.equal(result.state.activeInterval, false);
-    assert.equal(result.state.activeTime > 0, true);
+    assert.equal(result.status.state, 'cancelled');
+    assert.equal(result.status.conditions.includes('cancelled'), true);
+    assert.equal(result.status.counters.activeTime > 0, true);
     const db = DurableState.openBound(files.checkpoint, operator.parseSyntheticFixture(fixture).identity);
     try {
       const persisted = db.readTraversal();
       assert.equal(persisted.cancelled, true);
       assert.equal(persisted.activeInterval, false);
-      assert.equal(persisted.activeTime, result.state.activeTime);
+      assert.equal(persisted.activeTime, result.status.counters.activeTime);
     } finally { db.close(); }
   } finally { operator.setOperatorDiscoveryForTest(undefined); rmSync(files.directory, { recursive: true, force: true }); }
 });
@@ -58,9 +62,10 @@ test('pre-aborted run durably cancels before submitting work', async () => {
     operator.setOperatorDiscoveryForTest({ send: () => { sends++; throw new Error('must not submit'); } });
     const result = await operator.start({ checkpoint: files.checkpoint, fixture: files.fixturePath, geometry, limits, onPreflight() {}, signal: controller.signal });
     assert.equal(sends, 0);
-    assert.equal(result.state.cancelled, true);
-    assert.equal(result.state.submissions, 0);
-    assert.equal(result.state.activeTime, 0);
+    assert.equal(result.command, 'start');
+    assert.equal(result.status.conditions.includes('cancelled'), true);
+    assert.equal(result.status.counters.submissions, 0);
+    assert.equal(result.status.counters.activeTime, 0);
   } finally { operator.setOperatorDiscoveryForTest(undefined); rmSync(files.directory, { recursive: true, force: true }); }
 });
 
@@ -78,12 +83,14 @@ test('cancel-only acquisition reconciles orphan interval before cancel and prese
     const db = new DatabaseSync(files.checkpoint);
     db.prepare('INSERT OR REPLACE INTO owner(id,pid) VALUES(1,?)').run(2147483647);
     db.close();
-    const cancelled = operator.cancelCheckpoint(files.checkpoint);
-    assert.equal(cancelled.cancelled, true);
-    assert.equal(cancelled.recoveryPending, true);
-    assert.equal(cancelled.activeInterval, false);
-    assert.equal(cancelled.submissions, 1);
-    assert.deepEqual(cancelled.attempts[0].safeRetryAuthorization, { ordinal: 1, ceiling: 1, delayMs: 12 });
+    const cancelled = operator.cancelCheckpoint({ checkpoint: files.checkpoint });
+    assert.equal(cancelled.command, 'cancel');
+    const persisted = traversalFromDb(files.checkpoint);
+    assert.equal(persisted.cancelled, true);
+    assert.equal(persisted.recoveryPending, true);
+    assert.equal(persisted.activeInterval, false);
+    assert.equal(persisted.submissions, 1);
+    assert.deepEqual(persisted.attempts[0].safeRetryAuthorization, { ordinal: 1, ceiling: 1, delayMs: 12 });
   } finally { rmSync(files.directory, { recursive: true, force: true }); }
 });
 
@@ -95,11 +102,13 @@ test('cancel-only acquisition cancels a paused checkpoint and preserves recovery
     state.paused = true;
     state.recoveryPending = true;
     DurableState.createBound(files.checkpoint, identity, state);
-    const cancelled = operator.cancelCheckpoint(files.checkpoint);
-    assert.equal(cancelled.cancelled, true);
-    assert.equal(cancelled.paused, true);
-    assert.equal(cancelled.recoveryPending, true);
-    assert.notEqual(cancelled.activeInterval, true);
+    const cancelled = operator.cancelCheckpoint({ checkpoint: files.checkpoint });
+    assert.equal(cancelled.command, 'cancel');
+    const persisted = traversalFromDb(files.checkpoint);
+    assert.equal(persisted.cancelled, true);
+    assert.equal(persisted.paused, true);
+    assert.equal(persisted.recoveryPending, true);
+    assert.notEqual(persisted.activeInterval, true);
   } finally { rmSync(files.directory, { recursive: true, force: true }); }
 });
 
@@ -112,7 +121,7 @@ test('cancel-only acquisition refuses a live owner without changing logical stat
     db.prepare('INSERT OR REPLACE INTO owner(id,pid) VALUES(1,?)').run(process.pid);
     const before = db.prepare('SELECT payload FROM traversal WHERE id=1').get().payload;
     db.close();
-    assert.throws(() => operator.cancelCheckpoint(files.checkpoint), /already owned/);
+    assert.throws(() => operator.cancelCheckpoint({ checkpoint: files.checkpoint }), /already owned/);
     const check = new DatabaseSync(files.checkpoint);
     try { assert.equal(check.prepare('SELECT payload FROM traversal WHERE id=1').get().payload, before); } finally { check.close(); }
   } finally { rmSync(files.directory, { recursive: true, force: true }); }
@@ -123,12 +132,14 @@ test('standalone idle cancellation changes only the cancellation flag', () => {
   try {
     const state = createTraversal(geometry, { cells: 1, submissions: 1, activeTime: 100 });
     DurableState.createBound(files.checkpoint, operator.parseSyntheticFixture(fixture).identity, state);
-    const cancelled = operator.cancelCheckpoint(files.checkpoint);
-    assert.equal(cancelled.cancelled, true);
-    assert.equal(cancelled.paused, false);
-    assert.equal(cancelled.submissions, state.submissions);
-    assert.equal(cancelled.activeTime, state.activeTime);
-    assert.deepEqual(cancelled.queue, state.queue);
+    const cancelled = operator.cancelCheckpoint({ checkpoint: files.checkpoint });
+    assert.equal(cancelled.command, 'cancel');
+    const persisted = traversalFromDb(files.checkpoint);
+    assert.equal(persisted.cancelled, true);
+    assert.equal(persisted.paused, false);
+    assert.equal(persisted.submissions, state.submissions);
+    assert.equal(persisted.activeTime, state.activeTime);
+    assert.deepEqual(persisted.queue, state.queue);
   } finally { rmSync(files.directory, { recursive: true, force: true }); }
 });
 
@@ -138,7 +149,7 @@ test('cancel-only writer claim failure leaves state unchanged', () => {
     DurableState.createBound(files.checkpoint, operator.parseSyntheticFixture(fixture).identity, createTraversal(geometry, { cells: 1, submissions: 1, activeTime: 100 }));
     const lock = new DatabaseSync(files.checkpoint);
     lock.exec('BEGIN IMMEDIATE');
-    try { assert.throws(() => operator.cancelCheckpoint(files.checkpoint), /locked|busy/i); }
+    try { assert.throws(() => operator.cancelCheckpoint({ checkpoint: files.checkpoint }), /locked|busy/i); }
     finally { lock.exec('ROLLBACK'); lock.close(); }
     const check = new DatabaseSync(files.checkpoint);
     try { assert.equal(JSON.parse(check.prepare('SELECT payload FROM traversal WHERE id=1').get().payload).cancelled, false); } finally { check.close(); }
@@ -154,7 +165,7 @@ test('cancel-only acquisition rejects malformed binding without changing travers
     db.prepare('UPDATE operator_binding SET payload=? WHERE id=1').run('{"version":1,"fixtureIdentity":"bad"}');
     const before = db.prepare('SELECT payload FROM traversal WHERE id=1').get().payload;
     db.close();
-    assert.throws(() => operator.cancelCheckpoint(files.checkpoint), /binding/);
+    assert.throws(() => operator.cancelCheckpoint({ checkpoint: files.checkpoint }), /binding/);
     const check = new DatabaseSync(files.checkpoint);
     try { assert.equal(check.prepare('SELECT payload FROM traversal WHERE id=1').get().payload, before); } finally { check.close(); }
   } finally { rmSync(files.directory, { recursive: true, force: true }); }
@@ -173,11 +184,13 @@ test('known-ID pending observation consumes its delay and remains eligible at bo
   try {
     operator.setOperatorDiscoveryForTest({ send: () => { sends++; throw new Error('must not resend'); }, observe: id => { observations++; assert.equal(id, '0,0'); return { result: { status: 'empty' }, elapsed: 1 }; } });
     const result = await operator.resume({ checkpoint: files.checkpoint, fixture: files.fixturePath });
-    assert.equal(result.state.attempts[0].status, 'observed');
-    assert.equal(result.state.attempts[0].retryOrdinal, 1);
-    assert.equal(result.state.attempts[0].observationRetryCeiling, 2);
-    assert.equal(Object.hasOwn(result.state.attempts[0], 'observationRetryPendingDelayMs'), false);
-    assert.equal(result.state.submissions, 1);
+    assert.equal(result.command, 'resume');
+    const persisted = traversalFromDb(files.checkpoint);
+    assert.equal(persisted.attempts[0].status, 'observed');
+    assert.equal(persisted.attempts[0].retryOrdinal, 1);
+    assert.equal(persisted.attempts[0].observationRetryCeiling, 2);
+    assert.equal(Object.hasOwn(persisted.attempts[0], 'observationRetryPendingDelayMs'), false);
+    assert.equal(persisted.submissions, 1);
     assert.equal(sends, 0);
     assert.equal(observations, 1);
   } finally { operator.setOperatorDiscoveryForTest(undefined); rmSync(files.directory, { recursive: true, force: true }); }
@@ -198,8 +211,10 @@ test('refused unknown-ID safe-retry retains authorization and calls no callbacks
   try {
     operator.setOperatorDiscoveryForTest({ send: () => { sends++; throw new Error('must not send'); }, observe: () => { observations++; throw new Error('must not observe'); } });
     const result = await operator.resume({ checkpoint: files.checkpoint, fixture: files.fixturePath, signal: controller.signal });
-    assert.equal(result.state.cancelled, true);
-    assert.deepEqual(result.state.attempts[0].safeRetryAuthorization, { ordinal: 1, ceiling: 1, delayMs: 20 });
+    assert.equal(result.status.conditions.includes('cancelled'), true);
+    const persisted = traversalFromDb(files.checkpoint);
+    assert.equal(persisted.cancelled, true);
+    assert.deepEqual(persisted.attempts[0].safeRetryAuthorization, { ordinal: 1, ceiling: 1, delayMs: 20 });
     assert.equal(sends, 0);
     assert.equal(observations, 0);
   } finally { operator.setOperatorDiscoveryForTest(undefined); rmSync(files.directory, { recursive: true, force: true }); }
@@ -229,7 +244,7 @@ test('cancel-only acquisition rejects an unbound checkpoint', () => {
     const db = new DatabaseSync(files.checkpoint);
     db.exec('DROP TABLE operator_binding');
     db.close();
-    assert.throws(() => operator.cancelCheckpoint(files.checkpoint), /schema/);
+    assert.throws(() => operator.cancelCheckpoint({ checkpoint: files.checkpoint }), /schema/);
   } finally { rmSync(files.directory, { recursive: true, force: true }); }
 });
 
@@ -242,9 +257,9 @@ test('resume abort cancellation uses the retained writer lease', async () => {
     operator.setOperatorDiscoveryForTest({ send: id => { setTimeout(() => controller.abort(), 0); return { id: id.slice(5) }; } });
     DurableState.acquireCancelOnly = () => { throw new Error('must retain the original writer lease'); };
     const result = await operator.resume({ checkpoint: files.checkpoint, fixture: files.fixturePath, signal: controller.signal });
-    assert.equal(result.state.cancelled, true);
-    assert.equal(result.state.activeInterval, false);
-    assert.equal(result.state.activeTime > 0, true);
+    assert.equal(result.status.state, 'cancelled');
+    assert.equal(result.status.conditions.includes('cancelled'), true);
+    assert.equal(result.status.counters.activeTime > 0, true);
   } finally {
     DurableState.acquireCancelOnly = originalAcquire;
     operator.setOperatorDiscoveryForTest(undefined);
@@ -258,7 +273,7 @@ test('cancel-only acquisition has runtime-private writer storage', () => {
     DurableState.createBound(files.checkpoint, operator.parseSyntheticFixture(fixture).identity, createTraversal(geometry, { cells: 1, submissions: 1, activeTime: 100 }));
     const acquisition = DurableState.acquireCancelOnly(files.checkpoint);
     try {
-      assert.deepEqual(Object.getOwnPropertyNames(Object.getPrototypeOf(acquisition)).sort(), ['cancel', 'close', 'constructor', 'snapshot']);
+      assert.deepEqual(Object.getOwnPropertyNames(Object.getPrototypeOf(acquisition)).sort(), ['cancel', 'close', 'constructor', 'releaseOwner', 'snapshot']);
       assert.deepEqual(Object.getOwnPropertyNames(acquisition), []);
       assert.equal('db' in acquisition, false);
     } finally { acquisition.close(); }
@@ -310,9 +325,9 @@ test('in-run abort cancellation uses the retained writer lease', async () => {
     operator.setOperatorDiscoveryForTest({ send: id => { setTimeout(() => controller.abort(), 0); return { id: id.slice(5) }; } });
     DurableState.acquireCancelOnly = () => { throw new Error('must retain the original writer lease'); };
     const result = await operator.start({ checkpoint: files.checkpoint, fixture: files.fixturePath, geometry, limits: { ...limits, cells: 1 }, onPreflight() {}, signal: controller.signal });
-    assert.equal(result.state.cancelled, true);
-    assert.equal(result.state.activeInterval, false);
-    assert.equal(result.state.activeTime > 0, true);
+    assert.equal(result.status.state, 'cancelled');
+    assert.equal(result.status.conditions.includes('cancelled'), true);
+    assert.equal(result.status.counters.activeTime > 0, true);
   } finally {
     DurableState.acquireCancelOnly = originalAcquire;
     operator.setOperatorDiscoveryForTest(undefined);

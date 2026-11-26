@@ -7,7 +7,7 @@ const resumeArgs = ['resume', '--checkpoint', 'local.db', '--fixture', 'fixture.
 const stubLibrary = (overrides = {}) => ({
   start: async options => ({ command: 'start', options }),
   resume: async options => ({ command: 'resume', options }),
-  cancelCheckpoint: checkpoint => ({ command: 'cancel', checkpoint }),
+  cancelCheckpoint: options => ({ command: 'cancel', checkpoint: options.checkpoint }),
   ...overrides,
 });
 const invoke = (args, library = stubLibrary()) => {

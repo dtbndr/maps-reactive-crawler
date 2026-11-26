@@ -5,7 +5,7 @@ export type CliIo = { stdout: (text: string) => void; stderr: (text: string) => 
 export type CliLibrary = {
   start: (options: OperatorStartOptions) => Promise<unknown>;
   resume: (options: OperatorResumeOptions) => Promise<unknown>;
-  cancelCheckpoint: (checkpoint: string) => unknown;
+  cancelCheckpoint: (options: { checkpoint: string }) => unknown;
 };
 
 type ParsedCommand =
@@ -88,7 +88,7 @@ export async function runCli(args: string[], library: CliLibrary, io: CliIo): Pr
         io.stderr(`${JSON.stringify({ version: 1, type: 'preflight', geometry: configuration.geometry, limits: configuration.limits })}\n`);
       } });
     } else if (parsed.command === 'resume') result = await library.resume(parsed.options);
-    else result = library.cancelCheckpoint(parsed.checkpoint);
+    else result = library.cancelCheckpoint({ checkpoint: parsed.checkpoint });
     io.stdout(`${JSON.stringify(result)}\n`);
     return 0;
   } catch (error) {

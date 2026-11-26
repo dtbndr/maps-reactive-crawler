@@ -317,6 +317,11 @@ export class DurableState {
     if (value.timeUnit !== 'milliseconds') throw new Error('Durable traversal time unit is unmarked; explicit migration required');
     return value;
   }
+  readTraversalSnapshot(): TraversalState {
+    this.db.exec('BEGIN');
+    try { const snapshot = this.readTraversal(); this.db.exec('COMMIT'); return snapshot; }
+    catch (error) { this.db.exec('ROLLBACK'); throw error; }
+  }
   migrateDurableTimeUnits(activeTime: number, activeTimeLimit: number, evidence: string): void {
     if (!Number.isFinite(activeTime) || activeTime < 0 || !Number.isFinite(activeTimeLimit) || activeTimeLimit < 0 || typeof evidence !== 'string' || !evidence.trim()) throw new Error('Invalid durable time migration');
     this.db.exec('BEGIN IMMEDIATE');
@@ -388,7 +393,12 @@ export class DurableState {
       this.db.exec('COMMIT');
     } catch (error) { this.db.exec('ROLLBACK'); throw error; }
   }
-  close(): void { this.db.prepare('DELETE FROM owner WHERE id=1 AND pid=?').run(process.pid); this.db.close(); }
+  releaseOwner(): void {
+    this.db.exec('BEGIN IMMEDIATE');
+    try { this.db.prepare('DELETE FROM owner WHERE id=1 AND pid=?').run(process.pid); this.db.exec('COMMIT'); }
+    catch (error) { this.db.exec('ROLLBACK'); throw error; }
+  }
+  close(): void { this.releaseOwner(); this.db.close(); }
 }
 export class CancelOnlyAcquisition {
   #db: DatabaseSync;
@@ -400,7 +410,16 @@ export class CancelOnlyAcquisition {
     validateTraversal(state);
     return state;
   }
-  snapshot(): TraversalState { return this.#readTraversal(); }
+  snapshot(): TraversalState {
+    this.#db.exec('BEGIN');
+    try { const snapshot = this.#readTraversal(); this.#db.exec('COMMIT'); return snapshot; }
+    catch (error) { this.#db.exec('ROLLBACK'); throw error; }
+  }
+  releaseOwner(): void {
+    this.#db.exec('BEGIN IMMEDIATE');
+    try { this.#db.prepare('DELETE FROM owner WHERE id=1 AND pid=?').run(process.pid); this.#db.exec('COMMIT'); }
+    catch (error) { this.#db.exec('ROLLBACK'); throw error; }
+  }
   cancel(): TraversalState {
     this.#db.exec('BEGIN IMMEDIATE');
     try {
@@ -413,6 +432,6 @@ export class CancelOnlyAcquisition {
       return next;
     } catch (error) { this.#db.exec('ROLLBACK'); throw error; }
   }
-  close(): void { this.#db.prepare('DELETE FROM owner WHERE id=1 AND pid=?').run(process.pid); this.#db.close(); }
+  close(): void { this.releaseOwner(); this.#db.close(); }
 }
 function isAlive(pid: number): boolean { try { process.kill(pid, 0); return true; } catch (error) { const code = (error as NodeJS.ErrnoException).code; if (code === 'EPERM') return true; if (code === 'ESRCH') return false; throw new Error(`Cannot establish owner PID status: ${code ?? error}`); } }

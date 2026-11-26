@@ -182,7 +182,8 @@ export function parseSyntheticFixture(bytes: Uint8Array): ParsedSyntheticFixture
 }
 
 export type OperatorBlockReason = 'cancelled' | 'paused' | 'recovery-pending' | 'global-gap' | 'parked-only-uncertainty' | 'refuse-unknown-id' | 'refuse-safe-retry' | 'active-time-limit';
-export type OperatorRunResult = { kind: 'completed' | 'partial'; state: import('./traversal.js').TraversalState } | { kind: 'blocked'; reason: OperatorBlockReason; state: import('./traversal.js').TraversalState };
+export type OperatorRunResult = { version: 1; command: 'start' | 'resume'; status: OperatorStatus };
+type InternalRunResult = { kind: 'completed' | 'partial'; state: import('./traversal.js').TraversalState } | { kind: 'blocked'; reason: OperatorBlockReason; state: import('./traversal.js').TraversalState };
 export type OperatorStartOptions = OperatorConfig & { checkpoint: string; fixture: string; onPreflight: (configuration: OperatorConfig) => void; signal?: AbortSignal };
 export type OperatorResumeOptions = { checkpoint: string; fixture: string; limits?: Partial<TraversalLimits>; signal?: AbortSignal };
 
@@ -191,7 +192,7 @@ let discoveryTestOverrides: DiscoveryTestOverrides | undefined;
 /** Private-module test seam; it is intentionally not re-exported from the package entry point. */
 export function setOperatorDiscoveryForTest(overrides: DiscoveryTestOverrides | undefined): void { discoveryTestOverrides = overrides; }
 
-async function executeOperatorDiscovery(state: DurableState, fixture: ParsedSyntheticFixture, signal?: AbortSignal): Promise<OperatorRunResult> {
+async function executeOperatorDiscovery(state: DurableState, fixture: ParsedSyntheticFixture, signal?: AbortSignal): Promise<InternalRunResult> {
   let partial = state.readTraversal().gaps.some(gap => ['failed', 'unrecognized'].includes(gap.cause) && gap.status !== 'resolved' && gap.status !== 'skipped');
   for (;;) {
     const current = state.readTraversal();
@@ -228,13 +229,81 @@ async function executeOperatorDiscovery(state: DurableState, fixture: ParsedSynt
   }
 }
 
-function persistCancellation(checkpoint: string): import('./traversal.js').TraversalState {
-  const acquisition = DurableState.acquireCancelOnly(checkpoint);
-  try { return acquisition.cancel(); } finally { acquisition.close(); }
+export type OperatorStatus = {
+  version: 1;
+  state: 'potentially_interrupted' | 'cancelled' | 'paused' | 'idle';
+  headline: string;
+  conditions: string[];
+  geometry: import('./index.js').Geometry;
+  limits: TraversalLimits;
+  counters: { admitted: number; submissions: number; activeTime: number };
+  frontier: { queued: string[]; running: string[]; parked: string[]; blocked: string[]; discoveryExhausted: boolean };
+  discoveryGaps: { id: string | null; cellKey: string; cause: string; scope: 'isolated' | 'global' | null; status: 'unresolved' | 'resolved' | 'skipped' | null }[];
+  detailGaps: NonNullable<import('./traversal.js').TraversalState['detailGaps']>;
+  pendingDetails: { id: string; identity: string; observationIds: string[]; status: string }[];
+  coverage: { cellCenterEligibility: true; returnedPlacesFiltered: false; exhaustive: false; detailComplete: false };
+};
+
+const lexical = (a: string, b: string): number => a < b ? -1 : a > b ? 1 : 0;
+const nullableLexical = (a: string | null, b: string | null): number => a === null ? b === null ? 0 : -1 : b === null ? 1 : lexical(a, b);
+
+export function projectOperatorStatus(state: import('./traversal.js').TraversalState): OperatorStatus {
+  const decision = classifyOperatorEligibility(state);
+  const conditions = new Set<string>();
+  if (state.blocked.length) conditions.add('cells');
+  if (state.submissions >= state.limits.submissions) conditions.add('submissions');
+  if (state.activeTime >= state.limits.activeTime) conditions.add('active_time');
+  if (state.recoveryPending || state.activeInterval === true || ['refuse-unknown-id', 'refuse-safe-retry', 'parked-only-uncertainty'].includes(decision.kind)) conditions.add('recovery_pending');
+  if (decision.globalGap) conditions.add('global_gap');
+  if (state.cancelled) conditions.add('cancelled');
+  if (state.paused) conditions.add('paused');
+  const sortedConditions = [...conditions].sort();
+  const queued = [...state.queue].sort();
+  const running = Object.entries(state.cells).filter(([, cell]) => cell.outcome === 'running').map(([key]) => key).sort();
+  const parked = Object.entries(state.cells).filter(([, cell]) => cell.outcome === 'parked').map(([key]) => key).sort();
+  const blocked = [...state.blocked].sort();
+  const latestByCell = new Map<string, typeof state.attempts[number]>();
+  for (const attempt of state.attempts) latestByCell.set(attempt.cellKey, attempt);
+  const unresolvedCurrent = [...latestByCell.values()].some(attempt => ['reserved', 'dispatched', 'uncertain', 'observing'].includes(attempt.status));
+  const discoveryExhausted = !queued.length && !running.length && !parked.length && !blocked.length && !unresolvedCurrent;
+  const unresolvedGlobal = state.gaps.some(gap => gap.scope === 'global' && (gap.status ?? 'unresolved') === 'unresolved')
+    || state.detailGaps?.some(gap => gap.status === 'unresolved')
+    || state.detailWork?.some(work => ['reserved', 'dispatched', 'uncertain'].includes(work.status) && !work.attempts.at(-1)?.knownId);
+  const headline = conditions.has('recovery_pending') ? 'recovery_pending'
+    : unresolvedGlobal ? 'global_gap'
+      : state.cancelled ? 'cancelled'
+        : state.paused ? 'paused'
+          : conditions.has('submissions') ? 'submissions'
+            : conditions.has('active_time') ? 'active_time'
+              : conditions.has('cells') ? 'cells'
+                : discoveryExhausted ? 'discovery_exhausted' : 'ready';
+  const outputState = state.recoveryPending || state.activeInterval === true ? 'potentially_interrupted' : state.cancelled ? 'cancelled' : state.paused ? 'paused' : 'idle';
+  return {
+    version: 1, state: outputState, headline, conditions: sortedConditions,
+    geometry: state.geometry, limits: state.limits,
+    counters: { admitted: state.admitted.length, submissions: state.submissions, activeTime: state.activeTime },
+    frontier: { queued, running, parked, blocked, discoveryExhausted },
+    discoveryGaps: state.gaps.map(gap => ({ id: gap.id ?? null, cellKey: gap.cellKey, cause: gap.cause, scope: gap.scope ?? null, status: gap.status ?? null }))
+      .sort((a, b) => lexical(a.cellKey, b.cellKey) || nullableLexical(a.id, b.id) || lexical(a.cause, b.cause) || nullableLexical(a.scope, b.scope) || nullableLexical(a.status, b.status)),
+    detailGaps: (state.detailGaps ?? []).map(gap => ({ ...gap, observationIds: [...gap.observationIds].sort() }))
+      .sort((a, b) => lexical(a.workId, b.workId) || lexical(a.identity, b.identity) || lexical(a.status, b.status)),
+    pendingDetails: (state.detailWork ?? []).filter(work => !['completed', 'skipped'].includes(work.status)).map(work => ({ id: work.id, identity: work.identity, observationIds: [...work.observationIds].sort(), status: work.status }))
+      .sort((a, b) => lexical(a.id, b.id)),
+    coverage: { cellCenterEligibility: true, returnedPlacesFiltered: false, exhaustive: false, detailComplete: false },
+  };
 }
 
-export function cancelCheckpoint(checkpoint: string): import('./traversal.js').TraversalState {
-  return persistCancellation(checkpoint);
+function response<T extends 'start' | 'resume' | 'cancel'>(command: T, snapshot: import('./traversal.js').TraversalState): { version: 1; command: T; status: OperatorStatus } {
+  return { version: 1, command, status: projectOperatorStatus(snapshot) };
+}
+
+export function cancelCheckpoint(options: { checkpoint: string }): { version: 1; command: 'cancel'; status: OperatorStatus } {
+  const acquisition = DurableState.acquireCancelOnly(options.checkpoint);
+  try {
+    acquisition.cancel();
+    acquisition.releaseOwner();
+    return response('cancel', acquisition.snapshot());
+  } finally { acquisition.close(); }
 }
 
 export async function start(options: OperatorStartOptions): Promise<OperatorRunResult> {
@@ -247,8 +316,9 @@ export async function start(options: OperatorStartOptions): Promise<OperatorRunR
   const state = DurableState.openBound(options.checkpoint, fixture.identity);
   try {
     const result = await executeOperatorDiscovery(state, fixture, options.signal);
-    if (result.kind === 'blocked' && result.reason === 'cancelled') return { ...result, state: state.cancel() };
-    return result;
+    if (result.kind === 'blocked' && result.reason === 'cancelled') state.cancel();
+    state.releaseOwner();
+    return response('start', state.readTraversalSnapshot());
   } finally { state.close(); }
 }
 
@@ -271,7 +341,8 @@ export async function resume(options: OperatorResumeOptions): Promise<OperatorRu
       state.writeTraversal({ ...current, limits });
     }
     const result = await executeOperatorDiscovery(state, fixture, options.signal);
-    if (result.kind === 'blocked' && result.reason === 'cancelled') return { ...result, state: state.cancel() };
-    return result;
+    if (result.kind === 'blocked' && result.reason === 'cancelled') state.cancel();
+    state.releaseOwner();
+    return response('resume', state.readTraversalSnapshot());
   } finally { state.close(); }
 }
