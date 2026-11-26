@@ -28,6 +28,7 @@ function state(path) {
       checkpoint: db.prepare('SELECT payload FROM checkpoint').get()?.payload,
       owner: db.prepare('SELECT pid FROM owner').get()?.pid,
       traversal: db.prepare('SELECT payload FROM traversal').get()?.payload,
+      crashPages: tables.has('crash_pages') ? db.prepare('SELECT id, payload FROM crash_pages ORDER BY id').all() : undefined,
     };
   } finally { db.close(); }
 }
@@ -47,14 +48,14 @@ test('bound acquisition rejects a mismatched fixture without logical application
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
-test('bound acquisition validates identity before refusing a live owner', () => {
+test('bound acquisition refuses a live owner with matching identity without logical mutation', () => {
   const { dir, path } = setup();
   try {
     const db = new DatabaseSync(path);
     try { db.prepare('INSERT INTO owner(id,pid) VALUES(1,?)').run(process.pid); }
     finally { db.close(); }
     const before = state(path);
-    assert.throws(() => DurableState.openBound(path, otherIdentity), /fixture|binding|identity/i);
+    assert.throws(() => DurableState.openBound(path, identity), /already owned/i);
     assert.deepEqual(state(path), before);
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
@@ -120,6 +121,7 @@ for (const journalMode of ['DELETE', 'WAL']) {
       const db = new DatabaseSync(path);
       try {
         db.exec(`PRAGMA journal_mode=${journalMode}`);
+        if (journalMode === 'WAL') db.exec('PRAGMA wal_autocheckpoint=0');
         db.exec('CREATE TABLE crash_pages (id INTEGER PRIMARY KEY, payload TEXT NOT NULL)');
         const insert = db.prepare('INSERT INTO crash_pages(payload) VALUES(?)');
         for (let page = 0; page < 256; page++) insert.run('baseline-' + String(page).padEnd(4000, 'x'));
@@ -131,12 +133,18 @@ for (const journalMode of ['DELETE', 'WAL']) {
       const crash = spawnSync(process.execPath, ['--input-type=module', '-e', `
         import { DatabaseSync } from 'node:sqlite';
         const db = new DatabaseSync(process.argv[1]);
-        db.exec('PRAGMA cache_size=1; PRAGMA cache_spill=ON; BEGIN IMMEDIATE');
+        db.exec('PRAGMA cache_size=1; PRAGMA cache_spill=ON');
+        if (process.argv[2] === 'WAL') {
+          db.exec('PRAGMA wal_autocheckpoint=0; BEGIN IMMEDIATE');
+          db.prepare('UPDATE crash_pages SET payload=? WHERE id=1').run('committed-in-wal');
+          db.exec('COMMIT');
+        }
+        db.exec('BEGIN IMMEDIATE');
         for (let page = 1; page <= 256; page++) db.prepare('UPDATE crash_pages SET payload=? WHERE id=?').run('uncommitted-' + String(page).padEnd(4000, 'y'), page);
         db.prepare('UPDATE checkpoint SET payload=? WHERE id=1').run('{"version":1,"work":[{"id":"uncommitted","status":"running"}],"observations":[],"gaps":[]}');
         db.prepare('UPDATE traversal SET payload=? WHERE id=1').run('{"uncommitted":true}');
         process.kill(process.pid, 'SIGKILL');
-      `, path], { encoding: 'utf8' });
+      `, path, journalMode], { encoding: 'utf8' });
       assert.equal(crash.signal, 'SIGKILL');
       const recoveryFile = `${path}${journalMode === 'DELETE' ? '-journal' : '-wal'}`;
       assert.equal(existsSync(recoveryFile), true);
@@ -150,14 +158,30 @@ for (const journalMode of ['DELETE', 'WAL']) {
         const frameSize = pageSize + 24;
         const frameCount = Math.floor((recoveryBytes.length - 32) / frameSize);
         assert.ok(frameCount > 0, 'WAL contains uncommitted transaction frames');
-        assert.equal(recoveryBytes.readUInt32BE(32 + (frameCount - 1) * frameSize + 4), 0, 'last WAL frame has no commit marker');
+        const commitMarkers = Array.from({ length: frameCount }, (_, index) => recoveryBytes.readUInt32BE(32 + index * frameSize + 4));
+        const committedFrame = commitMarkers.findIndex(databaseSize => databaseSize > 0);
+        assert.ok(committedFrame >= 0, 'WAL contains a committed transaction frame');
+        assert.ok(commitMarkers.slice(committedFrame + 1).some(databaseSize => databaseSize === 0), 'later WAL frames belong to an uncommitted transaction');
+        assert.equal(commitMarkers.at(-1), 0, 'last WAL frame has no commit marker');
       }
 
       copyFileSync(path, baselinePath);
       for (const suffix of ['-journal', '-wal', '-shm']) if (existsSync(`${path}${suffix}`)) copyFileSync(`${path}${suffix}`, `${baselinePath}${suffix}`);
       const mainFileBeforeRecovery = readFileSync(baselinePath);
+      let standaloneMainPath;
+      let mainOnlyState;
+      if (journalMode === 'WAL') {
+        standaloneMainPath = join(dir, 'main-only.db');
+        copyFileSync(baselinePath, standaloneMainPath);
+        mainOnlyState = state(standaloneMainPath);
+      }
       const recoveredBaseline = independentlyRecoverState(baselinePath);
       if (journalMode === 'DELETE') assert.notDeepEqual(readFileSync(baselinePath), mainFileBeforeRecovery, 'hot rollback recovery restores the modified main database pages');
+      if (journalMode === 'WAL') {
+        assert.equal(mainOnlyState.crashPages[0].payload, 'baseline-' + String(0).padEnd(4000, 'x'));
+        assert.notDeepEqual(mainOnlyState, recoveredBaseline, 'committed WAL application data makes recovery differ from standalone main file');
+        assert.equal(recoveredBaseline.crashPages[0].payload, 'committed-in-wal');
+      }
       assert.equal(JSON.parse(recoveredBaseline.checkpoint).work.length, 0);
       const recoveredTraversal = JSON.parse(recoveredBaseline.traversal);
       assert.equal(recoveredTraversal.activeInterval, true);
