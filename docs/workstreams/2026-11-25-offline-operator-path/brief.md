@@ -1,7 +1,7 @@
 # Offline Operator Path Workstream Brief
 
 **Date**: 2026-11-25
-**Status**: Approved
+**Status**: Done
 
 ## Why
 Connect the tested offline traversal and durable recovery into a reproducible operator path without implying live-provider readiness.

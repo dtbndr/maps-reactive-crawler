@@ -1,6 +1,10 @@
 # Offline Operator Path Workstream Log
 
 Opt-ins: playback=on, external review=on
+Smoke: skipped (agent-verified)
+Final review: clean (at 0eb4992)
+P2/P3: Two A1 test-quality observations carried forward: whitespace-only identifier assertions may not isolate rejection; nested prototype/duplicate-key tests may fail for unrelated validation reasons. Later whitespace tests were added; recheck current coverage before action.
+Final review follow-up: Operator authorized both fixture consistency and preflight isolation fixes and accepted the fixture fix's missing original behavioral RED; the fixture-replacement test is characterization, not RED. The second targeted alias fix has independent pre-fix behavioral RED and a clean independent re-review. Final verification at 0eb4992: mise install, npm ci, build and check passed, 349/349 tests.
 
 ## 2026-11-26 — B6 review follow-up
 Release and snapshot failure handling now returns errors without retaining a successful response; ownership release verifies one deleted claim, and close attempts the connection close even when release fails. Eligibility and durable execution select recoverable known-ID work only from each cell's latest attempt, leaving superseded attempts as provenance; status v1 explicitly selects nested fields and sorts detail-gap ties by observation-ID sequence. Added independent full-document real-process assertions for blocked resume and clean successful cancel, a true thrown `reserved` boundary test, writer/execution status agreement across pause/cancel/caps/known-ID observation, and persisted provenance verification.
