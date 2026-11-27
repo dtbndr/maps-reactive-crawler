@@ -58,7 +58,7 @@ Maps-specific asynchronous submission and lifecycle evidence remains unverified.
 #### Tasks
 - [ ] Update `docs/research/bright-data-mcp.md` with source URLs, evidence dates, direct HTTP versus SDK comparison, supported claims and gaps. No calls to provider APIs.
 - [ ] In `src/bright-data-discovery.ts`, define explicit asynchronous submit and observe contracts with injected transport and a disabled unsupported route. Implement the real transport branch only where the operation matrix establishes sufficient evidence; keep it unreachable until the production terminal approval gate is complete. Define validation and result classifications only to the extent evidence supports them.
-- [ ] Test zero calls for both start and resume without evidence or separately approved invocation, even with a key; test pricing and rights gates independently. With submission evidence but blocked retrieval, assert zero submissions; known-ID-only mode must never submit.
+- [ ] At the internal operation gate, test zero calls for both start and resume without evidence or separately approved invocation, even with a key; test pricing and rights gates independently. Public-path proofs belong to the consent slice. With submission evidence but blocked retrieval, assert zero submissions; known-ID-only mode must never submit.
 - [ ] Sanitize transport exceptions and provider error text before diagnostics leave the adapter, retaining useful diagnostics without exposing credentials. Add credential-free tests showing missing evidence disables the affected path and that request construction/redaction does not expose credentials. Establish meaningful RED before behavior changes.
 - [ ] Run focused and full checks, distinguish baseline failures, and commit only after slice verification.
 
@@ -78,7 +78,7 @@ Documented contract matrix, adapter seam and explicit blockers.
 - [ ] Characterize `src/durable-discovery.ts` and `src/durable-state.ts`; demonstrate RED for async dispatch ordering, lost acknowledgment, ID persistence and restart. Preserve the synchronous `executeDurableDiscovery` fixture interface and its existing callers throughout this slice; choose a compatible async boundary without weakening existing checks.
 - [ ] Use an injectable restart-meaningful wall-clock epoch source for persisted observation deadline and next-eligible time, separate from monotonic active-time settlement; validate persisted timestamps fail-closed and test restart behavior.
 - [ ] Implement durable reserve/dispatch-before-send, ID-before-observation and explicit evidence-backed recovery. Persist finite observation budgets and deadlines across restart; preserve uncertainty and IDs on exhaustion/cancellation.
-- [ ] Extend `test/durable-discovery.test.mjs` and focused recovery tests for crash before ID persistence, restart after ID persistence, perpetual pending, transient errors and no duplicate submissions. Fresh-process tests must crash after dispatch or observation debit before response, exercise hung requests and cancellation during awaited I/O, and show exhausted known IDs survive without resubmission.
+- [ ] Extend `test/durable-discovery.test.mjs` and focused recovery tests for crash before ID persistence, restart after ID persistence, perpetual pending, transient errors and no duplicate submissions. Fresh-process tests must crash after dispatch or observation debit before response, exercise hung requests and cancellation during awaited I/O, and show exhausted known IDs survive without resubmission. Add deterministic late-success races after observation expiry and local stop, proving neither commits nor expands.
 - [ ] Persist a durable exhaustion disposition that retains the ID and gap but excludes it from ordinary observation selection; test a fresh resume makes no poll or resubmission and returns with the gap visible.
 - [ ] Run focused and full checks, distinguish baseline failures, and commit only after slice verification.
 
@@ -95,7 +95,7 @@ Async lifecycle contract, persisted observation budget and epoch clock, and reco
 **Goal:** Preserve offline compatibility and reject unauthorized or stale resume state before mutation.
 #### Tasks
 - [ ] Consume Slice B observation budget and clock; persist the versioned non-secret execution/query/provider binding and retain fixture binding. Extend read-only checkpoint inspection and cancel-only acquisition for provider bindings while preserving existing fixture checkpoints. Test provider-bound status, export and local cancellation without a key or transport; this does not imply remote cancellation. Test same-ID fresh-process resume and reject changed query and fixture/provider crossover before any mutation or transport.
-- [ ] Implement guarded provider acquisition: atomically re-read binding, intended ID, ownership and effective approved limits before any owner, recovery or limit write. No transaction spans terminal prompting. Denied interrupted resume and changed state between preview and acquisition must leave owner, recovery state and limits unchanged and make zero transport calls. Preserve fixture binding and offline status/export/cancel.
+- [ ] Implement guarded provider acquisition: atomically re-read binding, intended ID, ownership and effective approved limits before any owner, recovery or limit write. No transaction spans terminal prompting. At the acquisition guard seam, denied interrupted resume and changed state between preview and acquisition must leave owner, recovery state and limits unchanged and make zero transport calls; public-path proofs belong to the consent slice. Preserve fixture binding and offline status/export/cancel.
 - [ ] Establish meaningful RED and run focused checks and the full project check; distinguish baseline failures, then commit.
 #### Watch out
 A read-only preview followed by unguarded acquisition is a race.
@@ -122,7 +122,7 @@ Exact-ID executor and normalized scheduler transitions for public wiring.
 #### Tasks
 - [ ] Establish RED in synthetic operator acceptance tests for confirmed seed, keyword, country, explicit bounds, independent caps, expansion and distinct empty/partial/capped/failed outcomes.
 - [ ] Update `src/operator.ts` and `src/cli.ts` to select the contract-gated adapter without weakening fixture compatibility; reject binding mismatches before checkpoint mutation or transport; expose limits, known IDs, uncertainty and coverage limitations. Preflight must explain that the active-time cutoff stops new submissions while known-ID observation may continue only within its separately approved allowance and deadline. Test the cutoff prevents further submissions and observation remains within that allowance and deadline. In a submission-capable synthetic run with queued work, spare submission and cell capacity, and an eligible new neighbor, cross the active-time cutoff during known-ID observation while still inside its deadline. Return a confirmed nonempty result; assert result and provenance commit, the new neighbor is blocked, the existing queue is untouched, the stop reason is visible, and no new reservation or send occurs. Keep the known-ID-only test separate. Retain candidate provenance without claiming identity.
-- [ ] Implement library-owned fresh approval and CLI terminal confirmation after preview, requiring visible terminal preview before fresh response and rejecting pre-buffered input, unavailable preview, EOF, decline, interruption, absent terminal, piped confirmation and replay even for identical arguments; synthetic public-entry tests prove all fail closed. At actual start and resume entry points check authorization against effective invocation and submission, observation and stop limits before dispatch, checkpoint creation, or persistence of increased limits. Test zero calls and no checkpoint creation or limit mutation for unapproved start and resume and for resume with increased limits exceeding approval. Known-ID-only resume must not submit. With other gates synthetically satisfied, direct library invocation and injected affirmative callbacks must not reach a transport spy or mutate a checkpoint.
+- [ ] With two eligible known IDs, queued work and submission capacity remaining, test public fresh-process known-ID-only resume observes only the approved ID, makes zero submission calls and neither dequeues nor dispatches existing queued work, while a nonempty recovered result may append eligible neighbors.
 - [ ] Preserve the exact v1 fixture `OperatorStatus` and fixture preflight shapes, including existing exact-shape tests; omit provider-only fields for fixture checkpoints. Project exhausted observation IDs and their parked gaps without falsely reporting ready; test eligibility and status.
 - [ ] Test a CLI-level synthetic transport failure containing a fake key in its error: useful diagnostics remain while neither CLI output nor persisted state exposes the key.
 - [ ] Update `README.md` for BYOK, direct API notice, optional MCP and unresolved live-use, cost and rights gates; never include actual credentials.
@@ -135,15 +135,27 @@ Fixture success is not provider validation; no detail collection or geocoding. R
 `mise exec -- node --test test/operator-acceptance.test.mjs test/operator-cli.test.mjs test/bright-data-discovery.test.mjs`; `mise exec -- npm run check`.
 
 #### Carry-forward
-Credential-free acceptance evidence and explicit remaining contract blockers for later workstreams.
+Credential-free wiring evidence; real transport remains disabled pending production consent.
 
-### Slice C1: Operator reconciliation and local stop
-**Goal:** Complete operator recovery and interruption using Slice C approval and projection.
+### Slice C1: Production consent
+**Goal:** Deliver the terminal-only public approval boundary.
+#### Tasks
+- [ ] Establish focused RED for public consent bypasses before implementation.
+- [ ] Implement library-owned fresh approval and CLI terminal confirmation after preview, requiring visible terminal preview before fresh response and rejecting pre-buffered input, unavailable preview, EOF, decline, interruption, absent terminal, piped confirmation and replay even for identical arguments; synthetic public-entry tests prove all fail closed. At actual start and resume entry points check authorization against effective invocation and submission, observation and stop limits before dispatch, checkpoint creation, or persistence of increased limits. Test zero calls and no checkpoint creation or limit mutation for unapproved start and resume and for resume with increased limits exceeding approval. Known-ID-only resume must not submit. With other gates synthetically satisfied, direct library invocation and injected affirmative callbacks must not reach a transport spy or mutate a checkpoint.
+- [ ] Run focused and full checks and commit after verification.
+#### Watch out
+No supported automatic approval path; a TTY does not authenticate a human.
+#### Verification
+`mise exec -- npm run build`; `mise exec -- node --test test/operator-acceptance.test.mjs test/operator-cli.test.mjs`; `mise exec -- npm run check`.
+#### Carry-forward
+Production terminal consent and guarded public entry points.
+
+### Slice C2: Operator reconciliation
+**Goal:** Complete operator recovery using Slice C1 approval and projection.
 
 #### Tasks
-- [ ] Establish focused RED for each reconciliation and stop contract before implementation.
-- [ ] Expose a minimal supported operator reconciliation interface using the existing evidence-bearing active-time debit, never bypassing recoveryPending. Through that interface test fresh-process resume refuses transport before reconciliation, then after evidenced debit and separately approved invocation observes the same ID within remaining allowance without resubmission. With two eligible known IDs, queued work and submission capacity remaining, test only the approved ID is observed; also test through fresh-process public resume with a nonempty result that known-ID-only mode observes that ID, makes zero submission calls and neither dequeues nor dispatches existing queued work, while allowing eligible neighbors from the recovered result to be appended.
-- [ ] Wire a supported local CLI stop such as SIGINT through the abort signal during awaited I/O. In a child-process CLI test, send SIGINT after a hung synthetic observation starts; prove the observation receives the abort and the CLI exits through its handled stop path within a bounded time. Assert no further outbound requests and a visible known ID and gap; do not claim remote cancellation.
+- [ ] Establish focused RED for reconciliation before implementation.
+- [ ] Expose a minimal supported operator reconciliation interface using the existing evidence-bearing active-time debit, never bypassing recoveryPending. Through that interface test fresh-process resume refuses transport before reconciliation, then after evidenced debit and separately approved invocation observes the same ID within remaining allowance without resubmission.
 - [ ] Run focused and full checks and commit after verification.
 
 #### Watch out
@@ -153,4 +165,17 @@ Local stop does not imply remote cancellation.
 `mise exec -- npm run build`; `mise exec -- node --test test/operator-acceptance.test.mjs test/operator-cli.test.mjs`; `mise exec -- npm run check`.
 
 #### Carry-forward
-Verified operator reconciliation and local stop behavior.
+Verified operator reconciliation and same-ID observation without resubmission.
+
+### Slice C3: Local interruption
+**Goal:** Provide an independently verified local stop during awaited I/O.
+#### Tasks
+- [ ] Establish focused RED for the public interruption path before implementation.
+- [ ] Wire a supported local CLI stop such as SIGINT through the abort signal during awaited I/O. In a child-process CLI test, send SIGINT after a hung synthetic observation starts; prove the observation receives the abort and the CLI exits through its handled stop path within a bounded time. Assert no further outbound requests and a visible known ID and gap; do not claim remote cancellation.
+- [ ] Run focused and full checks and commit after verification.
+#### Watch out
+Local stop does not imply remote cancellation.
+#### Verification
+`mise exec -- npm run build`; `mise exec -- node --test test/operator-acceptance.test.mjs test/operator-cli.test.mjs`; `mise exec -- npm run check`.
+#### Carry-forward
+Verified local stop and explicit remaining contract blockers.
