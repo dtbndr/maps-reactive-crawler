@@ -133,3 +133,19 @@ This is coverage-only; no new behavior is intended, so no RED is claimed. Before
 - `git diff --check` — passed.
 
 Files changed this round: `test/bright-data-discovery.test.mjs`, this report. No source behavior changed; test inputs are synthetic. No credentials or provider calls were used. No staged files existed before committing this round.
+
+## Fix round 2 — gate-specific rejection assertions
+
+Ruling: Keep this correction coverage-only and assert each gate's explicit rejection reason in addition to zero transport calls — the adapter already distinguishes invocation approval, observation evidence, pricing approval, and rights approval, but generic `kind: unsupported` assertions also pass through the final generic disabled-transport fallback if a relevant gate check is removed — if wrong, a reason assertion could couple tests to a diagnostic contract; here those specific reasons are the only reliable way to prove each gate independently blocks an otherwise eligible operation, and cost is limited to updating tests if the wording legitimately changes.
+
+Strengthened the isolated invocation-approval case for both start and resume, the resume observation-evidence case, and independent pricing and rights cases. Each now asserts the exact gate-specific rejection reason and zero transport calls. Start cases use a fully populated bounded request with radius and independent work limits. Pricing and rights cases enable every other applicable gate. Test evidence is synthetic and does not enable transport.
+
+Coverage-only before/after evidence; no behavior change or RED is claimed:
+
+- Before test edit: `mise exec -- npm run build` — passed; `mise exec -- node --test test/bright-data-discovery.test.mjs` — 10 passed, 0 failed.
+- After test edit: `mise exec -- npm run build && mise exec -- node --test test/bright-data-discovery.test.mjs` — build passed; focused suite 10 passed, 0 failed. The newly required specific reasons distinguish a gate rejection from the generic unsupported fallback, so deleting an individual applicable guard makes the corresponding assertion fail.
+- `mise exec -- npm run check` — passed; project typecheck, complete test suite and build passed.
+- `mise exec -- npm test` — 359 passed, 0 failed, 0 skipped.
+- `git diff --check` — passed.
+
+Files changed this round: `test/bright-data-discovery.test.mjs`, this report. No source behavior changed; test inputs are synthetic. No credentials or provider calls were used. No staged files existed before committing this round.

@@ -30,6 +30,15 @@ test('start and resume do not call transport without production evidence and inv
   assert.equal(calls, 0);
 });
 
+const validBoundedStartRequest = {
+  keyword: 'coffee',
+  country: 'US',
+  lat: 1,
+  lon: 2,
+  bounds: { radiusMeters: 1000 },
+  limits: { cells: 10, submissions: 10, activeMilliseconds: 60_000 },
+};
+
 test('start and resume do not call transport without invocation approval when other gates pass', async () => {
   const create = requireAdapter();
   let calls = 0;
@@ -43,8 +52,14 @@ test('start and resume do not call transport without invocation approval when ot
     },
   });
 
-  assert.equal((await adapter.start({ keyword: 'coffee', country: 'US', lat: 1, lon: 2 })).kind, 'unsupported');
-  assert.equal((await adapter.resume({ id: 'run-1' })).kind, 'unsupported');
+  assert.deepEqual(await adapter.start(validBoundedStartRequest), {
+    kind: 'unsupported',
+    reason: 'Provider invocation approval is absent',
+  });
+  assert.deepEqual(await adapter.resume({ id: 'run-1' }), {
+    kind: 'unsupported',
+    reason: 'Provider invocation approval is absent',
+  });
   assert.equal(calls, 0);
 });
 
@@ -61,7 +76,10 @@ test('resume does not call transport without observation evidence when other gat
     },
   });
 
-  assert.equal((await adapter.resume({ id: 'run-1' })).kind, 'unsupported');
+  assert.deepEqual(await adapter.resume({ id: 'run-1' }), {
+    kind: 'unsupported',
+    reason: 'Observation contract evidence is absent',
+  });
   assert.equal(calls, 0);
 });
 
@@ -118,8 +136,17 @@ test('pricing and rights gates independently disable provider operations', async
           async observe() { calls++; return { state: 'ready' }; },
         },
       });
-      assert.equal((await adapter.start({ keyword: 'coffee', country: 'US', lat: 1, lon: 2 })).kind, 'unsupported');
-      assert.equal((await adapter.resume({ id: 'known-run' })).kind, 'unsupported');
+      const expectedReason = approvals.pricing
+        ? 'Data-rights approval is absent'
+        : 'Pricing approval is absent';
+      assert.deepEqual(await adapter.start(validBoundedStartRequest), {
+        kind: 'unsupported',
+        reason: expectedReason,
+      });
+      assert.deepEqual(await adapter.resume({ id: 'known-run' }), {
+        kind: 'unsupported',
+        reason: expectedReason,
+      });
       assert.equal(calls, 0);
     });
   }
