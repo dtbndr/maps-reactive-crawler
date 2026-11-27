@@ -75,6 +75,34 @@ test('pre-dispatch active cutoff reports a gap and makes zero submit calls', asy
     assert.deepEqual(result, { kind: 'gap', reason: 'active-time-cutoff' });
   } finally { Date.now = original; }
 });
+test('pre-dispatch request deadline prevents submit and observation', async () => {
+  const original = Date.now;
+  let reads = 0;
+  let submissions = 0;
+  let observations = 0;
+  const transport = {
+    submit: async () => { submissions++; return { status: 202, body: { snapshot_id: 'id' } }; },
+    observe: async () => { observations++; return { status: 200, body: { status: 'ready' } }; },
+  };
+  try {
+    Date.now = () => ++reads <= 2 ? 100 : 111;
+    const submission = await handoff.submitOnce(transport, request, { requestMilliseconds: 10, activeUntil: 200 });
+    assert.equal(submissions, 0);
+    assert.deepEqual(submission, { kind: 'gap', reason: 'submission-timeout' });
+    assert.equal(observations, 0);
+  } finally { Date.now = original; }
+});
+test('pre-dispatch request deadline prevents observation', async () => {
+  const original = Date.now;
+  let reads = 0;
+  let observations = 0;
+  Date.now = () => ++reads <= 2 ? 100 : 111;
+  try {
+    const result = await handoff.observeOnce({ observe: async () => { observations++; return { status: 200, body: { status: 'ready' } }; } }, 'id', { requestMilliseconds: 10, activeUntil: 200 });
+    assert.equal(observations, 0);
+    assert.deepEqual(result, { kind: 'gap', reason: 'observation-timeout' });
+  } finally { Date.now = original; }
+});
 test('malformed dispatched submission at active cutoff remains uncertain', async () => {
   const original = Date.now;
   let now = 100;
