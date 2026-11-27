@@ -1,7 +1,8 @@
 import { DatabaseSync } from 'node:sqlite';
 import { closeSync, linkSync, lstatSync, mkdtempSync, openSync, rmSync } from 'node:fs';
 import { join, basename, dirname } from 'node:path';
-import type { TraversalState } from './traversal.js';
+import type { TraversalLimits, TraversalState } from './traversal.js';
+import { effectiveResumeLimits, providerResumeFingerprint } from './provider-resume-fingerprint.js';
 import { cellKey, isCellEligible, validateGeometry } from './index.js';
 import { cancelTraversal } from './traversal.js';
 
@@ -257,7 +258,16 @@ export class DurableState {
       throw error;
     }
   }
+  /** Concurrency guard only: a fingerprint never authorizes provider access. */
+  static openProviderGuarded(path: string, binding: ProviderBinding, requested: Partial<TraversalLimits>, fingerprint: string): DurableState {
+    if (typeof fingerprint !== 'string' || !/^[a-f0-9]{64}$/.test(fingerprint)) throw new Error('Invalid resume fingerprint');
+    if (requestedBinding(binding).version !== 2) throw new Error('Checkpoint is not provider-bound');
+    return DurableState.openBoundInternal(path, binding, { requested, fingerprint });
+  }
   static openBound(path: string, fixtureIdentity: string | ProviderBinding): DurableState {
+    return DurableState.openBoundInternal(path, fixtureIdentity);
+  }
+  private static openBoundInternal(path: string, fixtureIdentity: string | ProviderBinding, guard?: { requested: Partial<TraversalLimits>; fingerprint: string }): DurableState {
     const operatorBinding = requestedBinding(fixtureIdentity);
     const db = new DatabaseSync(path);
     try {
@@ -277,6 +287,13 @@ export class DurableState {
       validateTraversal(traversal);
       if (traversal.timeUnit !== 'milliseconds') throw new Error('Durable traversal time unit is unmarked; explicit migration required');
       const owner = db.prepare('SELECT pid FROM owner WHERE id=1').get();
+      if (guard) {
+        if (parsedBinding.version !== 2) throw new Error('Checkpoint is not provider-bound');
+        const pid = owner ? owner.pid : null;
+        if (pid !== null && (typeof pid !== 'number' || !Number.isSafeInteger(pid) || pid < 1 || pid > 2147483647)) throw new Error('Corrupt state: invalid owner PID');
+        const limits = effectiveResumeLimits(traversal, guard.requested);
+        if (providerResumeFingerprint(parsedBinding, traversal, String(checkpoint.payload), pid as number | null, limits) !== guard.fingerprint) throw new Error('Stale resume preview');
+      }
       let recoveredPreviousOwner = false;
       afterOwnerReadForTest?.();
       if (owner) {

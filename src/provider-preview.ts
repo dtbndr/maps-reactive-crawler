@@ -1,6 +1,7 @@
-import { createHash } from 'node:crypto';
 import { readOnlyBoundSnapshot, type ProviderBinding } from './durable-state.js';
 import { validateOperatorConfig, type OperatorConfig } from './operator.js';
+import { effectiveResumeLimits, providerResumeFingerprint } from './provider-resume-fingerprint.js';
+export { effectiveResumeLimits } from './provider-resume-fingerprint.js';
 import type { TraversalLimits, TraversalState } from './traversal.js';
 
 type Document = Record<string, unknown> & { reference: string; date: string; scope: string };
@@ -52,20 +53,6 @@ export function previewProviderResume(path: string, requested: Partial<Traversal
   const snapshot = readOnlyBoundSnapshot(path);
   if (snapshot.binding.version !== 2) throw new Error('Checkpoint is not provider-bound');
   const limits = effectiveResumeLimits(snapshot.traversal, requested);
-  const fingerprint = createHash('sha256').update(JSON.stringify({ version: 1, binding: snapshot.binding, traversal: snapshot.traversal, checkpoint: snapshot.checkpointPayload, ownerPid: snapshot.ownerPid, limits })).digest('hex');
+  const fingerprint = providerResumeFingerprint(snapshot.binding, snapshot.traversal, snapshot.checkpointPayload, snapshot.ownerPid, limits);
   return { binding: snapshot.binding, geometry: snapshot.traversal.geometry, limits, knownIds: snapshot.traversal.attempts.filter(a => a.knownId !== undefined).map(a => ({ attemptId: a.id, id: a.knownId! })), gaps: snapshot.traversal.gaps, fingerprint, authorization: 'not-authorized' };
-}
-
-/** Apply exactly the same limit policy used by synthetic resume. */
-export function effectiveResumeLimits(state: TraversalState, requested: Partial<TraversalLimits>): TraversalLimits {
-  if (!object(requested)) throw new Error('Invalid resume limits');
-  for (const key of Object.keys(requested)) {
-    if (!['cells', 'submissions', 'activeTime'].includes(key)) throw new Error('Invalid resume limit name');
-    const name = key as keyof TraversalLimits;
-    const value = requested[name];
-    if (typeof value !== 'number' || !Number.isSafeInteger(value) || value <= state.limits[name]) throw new Error(`Resume ${key} limit must strictly increase`);
-  }
-  const limits = { ...state.limits, ...requested };
-  validateOperatorConfig({ geometry: state.geometry, limits });
-  return limits;
 }

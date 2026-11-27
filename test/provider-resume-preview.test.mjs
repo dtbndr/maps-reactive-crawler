@@ -68,3 +68,37 @@ test('preview limits match effective synthetic resume and preview performs no tr
     assert.deepEqual(resumed.status.limits, updatedPreview.limits); assert.equal(calls, 0);
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
+
+test('guarded acquisition rejects stale state without writes and accepts unchanged preview', () => withDb(path => {
+  const requested = { submissions: 9 };
+  const preview = previewProviderResume(path, requested);
+  const db = new DatabaseSync(path);
+  const state = JSON.parse(db.prepare('SELECT payload FROM traversal').get().payload);
+  state.paused = true;
+  db.prepare('UPDATE traversal SET payload=?').run(JSON.stringify(state)); db.close();
+  const before = rows(path);
+  assert.throws(() => DurableState.openProviderGuarded(path, binding, requested, preview.fingerprint), /stale/i);
+  assert.deepEqual(rows(path), before);
+  for (const fingerprint of ['', 'a'.repeat(63), null]) {
+    assert.throws(() => DurableState.openProviderGuarded(path, binding, requested, fingerprint));
+    assert.deepEqual(rows(path), before);
+  }
+  const fresh = previewProviderResume(path, requested);
+  assert.throws(() => DurableState.openProviderGuarded(path, binding, { submissions: 10 }, fresh.fingerprint), /stale/i);
+  assert.throws(() => DurableState.openProviderGuarded(path, { ...binding, keyword: 'other' }, requested, fresh.fingerprint), /binding/i);
+  assert.deepEqual(rows(path), before);
+  const acquired = DurableState.openProviderGuarded(path, binding, requested, fresh.fingerprint);
+  assert.deepEqual(acquired.providerBinding(), binding); acquired.close();
+}));
+test('guard detects checkpoint and owner changes before recovery writes', () => withDb(path => {
+  for (const mutate of [
+    db => db.prepare('UPDATE checkpoint SET payload=?').run(JSON.stringify({ version: 1, work: [], observations: ['changed'], gaps: [] })),
+    db => db.prepare('INSERT INTO owner VALUES(1, ?)').run(2147483647),
+  ]) {
+    const preview = previewProviderResume(path);
+    const db = new DatabaseSync(path); mutate(db); db.close();
+    const before = rows(path);
+    assert.throws(() => DurableState.openProviderGuarded(path, binding, {}, preview.fingerprint), /stale/i);
+    assert.deepEqual(rows(path), before);
+  }
+}));
