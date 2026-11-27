@@ -104,17 +104,29 @@ A read-only preview followed by unguarded acquisition is a race.
 #### Carry-forward
 Guarded acquisition and versioned non-secret binding for operator approval.
 
-### Slice B2: Scheduler and exact-ID transitions
-**Goal:** Deliver independently verified result and exact-ID executor semantics.
+### Slice B2: Exact-ID selection
+**Goal:** Deliver independently verified exact-ID executor selection.
 #### Tasks
-- [ ] Deliver and test in the shared executor an exact-ID-only observation mode that cannot fall back to submission or other work, including with queued work and spare capacity. Define and test normalized scheduler transitions for partial and capped results: retain candidates and gap without expansion; confirmed raw-nonempty success expands subject to existing admission limits even if duplicate-only. Test frontier, provenance and final status together; preserve candidate-to-`detailWork` linkage and update checkpoint validation for supported new outcomes and gap causes.
+- [ ] Deliver and test in the shared executor an exact-ID-only observation mode that cannot fall back to submission or other work, including with queued work and spare capacity.
 - [ ] Establish meaningful RED and run focused and full checks before committing; retain the synchronous fixture interface.
 #### Watch out
 Do not conflate partial results with successful empty or complete outcomes.
 #### Verification
 `mise exec -- npm run build`; `mise exec -- node --test test/durable-discovery.test.mjs test/durable-recovery.test.mjs`; `mise exec -- npm run check`.
 #### Carry-forward
-Exact-ID executor and normalized scheduler transitions for public wiring.
+Exact-ID executor for public wiring.
+
+### Slice B3: Scheduler result transitions
+**Goal:** Deliver independently verified result transitions.
+#### Tasks
+- [ ] Establish focused RED, then define and test normalized scheduler transitions for partial and capped results: retain candidates and gap without expansion; confirmed raw-nonempty success expands subject to existing admission limits even if duplicate-only. Test frontier, provenance and final status together; preserve candidate-to-`detailWork` linkage and update checkpoint validation for supported new outcomes and gap causes.
+- [ ] Run focused and full checks and commit after verification.
+#### Watch out
+Do not conflate partial results with successful empty or complete outcomes.
+#### Verification
+`mise exec -- npm run build`; `mise exec -- node --test test/durable-discovery.test.mjs test/durable-recovery.test.mjs`; `mise exec -- npm run check`.
+#### Carry-forward
+Normalized scheduler transitions for public wiring.
 
 ### Slice C: Bounded operator discovery
 **Goal:** Wire the supported operator inputs to discovery when verified, and report blockers safely otherwise.
@@ -122,7 +134,7 @@ Exact-ID executor and normalized scheduler transitions for public wiring.
 #### Tasks
 - [ ] Establish RED in synthetic operator acceptance tests for confirmed seed, keyword, country, explicit bounds, independent caps, expansion and distinct empty/partial/capped/failed outcomes.
 - [ ] Update `src/operator.ts` and `src/cli.ts` to select the contract-gated adapter without weakening fixture compatibility; reject binding mismatches before checkpoint mutation or transport; expose limits, known IDs, uncertainty and coverage limitations. Preflight must explain that the active-time cutoff stops new submissions while known-ID observation may continue only within its separately approved allowance and deadline. Test the cutoff prevents further submissions and observation remains within that allowance and deadline. In a submission-capable synthetic run with queued work, spare submission and cell capacity, and an eligible new neighbor, cross the active-time cutoff during known-ID observation while still inside its deadline. Return a confirmed nonempty result; assert result and provenance commit, the new neighbor is blocked, the existing queue is untouched, the stop reason is visible, and no new reservation or send occurs. Keep the known-ID-only test separate. Retain candidate provenance without claiming identity.
-- [ ] With two eligible known IDs, queued work and submission capacity remaining, test public fresh-process known-ID-only resume observes only the approved ID, makes zero submission calls and neither dequeues nor dispatches existing queued work, while a nonempty recovered result may append eligible neighbors.
+- [ ] Use a credential-free synthetic operator wiring seam to exercise selection while real transport remains disabled; this seam must not authorize or reach real transport. With two eligible known IDs, queued work and submission capacity remaining, test public fresh-process known-ID-only resume observes only the approved ID, makes zero submission calls and neither dequeues nor dispatches existing queued work, while a nonempty recovered result may append eligible neighbors.
 - [ ] Preserve the exact v1 fixture `OperatorStatus` and fixture preflight shapes, including existing exact-shape tests; omit provider-only fields for fixture checkpoints. Project exhausted observation IDs and their parked gaps without falsely reporting ready; test eligibility and status.
 - [ ] Test a CLI-level synthetic transport failure containing a fake key in its error: useful diagnostics remain while neither CLI output nor persisted state exposes the key.
 - [ ] Update `README.md` for BYOK, direct API notice, optional MCP and unresolved live-use, cost and rights gates; never include actual credentials.
@@ -142,6 +154,7 @@ Credential-free wiring evidence; real transport remains disabled pending product
 #### Tasks
 - [ ] Establish focused RED for public consent bypasses before implementation.
 - [ ] Implement library-owned fresh approval and CLI terminal confirmation after preview, requiring visible terminal preview before fresh response and rejecting pre-buffered input, unavailable preview, EOF, decline, interruption, absent terminal, piped confirmation and replay even for identical arguments; synthetic public-entry tests prove all fail closed. At actual start and resume entry points check authorization against effective invocation and submission, observation and stop limits before dispatch, checkpoint creation, or persistence of increased limits. Test zero calls and no checkpoint creation or limit mutation for unapproved start and resume and for resume with increased limits exceeding approval. Known-ID-only resume must not submit. With other gates synthetically satisfied, direct library invocation and injected affirmative callbacks must not reach a transport spy or mutate a checkpoint.
+- [ ] Exercise the actual terminal path with a synthetic transport downstream of authorization: after a visible preview and fresh affirmative, prove guarded acquisition and the approved operation occur. Do not inject an approval or enable real transport for this test.
 - [ ] Run focused and full checks and commit after verification.
 #### Watch out
 No supported automatic approval path; a TTY does not authenticate a human.
