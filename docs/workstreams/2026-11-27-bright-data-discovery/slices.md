@@ -29,6 +29,10 @@ No credentials in fixtures, logs, checkpoints or outputs. MCP is optional agenti
 - Bound scheduled cell centers, not returned places; report non-exhaustive coverage and unresolved gaps. Discovery observations are candidates, not verified identities. Preserve successful empty versus failed, malformed, partial and capped outcomes without converting uncertainty to completeness.
 - BYOK means `BRIGHT_DATA_API_KEY` comes from the operator; never read or expose the actual local key in planning, tests, logs or checkpoints. Explicitly document direct API use. Synthetic inputs and responses do not validate live behavior, pricing or rights. Applicable pricing, rights and provider recovery semantics remain separately gated.
 
+- Evidence and invocation are distinct gates: classify each operation (request/authentication, acknowledgement/errors, observation, retrieval, and optional retry/lookup/cancellation) as buildable from dated versioned evidence, blocked, or requiring redesigned brief and reapproval. Slice A owns the matrix and evidence-supported transport; SDK uncertainty never licenses guessing. Both real start and resume make zero transport calls without sufficient evidence and separately approved live invocation, even when a key is present. Pricing and rights are independent gates; synthetic tests prove neither. Brief approval authorizes implementation only, not provider calls.
+- Debit a durable observation allowance before every outbound observation request, including the first, pending polls, retries, and each supported retrieval page. Persist deadline and next-eligible time without reset on restart, separately from monotonic active-time settlement. Preserve exclusive ownership across awaits and fail closed on unaccounted active time. A hung request or local cancellation retains the ID and gap; submission and active-time limits stop new work but do not themselves abandon authorized budgeted observation.
+- Bind each checkpoint to versioned non-secret execution mode, normalized query and provider operation/contract; preserve fixture digest binding. Reject changed query, provider contract or fixture/provider crossover before transport or checkpoint mutation; never persist or hash the key as a binding.
+- Preserve expansion on confirmed raw-nonempty success even when all results are duplicates. Partial or capped results retain candidate provenance and a visible final gap but do not expand; change this only with separate evidence and approval. Unrecognized outcomes never become successful empty or complete. Test frontier, provenance and final status together.
 ### Implementation discretion
 Local helper names, type spelling, synthetic data values and internal decomposition, provided the boundaries above remain intact.
 
@@ -38,7 +42,8 @@ Maps-specific asynchronous submission and lifecycle evidence remains unverified.
 ## Final verification
 - [ ] `mise install`
 - [ ] `mise exec -- npm ci`
-- [ ] `mise exec -- npm run check` (project tests, type, lint and formatting checks as configured); all required checks must pass.
+- [ ] `mise exec -- npm run build` before each focused RED/GREEN test run and before the full check; tests import untracked `dist/`, so missing or stale artifacts are not meaningful RED.
+- [ ] `mise exec -- npm run check` (typecheck, tests and build; no lint or formatter in the current script); all required checks must pass. Record verified unchanged baseline failures separately.
 
 ## Slices
 
@@ -47,7 +52,8 @@ Maps-specific asynchronous submission and lifecycle evidence remains unverified.
 
 #### Tasks
 - [ ] Update `docs/research/bright-data-mcp.md` with source URLs, evidence dates, direct HTTP versus SDK comparison, supported claims and gaps. No calls to provider APIs.
-- [ ] In `src/bright-data-discovery.ts`, define explicit asynchronous submit and observe contracts with injected transport and a disabled unsupported route. Define validation and result classifications only to the extent evidence supports them.
+- [ ] In `src/bright-data-discovery.ts`, define explicit asynchronous submit and observe contracts with injected transport and a disabled unsupported route. Implement the real transport branch only where the operation matrix establishes sufficient evidence; otherwise keep it disabled. Define validation and result classifications only to the extent evidence supports them.
+- [ ] Test zero calls for both start and resume without evidence or separately approved invocation, even with a key; test pricing and rights gates independently.
 - [ ] Add credential-free tests showing missing evidence disables the affected path and that request construction/redaction does not expose credentials. Establish meaningful RED before behavior changes.
 - [ ] Run focused and full checks, distinguish baseline failures, and commit only after slice verification.
 
@@ -66,7 +72,8 @@ Documented contract matrix, adapter seam and explicit blockers.
 #### Tasks
 - [ ] Characterize `src/durable-discovery.ts` and `src/durable-state.ts`; demonstrate RED for async dispatch ordering, lost acknowledgment, ID persistence and restart.
 - [ ] Implement durable reserve/dispatch-before-send, ID-before-observation and explicit evidence-backed recovery. Persist finite observation budgets and deadlines across restart; preserve uncertainty and IDs on exhaustion/cancellation.
-- [ ] Extend `test/durable-discovery.test.mjs` and focused recovery tests for crash before ID persistence, restart after ID persistence, perpetual pending, transient errors and no duplicate submissions.
+- [ ] Extend `test/durable-discovery.test.mjs` and focused recovery tests for crash before ID persistence, restart after ID persistence, perpetual pending, transient errors and no duplicate submissions. Fresh-process tests must crash after dispatch or observation debit before response, exercise hung requests and cancellation during awaited I/O, and show exhausted known IDs survive without resubmission.
+- [ ] Persist the versioned non-secret execution/query/provider binding and observation debits, deadline and next-eligible time; retain fixture binding. Test same-ID fresh-process resume and reject changed query and fixture/provider crossover before any mutation or transport.
 - [ ] Run focused and full checks, distinguish baseline failures, and commit only after slice verification.
 
 #### Watch out
@@ -83,7 +90,8 @@ Async lifecycle contract, persistent observation budget and recovery transitions
 
 #### Tasks
 - [ ] Establish RED in synthetic operator acceptance tests for confirmed seed, keyword, country, explicit bounds, independent caps, expansion and distinct empty/partial/capped/failed outcomes.
-- [ ] Update `src/operator.ts` and `src/cli.ts` to select the contract-gated adapter without weakening fixture compatibility; expose limits, known IDs, uncertainty and coverage limitations. Retain candidate provenance without claiming identity.
+- [ ] Update `src/operator.ts` and `src/cli.ts` to select the contract-gated adapter without weakening fixture compatibility; reject binding mismatches before checkpoint mutation or transport; expose limits, known IDs, uncertainty and coverage limitations. Retain candidate provenance without claiming identity.
+- [ ] Define normalized scheduler transitions for partial and capped results: retain candidates and gap, do not expand. Confirmed raw-nonempty success expands even if duplicate-only. Test frontier, provenance and final status together.
 - [ ] Update `README.md` for BYOK, direct API notice, optional MCP and unresolved live-use, cost and rights gates; never include actual credentials.
 - [ ] Run focused and full checks, distinguish baseline failures, and commit only after slice verification.
 
