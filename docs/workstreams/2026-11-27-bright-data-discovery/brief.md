@@ -1,7 +1,7 @@
 # Bright Data Discovery Workstream Brief
 
 **Date**: 2026-11-27
-**Status**: Planned
+**Status**: Approved
 
 ## Why
 Connect the bounded crawler to operator-funded discovery without hiding uncertain paid work or claiming unverified provider behavior.
