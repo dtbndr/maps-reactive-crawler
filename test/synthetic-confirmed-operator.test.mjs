@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, rmSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { runConfirmedSyntheticOperator } from '../dist/synthetic-confirmed-operator.js';
+import { runConfirmedSyntheticOperator } from './support/synthetic-confirmed-operator.mjs';
 import { previewProviderResume } from '../dist/provider-preview.js';
 import { DurableState } from '../dist/durable-state.js';
 import { createTraversal } from '../dist/traversal.js';
