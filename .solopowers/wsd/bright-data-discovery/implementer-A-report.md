@@ -44,7 +44,7 @@ Additional TDD round — diagnostic red, recorded before restoring the sanitizer
 ```text
 ✖ provider diagnostic sanitizer preserves useful text and removes credentials
 AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
-+ actual - expected
++ actual
 + 'undefined'
 - 'function'
   at TestContext.<anonymous> (test/bright-data-discovery.test.mjs:95:10)
@@ -81,3 +81,55 @@ Commits created:
 - `91f13f1 test: specify fail-closed Bright Data discovery boundary`
 - `ecd68f8 feat: add fail-closed Bright Data discovery adapter`
 - Final report commit records the verified commit list and check results.
+
+## Evidence correction — standard-tier review
+
+**Status: BLOCKED.** Review of the recorded execution/report and available Git history found no genuine pre-implementation behavioral RED evidence. The prior RED descriptions above are not valid behavioral REDs and must not be cited as proof that the intended behaviors failed:
+
+- The initial command recorded was `mise exec -- node --test test/bright-data-discovery.test.mjs`. Its excerpt was `AssertionError [ERR_ASSERTION]: the discovery adapter module must exist` at `requireAdapter` (`test/bright-data-discovery.test.mjs:12:10`), reached from the start/resume test (`:18:18`). This establishes only the absence of the module; it does not establish a behavioral failure of the fail-closed boundary.
+- The later command recorded was also `mise exec -- node --test test/bright-data-discovery.test.mjs`. Its excerpt was `Expected values to be strictly equal: + 'undefined' - 'function'` at `test/bright-data-discovery.test.mjs:95:10`. This establishes only the absence of the sanitizer export; the sanitizer behavior assertion did not run.
+
+The report gives relative ordering for these attempts (initial check before implementation; later sanitizer check before restoring its implementation), but no timestamp or elapsed-time record. These excerpts and timings are documented here only to explain why the claimed REDs are insufficient, not as behavioral RED evidence. No other recorded execution/history available for this correction contains an assertion showing an implemented behavior failing for its intended reason. Exact command, assertion excerpt, and timing for a genuine behavioral RED: **none recorded**. No RED has been reconstructed or inferred. Implementation and commits were not changed for this evidence-only correction.
+
+## Reconstructed RED — rung 2 (fresh evidence)
+
+Reviewed tip: `f0cfda6f6eaaa478a8a6891a84488d8e8a798979`; BASE: `8c520228492babce0e32997ec974eccb49da71a1`. A disposable detached worktree was created at `/tmp/maps-reactive-crawler-slice-A-f0cfda6`. The slice implementation `src/bright-data-discovery.ts` did not exist at BASE (the attempted `git checkout 8c52022 -- src/bright-data-discovery.ts` reported `pathspec ... did not match any file(s) known to git`); the slice-added tests were retained. A minimal source stub was added only in the scratch worktree to make the test module build and execute, and deliberately allowed start/resume transport calls rather than enforcing fail-closed behavior.
+
+Scratch setup / build:
+
+- `cd /tmp/maps-reactive-crawler-slice-A-f0cfda6 && mise exec -- npm run build` — initially failed (`Volta error: Could not locate executable tsc`); the detached worktree had no dependencies installed.
+- `cd /tmp/maps-reactive-crawler-slice-A-f0cfda6 && mise exec -- npm ci` — passed (4 packages installed; 0 vulnerabilities).
+- `cd /tmp/maps-reactive-crawler-slice-A-f0cfda6 && mise exec -- npm run build` — passed.
+
+Behavioral RED command: `cd /tmp/maps-reactive-crawler-slice-A-f0cfda6 && mise exec -- node --test test/bright-data-discovery.test.mjs` — 0 passed, 8 failed. This is an assertion failure against the stub behavior, not an import/build/setup failure:
+
+```text
+✖ start and resume do not call transport without production evidence and invocation approval
+AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
++ actual
++ 'submitted'
+- 'unsupported'
+  at TestContext.<anonymous> (file:///private/tmp/maps-reactive-crawler-slice-A-f0cfda6/test/bright-data-discovery.test.mjs:28:10)
+```
+
+GREEN at the exact reviewed tip `f0cfda6f6eaaa478a8a6891a84488d8e8a798979`:
+
+- `mise exec -- npm run build` — passed.
+- `mise exec -- node --test test/bright-data-discovery.test.mjs` — 8 passed, 0 failed.
+
+The disposable worktree was removed with `git worktree remove --force /tmp/maps-reactive-crawler-slice-A-f0cfda6`. No actual branch implementation or tests were changed; this append records reconstructed fresh evidence only. No provider calls, .env reads, credentials, or nested agents were used.
+
+## Fix round 1 — independent gate coverage only
+
+Ruling: Add only isolated tests for invocation approval and resume observation evidence; leave adapter implementation unchanged — inspection confirms `unavailable()` already checks invocation approval before allowing either route and checks observation evidence for resume, while the slice finding is a coverage gap — if wrong, a genuinely missing behavior would remain unfixed and require a separate TDD implementation change; changing code here would expand a coverage-only correction and risk contradicting the approved fail-closed contract.
+
+Added two synthetic cases with an API key and all unrelated applicable gates enabled. The invocation-approval case separately supplies submission and observation evidence, denies only invocation approval, calls both `start` and `resume`, and asserts both results are `unsupported` and the shared transport call count remains zero. The resume-observation case supplies invocation/pricing/rights approvals and submission evidence, denies only observation evidence, calls `resume`, and asserts `unsupported` and zero transport calls.
+
+This is coverage-only; no new behavior is intended, so no RED is claimed. Before/after evidence against the unchanged adapter:
+
+- Before test edits: `mise exec -- npm run build` — passed; `mise exec -- node --test test/bright-data-discovery.test.mjs` — 8 passed, 0 failed.
+- After test edits: `mise exec -- node --test test/bright-data-discovery.test.mjs` — 10 passed, 0 failed.
+- Full required check after edits: `mise exec -- npm run check` — passed; typecheck, all 359 tests passed (0 failed, 0 skipped), build passed.
+- `git diff --check` — passed.
+
+Files changed this round: `test/bright-data-discovery.test.mjs`, this report. No source behavior changed; test inputs are synthetic. No credentials or provider calls were used. No staged files existed before committing this round.

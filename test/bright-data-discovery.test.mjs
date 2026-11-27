@@ -30,6 +30,41 @@ test('start and resume do not call transport without production evidence and inv
   assert.equal(calls, 0);
 });
 
+test('start and resume do not call transport without invocation approval when other gates pass', async () => {
+  const create = requireAdapter();
+  let calls = 0;
+  const adapter = create({
+    apiKey: 'synthetic-key',
+    evidence: { submission: true, observation: true },
+    approvals: { invocation: false, pricing: true, rights: true },
+    transport: {
+      async submit() { calls++; return { id: 'run-1' }; },
+      async observe() { calls++; return { state: 'ready' }; },
+    },
+  });
+
+  assert.equal((await adapter.start({ keyword: 'coffee', country: 'US', lat: 1, lon: 2 })).kind, 'unsupported');
+  assert.equal((await adapter.resume({ id: 'run-1' })).kind, 'unsupported');
+  assert.equal(calls, 0);
+});
+
+test('resume does not call transport without observation evidence when other gates pass', async () => {
+  const create = requireAdapter();
+  let calls = 0;
+  const adapter = create({
+    apiKey: 'synthetic-key',
+    evidence: { submission: true, observation: false },
+    approvals: { invocation: true, pricing: true, rights: true },
+    transport: {
+      async submit() { calls++; return { id: 'run-1' }; },
+      async observe() { calls++; return { state: 'ready' }; },
+    },
+  });
+
+  assert.equal((await adapter.resume({ id: 'run-1' })).kind, 'unsupported');
+  assert.equal(calls, 0);
+});
+
 test('submission evidence cannot enable starts when retrieval evidence is absent', async () => {
   const create = requireAdapter();
   let submissions = 0;
