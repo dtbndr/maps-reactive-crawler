@@ -1,10 +1,10 @@
 # Bright Data Discovery Workstream Brief
 
 **Date**: 2026-11-27
-**Status**: Draft — revised plan awaiting operator approval
+**Status**: Approved
 
 ## Why
-Connect the existing bounded crawler to operator-funded discovery with a smaller, honest first-release path. This draft proposes changes to the previously approved plan; it does not replace that approval until the operator approves it.
+Connect the existing bounded crawler to operator-funded discovery with a smaller, honest first-release path. This revised plan replaces the earlier approved workstream contract.
 
 ## Happy path and acceptance boundary
 - One operator supplies their own key, a confirmed coordinate, keyword, country, radius or bounding box, and independent cell, submission and active-time limits. Synthetic tests exercise one-seed discovery, SQLite persistence and cardinal expansion.
@@ -21,7 +21,6 @@ Connect the existing bounded crawler to operator-funded discovery with a smaller
 - Protect BYOK credentials and real data — no secrets or raw provider data in shared artifacts, fixtures or logs.
 
 ## Open questions
-- Does the operator approve this smaller plan and its explicit recovery and consent trade-offs in place of the earlier approved contract?
 - Are applicable current provider behavior, account pricing and rights sufficiently evidenced for the intended actual use? Until then affected live use is blocked.
 
 ## Final smoke checks
