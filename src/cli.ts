@@ -42,7 +42,7 @@ function parseArgs(args: string[]): ParsedCommand {
   }
   if (values.has('provider')) {
     if (values.get('provider') !== 'bright-data') throw new Error('Unsupported provider');
-    throw new Error('Bright Data CLI execution is not implemented. Independent contract and lifecycle evidence, account and dataset pricing evidence, rights evidence, and fresh invocation confirmation are required; none authorizes execution until a safe production boundary is implemented. No checkpoint was changed or provider called.');
+    throw new Error('Bright Data CLI execution is not implemented. The planned provider integration uses the direct API; MCP is optional. Independent contract and lifecycle evidence, account and dataset pricing evidence, rights evidence, and fresh invocation confirmation are required; none authorizes execution until a safe production boundary is implemented. No checkpoint was changed or provider called.');
   }
   const required = (name: string): string => {
     const value = values.get(name);
