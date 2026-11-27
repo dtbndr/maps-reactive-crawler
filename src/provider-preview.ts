@@ -1,27 +1,31 @@
+import { isDeepStrictEqual } from 'node:util';
 import { readOnlyBoundSnapshot, type ProviderBinding } from './durable-state.js';
 import { validateOperatorConfig, type OperatorConfig } from './operator.js';
 import { effectiveResumeLimits, providerResumeFingerprint } from './provider-resume-fingerprint.js';
 export { effectiveResumeLimits } from './provider-resume-fingerprint.js';
 import type { TraversalLimits, TraversalState } from './traversal.js';
 
-type Document = Record<string, unknown> & { reference: string; date: string; scope: string };
-type ScopedDocument = Document & { account: string; dataset: string };
 type Invocation = OperatorConfig & { operation: 'start' | 'resume'; query: { keyword: string; country: string }; account: string; dataset: string };
-type Evidence = { submission: Document; observation: Document; retrieval: Document; pricing: ScopedDocument; rights: ScopedDocument };
+type Document = Record<string, unknown> & { reference: string; date: string; validThrough: string; scope: string };
+type TechnicalDocument = Document & { attestation: { method: string; operation: Invocation['operation']; dataset: string } };
+type CommercialDocument = Document & { attestation: { invocation: Invocation; collection: true; storage: true; export: true } };
+type Evidence = { submission: TechnicalDocument; observation: TechnicalDocument; retrieval: TechnicalDocument; pricing: CommercialDocument; rights: CommercialDocument };
 type Estimate = { currency: string; amount: number; assumptions: string; uncertainty: string; pricingReference: string };
 export type ProviderPreview = { kind: 'blocked'; reason: string } | { kind: 'preview'; invocation: Invocation; evidence: Evidence; estimate: Estimate; authorization: 'not-authorized' };
 
 const object = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null && !Array.isArray(value);
 const text = (value: unknown): value is string => typeof value === 'string' && value.trim().length > 0;
-const doc = (value: unknown): value is Document => {
-  if (!object(value) || !text(value.reference) || !text(value.scope) || typeof value.date !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value.date)) return false;
-  const date = new Date(value.date);
-  return Number.isFinite(date.valueOf()) && date.toISOString().slice(0, 10) === value.date;
+const validDate = (value: unknown): value is string => {
+  if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const date = new Date(value);
+  return Number.isFinite(date.valueOf()) && date.toISOString().slice(0, 10) === value;
 };
+const doc = (value: unknown, today: string): value is Document => object(value) && text(value.reference) && text(value.scope) && validDate(value.date) && validDate(value.validThrough) && value.date <= today && today <= value.validThrough;
 
 /** Documentary attestation preview only: never grants authority or performs I/O. */
-export function previewProviderInvocation(input: unknown): ProviderPreview {
+export function previewProviderInvocation(input: unknown, today: string = new Date().toISOString().slice(0, 10)): ProviderPreview {
   const blocked = (reason: string): ProviderPreview => ({ kind: 'blocked', reason });
+  if (!validDate(today)) return blocked('Invalid current date');
   if (!object(input) || !object(input.invocation)) return blocked('Invalid effective invocation');
   const invocation = input.invocation;
   if ((invocation.operation !== 'start' && invocation.operation !== 'resume') || !object(invocation.query) || !text(invocation.query.keyword) || !text(invocation.query.country) || !text(invocation.account) || !text(invocation.dataset)) return blocked('Invalid effective invocation');
@@ -30,7 +34,12 @@ export function previewProviderInvocation(input: unknown): ProviderPreview {
   const evidence = object(input.evidence) ? input.evidence : {};
   for (const category of ['submission', 'observation', 'retrieval', 'pricing', 'rights'] as const) {
     const item = evidence[category];
-    if (!doc(item) || ((category === 'pricing' || category === 'rights') && (!object(item) || item.account !== invocation.account || item.dataset !== invocation.dataset))) return blocked(`Missing or invalid ${category} evidence`);
+    if (!doc(item, today) || !object(item.attestation)) return blocked(`Missing or invalid ${category} evidence`);
+    const attestation = item.attestation;
+    const applicable = category === 'pricing' || category === 'rights'
+      ? attestation.collection === true && attestation.storage === true && attestation.export === true && isDeepStrictEqual(attestation.invocation, invocation)
+      : attestation.method === category && attestation.operation === invocation.operation && attestation.dataset === invocation.dataset;
+    if (!applicable) return blocked(`Missing or invalid ${category} evidence`);
   }
   const estimate = input.estimate;
   if (!object(estimate) || !text(estimate.currency) || typeof estimate.amount !== 'number' || !Number.isFinite(estimate.amount) || estimate.amount < 0 || !text(estimate.assumptions) || !text(estimate.uncertainty) || !object(evidence.pricing) || estimate.pricingReference !== evidence.pricing.reference) return blocked('Missing or invalid cost estimate');
