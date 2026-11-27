@@ -26,7 +26,7 @@ export const MAPS_DATASET = 'gd_m8ebnr0q2qlklc02fz';
 export interface MappingInput { country: string; keyword: string; lat: number; lon: number; zoom: number; limit: number }
 export function mapDiscoveryRequest(input: MappingInput) {
   if (!/^[A-Z]{2}$/.test(input.country) || !text(input.keyword) || !Number.isFinite(input.lat) || Math.abs(input.lat) > 90 || !Number.isFinite(input.lon) || Math.abs(input.lon) > 180 || !Number.isFinite(input.zoom) || !Number.isInteger(input.limit) || input.limit < 1 || input.limit > 200) return gap('invalid-input');
-  return { method: 'POST', path: '/datasets/v3/scrape', query: { dataset_id: MAPS_DATASET, notify: 'false', include_errors: 'true', type: 'discover_new', discover_by: 'location' }, body: { input: [{ country: input.country, keyword: input.keyword, lat: input.lat, long: input.lon, zoom_level: input.zoom }], limit_per_input: input.limit } };
+  return { method: 'POST', path: '/datasets/v3/scrape', query: { dataset_id: MAPS_DATASET, format: 'json', notify: 'false', include_errors: 'true', type: 'discover_new', discover_by: 'location' }, body: { input: [{ country: input.country, keyword: input.keyword, lat: input.lat, long: input.lon, zoom_level: input.zoom }], limit_per_input: input.limit } };
 }
 export function mapSubmitResponse(status: number, body: unknown, retryAfter?: string): Gap | { kind: 'pending'; snapshotId: string; retryAfterSeconds?: number; retryAfterInvalid?: true } | { kind: 'inline'; records: unknown[] } {
   if (status === 429) return gap('rate-limited');

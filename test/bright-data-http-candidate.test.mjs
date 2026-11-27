@@ -7,7 +7,7 @@ const response = (body, status = 200) => new Response(JSON.stringify(body), {sta
 test('documented location request and progress and snapshot use fixed endpoints', async () => {
   const calls=[]; const transport=createBrightDataHttpCandidate('fake-key', 1000, async (url, init) => {calls.push([String(url),init]); return response([]);});
   await transport.submit(request); await transport.observe('abc'); await transport.retrieve('abc');
-  const url=new URL(calls[0][0]); assert.equal(url.origin,'https://api.brightdata.com'); assert.equal(url.pathname,'/datasets/v3/scrape'); assert.equal(url.searchParams.get('discover_by'),'location'); assert.equal(url.searchParams.get('dataset_id'),'gd_m8ebnr0q2qlklc02fz'); assert.deepEqual(JSON.parse(calls[0][1].body),request.body); assert.equal(calls[0][1].headers.Authorization,'Bearer fake-key');
+  const url=new URL(calls[0][0]); assert.equal(url.origin,'https://api.brightdata.com'); assert.equal(url.pathname,'/datasets/v3/scrape'); assert.equal(url.searchParams.get('format'),'json'); assert.equal(url.searchParams.get('discover_by'),'location'); assert.equal(url.searchParams.get('dataset_id'),'gd_m8ebnr0q2qlklc02fz'); assert.deepEqual(JSON.parse(calls[0][1].body),request.body); assert.equal(calls[0][1].headers.Authorization,'Bearer fake-key');
   assert.equal(calls[1][0],'https://api.brightdata.com/datasets/v3/progress/abc'); assert.equal(calls[2][0],'https://api.brightdata.com/datasets/v3/snapshot/abc?format=json');
 });
 test('rejects unsupported contracts without dispatch', async () => {

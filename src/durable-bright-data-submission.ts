@@ -47,7 +47,7 @@ export async function runSyntheticBrightData(state: DurableState, transport: Syn
     await submitDurableBrightData(state, transport, bounds, clock);
     const after = state.readTraversal();
     if (after.gaps.some(g => g.status !== 'resolved' && g.status !== 'skipped')) return { reason: 'gap' };
-    if (!after.attempts.some(a => a.status === 'observing')) return { reason: 'unsupported-recovery' };
+    if (!after.attempts.some(a => a.status === 'observing') && after.attempts.at(-1)?.status !== 'observed') return { reason: 'unsupported-recovery' };
   }
 }
 
@@ -96,7 +96,7 @@ export async function observeDurableBrightData(state: DurableState, transport: {
   }
 }
 
-/** Synthetic single submission only; no observation, retry or result processing. */
+/** Synthetic single submission, including atomic application of understood inline results. */
 export async function submitDurableBrightData(state: DurableState, transport: Pick<SyntheticTransport, 'submit'>, bounds: HandoffBounds, clock: Clock = defaultClock): Promise<void> {
   const binding = state.providerBinding();
   let current = state.readTraversal();
@@ -137,6 +137,14 @@ export async function submitDurableBrightData(state: DurableState, transport: Pi
         const attempts = s.attempts.map(a => a.id === current.attempts.at(-1)!.id ? { ...a, knownId: result.id, status: 'observing' as const, ...(result.retryAfterSeconds === undefined ? {} : { retryAfterSeconds: result.retryAfterSeconds }), ...timing } : a);
         const withId = { ...s, attempts };
         return result.gap ? markUncertain(withId, cell, 'isolated', result.id) : withId;
+      });
+    } else if (result.kind === 'results') {
+      state.transitionTraversal(s => {
+        const attempt = s.attempts.at(-1);
+        if (!attempt || attempt.id !== current.attempts.at(-1)!.id || attempt.status !== 'dispatched' || s.paused || s.cancelled) throw new Error('Inline result no longer applicable');
+        const attempts = s.attempts.map(a => a.id === attempt.id ? { ...a, status: 'observed' as const, inlineResult: true as const } : a);
+        const candidates = result.candidates.map(c => ({ id: c.placeId, name: c.name, ...(c.coordinates ? { coordinate: { latitude: c.coordinates.lat, longitude: c.coordinates.lon } } : {}) }));
+        return applyDiscoveryResult({ ...s, attempts }, cell, candidates.length ? { status: result.gap ? 'partial' : 'success', candidates } : { status: 'empty' });
       });
     } else if (!called) state.transitionTraversal(s => confirmNoSend(s, cell));
     else state.transitionTraversal(s => markUncertain(s, cell));

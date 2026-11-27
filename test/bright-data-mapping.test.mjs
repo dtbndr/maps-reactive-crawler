@@ -4,7 +4,7 @@ import { mapDiscoveryRequest, mapSubmitResponse, mapProgressResponse, mapResults
 
 const input = { country: 'GB', keyword: 'pizza', lat: 51.5, lon: -0.1, zoom: 14, limit: 2 };
 test('maps the documented single input request envelope', () => {
-  assert.deepEqual(mapDiscoveryRequest(input), { method: 'POST', path: '/datasets/v3/scrape', query: { dataset_id: 'gd_m8ebnr0q2qlklc02fz', notify: 'false', include_errors: 'true', type: 'discover_new', discover_by: 'location' }, body: { input: [{ country: 'GB', keyword: 'pizza', lat: 51.5, long: -0.1, zoom_level: 14 }], limit_per_input: 2 } });
+  assert.deepEqual(mapDiscoveryRequest(input), { method: 'POST', path: '/datasets/v3/scrape', query: { dataset_id: 'gd_m8ebnr0q2qlklc02fz', format: 'json', notify: 'false', include_errors: 'true', type: 'discover_new', discover_by: 'location' }, body: { input: [{ country: 'GB', keyword: 'pizza', lat: 51.5, long: -0.1, zoom_level: 14 }], limit_per_input: 2 } });
 });
 test('maps a 202 snapshot and retry-after', () => {
   assert.deepEqual(mapSubmitResponse(202, { snapshot_id: 's_123' }, '10'), { kind: 'pending', snapshotId: 's_123', retryAfterSeconds: 10 });
