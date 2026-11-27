@@ -90,6 +90,18 @@ test('pricing and rights gates independently disable provider operations', async
   }
 });
 
+test('provider diagnostic sanitizer preserves useful text and removes credentials', () => {
+  assert.ok(discovery, 'the discovery adapter module must exist');
+  assert.equal(typeof discovery.sanitizeProviderDiagnostic, 'function');
+  const secret = 'synthetic-secret';
+  const safe = discovery.sanitizeProviderDiagnostic(
+    new Error(`request failed for Authorization: Bearer ${secret}; api_key=${secret}`),
+    secret,
+  );
+  assert.match(safe, /request failed/);
+  assert.equal(safe.includes(secret), false);
+});
+
 test('transport errors are reduced to credential-free diagnostics', async () => {
   const create = requireAdapter();
   const secret = 'synthetic-secret';
