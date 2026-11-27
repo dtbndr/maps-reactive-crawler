@@ -9,6 +9,8 @@ import { DurableState } from '../dist/durable-state.js';
 import { mapDiscoveryRequest } from '../dist/bright-data-mapping.js';
 import { createTraversal, admitNextCell, reserveSubmission, markUncertain } from '../dist/traversal.js';
 
+delete process.env.BRIGHT_DATA_API_KEY;
+
 test('valid provider evidence reaches fail-closed terminal confirmation without creating checkpoint', () => {
  const dir = mkdtempSync(join(tmpdir(), 'cli-preview-'));
  try {
@@ -42,7 +44,7 @@ test('valid provider evidence reaches fail-closed terminal confirmation without 
    assert.match(pty.stdout, new RegExp(`"dataset": "${mapped.query.dataset_id}"`));
    assert.match(pty.stdout, new RegExp(`"zoom": ${mapped.body.input[0].zoom_level}`));
    assert.match(pty.stdout, new RegExp(`"limitPerInput": ${mapped.body.limit_per_input}`));
-   assert.match(pty.stdout,answer === 'yes' ? /not yet implemented/i : /declined or unavailable/i);
+   assert.match(pty.stdout,answer === 'yes' ? /Missing BRIGHT_DATA_API_KEY/i : /declined or unavailable/i);
    assert.equal(existsSync(checkpoint),false);
   }
  } finally { rmSync(dir,{recursive:true,force:true}); }
@@ -76,7 +78,7 @@ test('child PTY resume previews effective checkpoint and never changes logical s
    assert.match(pty.stdout, /"submissions": 9/); assert.match(pty.stdout, /"cells": 5/); assert.match(pty.stdout, /"activeTime": 10000/);
    assert.match(pty.stdout, /synthetic-job-id/);
    assert.ok(pty.stdout.indexOf('synthetic-job-id') < pty.stdout.indexOf('READY: Type yes'));
-   assert.match(pty.stdout, answer === 'yes' ? /not yet implemented/i : /declined or unavailable/i);
+   assert.match(pty.stdout, answer === 'yes' ? /Missing BRIGHT_DATA_API_KEY/i : /declined or unavailable/i);
    assert.deepEqual(snapshot(),before);
   }
   const nonTty = spawnSync(process.execPath,args,{encoding:'utf8',input:'yes\n'});

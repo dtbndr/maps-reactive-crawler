@@ -3,7 +3,11 @@ import { readFileSync } from 'node:fs';
 import { previewProviderInvocation, previewProviderResume } from './provider-preview.js';
 import { terminalPrompt } from './terminal-prompt.js';
 import { MAPS_DATASET } from './bright-data-mapping.js';
-import { validateProviderBinding, type ProviderBinding } from './durable-state.js';
+import { DurableState, validateProviderBinding, type ProviderBinding } from './durable-state.js';
+import { createTraversal } from './traversal.js';
+import { createBrightDataHttpCandidate } from './bright-data-http-candidate.js';
+import { runSyntheticBrightData } from './durable-bright-data-submission.js';
+import { projectOperatorStatus } from './operator.js';
 import { cancelCheckpoint, exportResults, resume, start, status, type OperatorResumeOptions, type OperatorStartOptions } from './operator.js';
 
 export type CliIo = { stdout: (text: string) => void; stderr: (text: string) => void };
@@ -130,10 +134,29 @@ async function providerPreview(args: string[], io: CliIo): Promise<number> {
   const value = record as Record<string, unknown>;
   const preview = previewProviderInvocation({ invocation: { operation: command, query: { keyword: binding.keyword, country: binding.country }, geometry, limits, account, dataset, zoom: binding.zoom, limitPerInput: binding.limitPerInput }, evidence: value.evidence, estimate: value.estimate });
   if (preview.kind === 'blocked') throw new Error(preview.reason);
-  const display = JSON.stringify({ notice: 'Direct API use; MCP is optional. Estimate is not a quote or cost cap; evidence is operator attestation, not independent verification. No provider execution is implemented.', ...preview, ...(resumeDetails ? { resume: resumeDetails } : {}) }, null, 2);
+  const display = JSON.stringify({ notice: 'Direct API use; MCP is optional. Estimate is not a quote or cost cap; evidence is operator attestation, not independent verification. Local abort does not cancel remote work.', ...preview, ...(resumeDetails ? { resume: resumeDetails } : {}) }, null, 2);
   if (!await terminalPrompt(display)) throw new Error('Confirmation requires fresh affirmative terminal input; declined or unavailable. No checkpoint changed or provider called.');
-  io.stderr('Provider execution is not yet implemented. No checkpoint changed or provider called.\n');
-  return 1;
+  const key = process.env.BRIGHT_DATA_API_KEY;
+  if (!key) throw new Error('Missing BRIGHT_DATA_API_KEY');
+  let state: DurableState | undefined;
+  try {
+    if (parsed.command === 'start') {
+      DurableState.createBound(parsed.options.checkpoint, binding, createTraversal(geometry, limits));
+      state = DurableState.openBound(parsed.options.checkpoint, binding);
+    } else {
+      state = DurableState.openProviderGuarded(parsed.options.checkpoint, binding, parsed.options.limits ?? {}, resumeDetails!.fingerprint);
+      if (parsed.options.limits && Object.keys(parsed.options.limits).length) state.writeTraversal({ ...state.readTraversal(), limits });
+    }
+    const now = Date.now();
+    const deadline = now + Math.max(0, limits.activeTime - state.readTraversal().activeTime);
+    const transport = createBrightDataHttpCandidate(key, 30000);
+    const outcome = await runSyntheticBrightData(state, transport, { requestMilliseconds: 30000, activeUntil: deadline, observationDeadline: deadline, maxObservations: 20, credential: key });
+    state.releaseOwner();
+    io.stdout(`${JSON.stringify({ version: 1, command, status: projectOperatorStatus(state.readTraversalSnapshot()), reason: outcome.reason })}\n`);
+    return 0;
+  } catch {
+    throw new Error('Provider execution failed; inspect checkpoint locally. No automatic resend is safe.');
+  } finally { state?.close(); }
 }
 
 export async function runCli(args: string[], library: CliLibrary, io: CliIo): Promise<number> {
