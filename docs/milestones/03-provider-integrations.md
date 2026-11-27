@@ -12,6 +12,8 @@ These workstreams and their order are a planning proposal, not implementation au
 
 ### Workstream 1 — Bright Data discovery integration
 
+Status: complete for the fixture-tested guarded discovery path; live behavior remains unvalidated and requires separate authorization and applicable evidence. See the [workstream brief](../workstreams/2026-11-27-bright-data-discovery/brief.md) for limitations.
+
 Refresh the current Bright Data Maps discovery and lifecycle contracts and compare direct HTTP with the JavaScript SDK before choosing an integration. Connect the existing bounded scheduler to discovery for one confirmed coordinate seed, keyword and country as required by the verified contract, explicit geography and independent work limits. Each operator supplies their own `BRIGHT_DATA_API_KEY`; credentials are never bundled, logged or stored in checkpoints. Keep scheduling and recovery project-owned, document direct API use with notice, and retain MCP as optional agentic support rather than a runtime requirement.
 
 Use synthetic integration tests for submission, polling, bounded failure handling and durable recovery. Preserve observation of known provider IDs and do not blindly resubmit when acceptance is uncertain or an acknowledgment is lost. Missing contract evidence blocks the affected behavior; it does not justify inventing semantics or making an unapproved probe.

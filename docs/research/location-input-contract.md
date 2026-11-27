@@ -10,7 +10,7 @@ The owner agreed to serialize ordinary interactive requests and space them at le
 
 The public-service policy also requires identification and attribution, prohibits autocomplete, requires service switching without a software update, and imposes additional restrictions on bulk and periodic scripts. Design attribution and data handling for the actual fields and workflow; do not represent the owner's responsibility decision as a grant of rights. The historical recommendation gates and calls for aggregate confirmation or individual export-rights determinations below are superseded by this owner decision. The policy's explicit per-application wording above supersedes any historical suggestion that it specifies no application-wide scope.
 
-Status: **completed research handoff; no provider selected**. The CLI and geocoder are not implemented. This documents evaluation criteria and candidate evidence for the first-release operator-run workflow, not a provider contract or authorization to make requests.
+Status: **completed research handoff; no geocoder selected**. The coordinate-based CLI is implemented; the geocoder is not. This documents evaluation criteria and candidate evidence for the first-release operator-run workflow, not a provider contract or authorization to make requests.
 
 ## Initial documentation-only red check (before research)
 

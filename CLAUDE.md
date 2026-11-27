@@ -1,6 +1,6 @@
 # Agent guidance
 
-This repository is an early-stage public, MIT-licensed, operator-run Google Maps reactive spatial crawler. The offline bounded traversal core, synthetic SQLite durable recovery/result-identity behavior and fixture-backed operator CLI are implemented and tested; the live-provider end-to-end crawler is not yet implemented. Synthetic identity tests do not establish live-provider identity or behavior.
+This repository is an early-stage public, MIT-licensed, operator-run Google Maps reactive spatial crawler. The offline bounded traversal core, synthetic SQLite durable recovery/result-identity behavior, fixture-backed operator CLI and guarded direct-provider discovery path are implemented and fixture-tested; live-provider behavior and the complete end-to-end crawler remain unvalidated. Synthetic identity tests do not establish live-provider identity or behavior.
 
 ## Start here
 

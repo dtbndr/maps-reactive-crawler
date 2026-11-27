@@ -1,6 +1,6 @@
 # First-release happy path
 
-Status: **target, not implemented end to end**. The offline bounded traversal core, synthetic durable-recovery/result-identity behavior and fixture-backed operator CLI are implemented and tested. Live provider and geocoder integrations are not implemented; provider contracts, live result fields, returned-place boundary semantics and geocoding provider remain to be specified. See the [offline CLI instructions](../README.md#offline-operator-cli) for the supported coordinate-based fixture path.
+Status: **target, not implemented end to end**. The offline bounded traversal core, synthetic durable-recovery/result-identity behavior, fixture-backed operator CLI and guarded direct-provider discovery path are implemented and fixture-tested. Live provider behavior remains unvalidated and geocoding is not implemented; applicable provider contracts, live result fields, returned-place boundary semantics and geocoding provider remain to be established. See the [offline CLI instructions](../README.md#offline-operator-cli) for the supported coordinate-based fixture path.
 
 1. The operator installs the tool and configures their own Bright Data API key securely.
 2. The operator supplies a search keyword, country as required by the verified provider, and either a latitude/longitude pair or a human-readable location. A human-readable location is resolved and displayed; ambiguity must not be silently guessed.
