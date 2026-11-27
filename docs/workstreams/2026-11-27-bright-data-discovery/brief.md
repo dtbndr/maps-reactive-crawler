@@ -9,12 +9,12 @@ Connect the existing bounded crawler to operator-funded discovery with a smaller
 ## Happy path and acceptance boundary
 - One operator supplies their own key, a confirmed coordinate, keyword, country, radius or bounding box, and independent cell, submission and active-time limits. Synthetic tests exercise one-seed discovery, SQLite persistence and cardinal expansion.
 - Direct HTTP submits and observes bounded work; known IDs are saved and uncertain sends are never blindly retried. Stops, failures and incomplete observations remain visible, not empty successes.
-- Results are conservative candidates, not verified identities; centers are bounded, returned places are not guaranteed inside the area, and coverage is not exhaustive.
+- Results are conservative candidates, not verified identities; centers are bounded, returned places are not guaranteed inside the area, and coverage is not exhaustive. A response at the requested limit is potentially capped and does not expand, so a dense seed can stop the crawl.
 - No geocoding, detail collection, enrichment, remote cancellation or guarantee that every paused observation automatically resumes.
 
 ## Key decisions
 - Use direct HTTP and the existing traversal and SQLite core — avoid a general provider framework and disclose direct API use; MCP is optional.
-- Use simple bounded waits and preserve known IDs — avoid indefinite polling and duplicate paid submissions.
+- Bound waits and requests by remaining active time and preserve known IDs — avoid indefinite polling and duplicate paid submissions.
 - Stop and show unresolved work when recovery is unsupported — the operator retains the checkpoint and ID, checks provider status separately if authorized, and does not resubmit an uncertain send.
 - Obtain applicable current provider, account-pricing and data-rights evidence separately from explicit operator approval before any paid call — the one successful probe establishes none of these guarantees.
 - Protect BYOK credentials and real data — no secrets or raw provider data in shared artifacts, fixtures or logs.
