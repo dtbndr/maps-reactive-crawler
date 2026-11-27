@@ -14,3 +14,11 @@ Slice E: independent re-review CLEAN after retry-after handling; synthetic runne
 Slice F: independent re-review CLEAN at 7c7e782 after synthetic real-CLI known-ID recovery and deadline fix. Some preview RED evidence does not independently establish every contract; do not claim it did. Final verification at 7c7e782: mise install, npm ci, build and check passed (471 tests); no provider calls.
 
 Smoke: skipped (agent-verified) — no default operator-only checks; a bounded live demonstration is excluded and requires separate authorization.
+
+Final review fix wave: acknowledgement timeout fixed at 3feb615; independent scoped re-review CLEAN. Final verification at 3feb615: mise install, npm ci, build and check passed (474 tests). No provider call was made.
+
+P2/P3: Slice A transport-error test name overstates coverage; unsupported Retry-After values can be discarded and allow early polling; starting/running progress can trigger immediate repeated polling. GitHub issue publication requires operator approval.
+
+RED gaps: Slice D1 late-observation behavioral RED could not be independently reconstructed; worker-attested GREEN at 5088d34. Slice E mapping and runner gaps and Slice F preview gaps are recorded above. These are process gaps, not claims of established historical RED.
+
+Final review: clean (at 3feb615)

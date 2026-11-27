@@ -1,7 +1,7 @@
 # Bright Data Discovery Workstream Brief
 
 **Date**: 2026-11-27
-**Status**: Approved
+**Status**: Done
 
 ## Why
 Connect the existing bounded crawler to operator-funded discovery with a smaller, honest first-release path. This revised plan replaces the earlier approved workstream contract.
