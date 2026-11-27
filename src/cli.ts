@@ -1,4 +1,7 @@
 import { pathToFileURL } from 'node:url';
+import { readFileSync } from 'node:fs';
+import { previewProviderInvocation, previewProviderResume } from './provider-preview.js';
+import { terminalPrompt } from './terminal-prompt.js';
 import { cancelCheckpoint, exportResults, resume, start, status, type OperatorResumeOptions, type OperatorStartOptions } from './operator.js';
 
 export type CliIo = { stdout: (text: string) => void; stderr: (text: string) => void };
@@ -85,8 +88,54 @@ function parseArgs(args: string[]): ParsedCommand {
   };
 }
 
+async function providerPreview(args: string[], io: CliIo): Promise<number> {
+  const [command, ...tokens] = args;
+  if (command !== 'start' && command !== 'resume') throw new Error('Unsupported provider command');
+  const extra = new Map<string, string>();
+  const ordinary: string[] = [command];
+  for (let i = 0; i < tokens.length; i += 2) {
+    const flag = tokens[i]!; const value = tokens[i + 1];
+    if (!flag.startsWith('--') || value === undefined || value.startsWith('--')) throw new Error(`Invalid option ${flag}`);
+    if (['--provider', '--evidence', '--account', '--dataset', '--keyword', '--country'].includes(flag)) {
+      if (extra.has(flag)) throw new Error(`Duplicate option: ${flag}`);
+      extra.set(flag, value);
+    } else {
+      if (flag === '--fixture') throw new Error('Fixture cannot be combined with provider');
+      ordinary.push(flag, value);
+    }
+  }
+  if (extra.get('--provider') !== 'bright-data') throw new Error('Unsupported provider');
+  const required = (name: string): string => { const value = extra.get(name); if (!value) throw new Error(`Missing required option ${name}; direct API use (MCP optional) requires contract and lifecycle, pricing, rights and confirmation; execution is not implemented`); return value; };
+  const evidencePath = required('--evidence');
+  const account = required('--account'); const dataset = required('--dataset');
+  ordinary.push('--fixture', 'unused');
+  const parsed = parseArgs(ordinary);
+  if (parsed.command !== 'start' && parsed.command !== 'resume') throw new Error('Unsupported provider command');
+  let geometry; let limits; let query; let resumeDetails;
+  if (parsed.command === 'start') {
+    geometry = parsed.options.geometry; limits = parsed.options.limits;
+    query = { keyword: required('--keyword'), country: required('--country') };
+  } else {
+    if (extra.has('--keyword') || extra.has('--country')) throw new Error('Resume query is bound to checkpoint');
+    resumeDetails = previewProviderResume(parsed.options.checkpoint, parsed.options.limits);
+    geometry = resumeDetails.geometry; limits = resumeDetails.limits;
+    query = { keyword: resumeDetails.binding.keyword, country: resumeDetails.binding.country };
+  }
+  let record: unknown;
+  try { record = JSON.parse(readFileSync(evidencePath, 'utf8')); } catch { throw new Error('Cannot read valid evidence record'); }
+  if (!record || typeof record !== 'object' || Array.isArray(record)) throw new Error('Invalid evidence record');
+  const value = record as Record<string, unknown>;
+  const preview = previewProviderInvocation({ invocation: { operation: command, query, geometry, limits, account, dataset }, evidence: value.evidence, estimate: value.estimate });
+  if (preview.kind === 'blocked') throw new Error(preview.reason);
+  const display = JSON.stringify({ notice: 'Direct API use; MCP is optional. Estimate is not a quote or cost cap; evidence is operator attestation, not independent verification. No provider execution is implemented.', ...preview, ...(resumeDetails ? { resume: resumeDetails } : {}) }, null, 2);
+  if (!await terminalPrompt(display)) throw new Error('Confirmation requires fresh affirmative terminal input; declined or unavailable. No checkpoint changed or provider called.');
+  io.stderr('Provider execution is not yet implemented. No checkpoint changed or provider called.\n');
+  return 1;
+}
+
 export async function runCli(args: string[], library: CliLibrary, io: CliIo): Promise<number> {
   try {
+    if (args.includes('--provider')) return await providerPreview(args, io);
     const parsed = parseArgs(args);
     let result: unknown;
     if (parsed.command === 'start') {
