@@ -31,13 +31,16 @@ test('observes the SQLite ID then separately retrieves and durably expands below
   assert.equal(state.readTraversal().cells['0,0'].outcome, 'nonempty');
   assert.equal(state.readTraversal().candidates.length, 1); assert.ok(state.readTraversal().queue.length > 0);
 }));
-test('cutoff known ID resumes after reopen and budget increase without submission', async () => setup(async (state, path, reopen) => {
+test('cutoff known ID resumes after reopen and budget increase without submission', async t => setup(async (state, path, reopen) => {
+  // Freeze wall time until dispatch; the real timer still cuts off the pending observation.
+  t.mock.timers.enable({ apis: ['Date'], now: Date.now() });
   let now = 0, observes = 0, retrieves = 0, submits = 0;
   const pending = Promise.withResolvers();
   const transport = { submit: async () => { submits++; throw Error('resubmit'); }, observe: async id => { observes++; assert.equal(id, 'stored-id'); now = 15; return pending.promise; }, retrieve: async () => { retrieves++; throw Error('early retrieval'); } };
   state.transitionTraversal(s => ({ ...s, activeTime: 0, limits: { ...s.limits, activeTime: 10 } }));
   await observeDurableBrightData(state, transport, { ...bounds(), maxObservations: 1, observationDeadline: Date.now() + 5000 }, { monotonicNow: () => now });
   let stopped = state.readTraversal();
+  assert.equal(observes, 1);
   assert.equal(stopped.activeTime, 15); assert.equal(stopped.activeInterval, false);
   assert.equal(stopped.attempts.at(-1).knownId, 'stored-id'); assert.equal(stopped.attempts.at(-1).observationDisposition, 'stopped');
   assert.ok(stopped.gaps.some(g => g.status === 'unresolved')); assert.equal(retrieves, 0);
