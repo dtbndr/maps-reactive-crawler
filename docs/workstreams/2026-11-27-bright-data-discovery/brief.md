@@ -16,7 +16,8 @@ Connect the existing bounded crawler to operator-funded discovery with a smaller
 - Use direct HTTP and the existing traversal and SQLite core — avoid a general provider framework and disclose direct API use; MCP is optional.
 - Bound waits and requests by remaining active time and preserve known IDs — avoid indefinite polling and duplicate paid submissions.
 - Stop and show unresolved work when recovery is unsupported — the operator retains the checkpoint and ID, checks provider status separately if authorized, and does not resubmit an uncertain send.
-- Obtain applicable current provider, account-pricing and data-rights evidence separately from explicit operator approval before any paid call — the one successful probe establishes none of these guarantees.
+- Show an evidence-backed cost estimate with assumptions and uncertainty before paid approval, blocking if no estimate is possible — a probe is not pricing evidence.
+- Obtain applicable current provider and data-rights evidence separately from explicit operator approval before any paid call — the one successful probe establishes neither.
 - Protect BYOK credentials and real data — no secrets or raw provider data in shared artifacts, fixtures or logs.
 
 ## Open questions
@@ -24,7 +25,7 @@ Connect the existing bounded crawler to operator-funded discovery with a smaller
 - Are applicable current provider behavior, account pricing and rights sufficiently evidenced for the intended actual use? Until then affected live use is blocked.
 
 ## Final smoke checks
-- A bounded live demonstration is separately authorized, not included in this draft or the default checks.
+- A bounded live demonstration requires separate authorization; it is not included in this draft or the default checks.
 
 ## Pointers
 - Slices (agents only): [slices.md](slices.md)
