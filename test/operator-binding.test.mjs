@@ -7,7 +7,7 @@ import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { createHash } from 'node:crypto';
 import { createTraversal } from '../dist/traversal.js';
-import { DurableState } from '../dist/durable-state.js';
+import { DurableState, readOnlyCheckpointSnapshot } from '../dist/durable-state.js';
 import { recordDurableCleanPause } from '../dist/durable-discovery.js';
 
 const identity = 'a'.repeat(64);
@@ -38,6 +38,23 @@ function independentlyRecoverState(path) {
   finally { db.close(); }
   return state(path);
 }
+
+test('provider binding rejects a changed query without mutating the checkpoint', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'crawler-provider-binding-'));
+  const path = join(dir, 'state.db');
+  const binding = { version: 2, mode: 'bright-data', keyword: 'pizza', country: 'GB', zoom: 14, limitPerInput: 10 };
+  try {
+    assert.doesNotThrow(() => DurableState.createBound(path, binding, traversal()));
+    const before = state(path);
+    assert.throws(() => DurableState.openBound(path, { ...binding, keyword: 'coffee' }), /binding|query/i);
+    assert.deepEqual(state(path), before);
+    assert.doesNotThrow(() => readOnlyCheckpointSnapshot(path));
+    const acquired = DurableState.openBound(path, binding);
+    acquired.close();
+    const cancel = DurableState.acquireCancelOnly(path);
+    cancel.close();
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
 
 test('bound acquisition rejects a mismatched fixture without logical application mutation', () => {
   const { dir, path } = setup();

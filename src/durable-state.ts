@@ -6,6 +6,25 @@ import { cellKey, isCellEligible, validateGeometry } from './index.js';
 import { cancelTraversal } from './traversal.js';
 
 type Snapshot = { version: 1; work: { id: string; status: string }[]; observations: unknown[]; gaps: unknown[] };
+export type ProviderBinding = { version: 2; mode: 'bright-data'; keyword: string; country: string; zoom: number; limitPerInput: number };
+type OperatorBinding = { version: 1; fixtureIdentity: string } | ProviderBinding;
+function parseBinding(value: unknown): OperatorBinding {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('Corrupt state: invalid operator binding');
+  const b = value as Record<string, unknown>;
+  if (Object.keys(b).length === 2 && b.version === 1 && typeof b.fixtureIdentity === 'string' && /^[a-f0-9]{64}$/.test(b.fixtureIdentity)) return { version: 1, fixtureIdentity: b.fixtureIdentity };
+  if (Object.keys(b).length === 6 && b.version === 2 && b.mode === 'bright-data' && typeof b.keyword === 'string' && !!b.keyword.trim() && typeof b.country === 'string' && /^[A-Z]{2}$/.test(b.country) && Number.isSafeInteger(b.zoom) && (b.zoom as number) >= 0 && (b.zoom as number) <= 21 && Number.isSafeInteger(b.limitPerInput) && (b.limitPerInput as number) >= 1 && (b.limitPerInput as number) <= 200) return { version: 2, mode: 'bright-data', keyword: b.keyword, country: b.country, zoom: b.zoom as number, limitPerInput: b.limitPerInput as number };
+  throw new Error('Corrupt state: invalid operator binding');
+}
+function requestedBinding(value: string | ProviderBinding): OperatorBinding {
+  if (typeof value === 'string') {
+    if (!/^[a-f0-9]{64}$/.test(value)) throw new Error('Invalid fixture identity');
+    return { version: 1, fixtureIdentity: value };
+  }
+  return parseBinding(value);
+}
+function storedBinding(value: unknown): OperatorBinding {
+  try { return parseBinding(JSON.parse(String(value))); } catch { throw new Error('Corrupt state: invalid operator binding'); }
+}
 let afterOwnerReadForTest: (() => void) | undefined;
 let beforePublishForTest: (() => void) | undefined;
 let afterCreateForTest: (() => void) | undefined;
@@ -26,7 +45,8 @@ function validateTraversal(value: unknown): asserts value is TraversalState {
   if (!s || typeof s !== 'object' || (s.activeInterval !== undefined && typeof s.activeInterval !== 'boolean') || (s.timeUnit !== undefined && s.timeUnit !== 'milliseconds') || typeof s.recoveryPending !== 'undefined' && typeof s.recoveryPending !== 'boolean' || !s.geometry || !s.limits || ![s.limits.cells, s.limits.submissions, s.limits.activeTime].every(Number.isFinite) || !Number.isSafeInteger(s.limits.cells) || !Number.isSafeInteger(s.limits.submissions) || !Number.isSafeInteger(s.limits.cells) || !Number.isSafeInteger(s.limits.submissions) || s.limits.cells < 1 || s.limits.submissions < 0 || s.limits.activeTime < 0 || !Array.isArray(s.queue) || !s.queue.every((x: unknown) => typeof x === 'string') || !Array.isArray(s.admitted) || !s.cells || typeof s.cells !== 'object' || !Array.isArray(s.candidates) || !Array.isArray(s.gaps) || !Array.isArray(s.blocked) || !Array.isArray(s.attempts) || ![s.submissions, s.activeTime].every(Number.isFinite) || s.submissions < 0 || s.activeTime < 0 || typeof s.paused !== 'boolean' || typeof s.cancelled !== 'boolean') throw new Error('Corrupt traversal checkpoint');
   try { validateGeometry(s.geometry); } catch { throw new Error('Corrupt traversal checkpoint'); }
   if (!Number.isSafeInteger(s.submissions) || s.submissions !== s.attempts.length + (Array.isArray(s.detailWork) ? s.detailWork.reduce((n: number, work: any) => n + (Array.isArray(work?.attempts) ? work.attempts.length : 0), 0) : 0) || !s.attempts.every((a: any) => a && typeof a.id === 'string' && a.id.length > 0 && typeof a.cellKey === 'string' && a.workId === `work:${a.cellKey}` && s.cells[a.cellKey] && ['reserved', 'dispatched', 'uncertain', 'observing', 'observed', 'skipped', 'confirmed_no_send'].includes(a.status)) || new Set(s.attempts.map((a: any) => a.id)).size !== s.attempts.length) throw new Error('Corrupt traversal checkpoint');
-  if (!s.attempts.every((a: any) => a.knownId === undefined || (typeof a.knownId === 'string' && a.knownId.trim().length > 0)) || !s.attempts.every((a: any) => !['observing', 'observed'].includes(a.status) || (typeof a.knownId === 'string' && a.knownId.trim().length > 0)) || !s.attempts.every((a: any) => a.status !== 'confirmed_no_send' || (a.knownId === undefined && a.retryOrdinal === undefined && a.observationRetryCeiling === undefined && a.observationRetryPendingDelayMs === undefined && a.recoveryEvidence === undefined && a.safeRetryAuthorization === undefined && s.cells[a.cellKey]?.outcome === 'failed' && s.gaps.some((g: any) => g.cellKey === a.cellKey && g.cause === 'failed' && g.scope === 'isolated' && g.status === 'unresolved')))) throw new Error('Corrupt traversal checkpoint');
+  if (!s.attempts.every((a: any) => a.knownId === undefined || (typeof a.knownId === 'string' && a.knownId.trim().length > 0)) || !s.attempts.every((a: any) => (a.observationDeadlineEpochMs === undefined || (Number.isSafeInteger(a.observationDeadlineEpochMs) && a.observationDeadlineEpochMs >= 0)) && (a.nextObservationEligibleEpochMs === undefined || (Number.isSafeInteger(a.nextObservationEligibleEpochMs) && a.nextObservationEligibleEpochMs >= 0)) && (a.observationDisposition === undefined || ['active', 'exhausted', 'stopped'].includes(a.observationDisposition)) && (a.observationDisposition === undefined || typeof a.knownId === 'string') && (a.observationDisposition !== 'exhausted' || a.status === 'uncertain')) || !s.attempts.every((a: any) => !['observing', 'observed'].includes(a.status) || (typeof a.knownId === 'string' && a.knownId.trim().length > 0)) || !s.attempts.every((a: any) => a.status !== 'confirmed_no_send' || (a.knownId === undefined && a.retryOrdinal === undefined && a.observationRetryCeiling === undefined && a.observationRetryPendingDelayMs === undefined && a.recoveryEvidence === undefined && a.safeRetryAuthorization === undefined && s.cells[a.cellKey]?.outcome === 'failed' && s.gaps.some((g: any) => g.cellKey === a.cellKey && g.cause === 'failed' && g.scope === 'isolated' && g.status === 'unresolved')))) throw new Error('Corrupt traversal checkpoint');
+  if (!s.attempts.every((a: any) => (a.retryAfterSeconds === undefined || (Number.isSafeInteger(a.retryAfterSeconds) && a.retryAfterSeconds >= 0 && typeof a.knownId === 'string')) && ((a.retryAfterNotBeforeEpochMs === undefined && a.retryAfterLastWallEpochMs === undefined) || (Number.isSafeInteger(a.retryAfterNotBeforeEpochMs) && Number.isSafeInteger(a.retryAfterLastWallEpochMs) && a.retryAfterLastWallEpochMs >= 0 && a.retryAfterSeconds > 0 && typeof a.knownId === 'string' && a.retryAfterNotBeforeEpochMs >= a.retryAfterSeconds * 1000)))) throw new Error('Corrupt traversal checkpoint');
   if (s.cleanPauseEvidence !== undefined && (!s.cleanPauseEvidence || typeof s.cleanPauseEvidence !== 'object' || typeof s.cleanPauseEvidence.evidence !== 'string' || !s.cleanPauseEvidence.evidence.trim() || s.paused !== true || s.recoveryPending === true || s.activeInterval === true)) throw new Error('Corrupt traversal checkpoint');
   if (s.resendApprovalsConsumed !== undefined && (!Number.isSafeInteger(s.resendApprovalsConsumed) || s.resendApprovalsConsumed < 0) || s.resendCeiling !== undefined && (!Number.isSafeInteger(s.resendCeiling) || s.resendCeiling < 1) || !s.attempts.every((a: any) => a.resendOrdinal === undefined || a.resendCeiling === s.resendCeiling) || !s.attempts.every((a: any) => ['submissionRetryOrdinal', 'retryOrdinal', 'retryCeiling', 'observationRetryCeiling', 'submissionRetryCeiling', 'resendOrdinal', 'resendCeiling'].every(key => a[key] === undefined || (Number.isSafeInteger(a[key]) && a[key] >= 0)) && (a.retryCeiling === undefined || a.retryOrdinal === undefined || a.retryOrdinal <= a.retryCeiling) && (a.observationRetryCeiling === undefined || a.retryOrdinal === undefined || a.retryOrdinal <= a.observationRetryCeiling) && !(a.observationRetryCeiling !== undefined && a.retryCeiling !== undefined) && (a.resendOrdinal === undefined ? a.resendCeiling === undefined && a.approval === undefined : Number.isSafeInteger(a.resendCeiling) && a.resendOrdinal > 0 && a.resendOrdinal <= a.resendCeiling && a.approval && typeof a.approval.rationale === 'string' && !!a.approval.rationale.trim()) && (a.submissionRetryCeiling === undefined || (a.submissionRetryOrdinal ?? 0) <= a.submissionRetryCeiling) && !(a.submissionRetryOrdinal !== undefined && a.submissionRetryCeiling === undefined && a.retryCeiling !== undefined && a.submissionRetryOrdinal > a.retryCeiling) && !(a.submissionRetryOrdinal !== undefined && a.submissionRetryCeiling === undefined && a.retryOrdinal !== undefined && a.retryCeiling !== undefined))) throw new Error('Corrupt traversal checkpoint');
   const resendAttempts = s.attempts.filter((a: any) => a.resendOrdinal !== undefined);
@@ -112,7 +132,7 @@ function validateTraversal(value: unknown): asserts value is TraversalState {
     const column = Number(match[1]), row = Number(match[2]);
     return Number.isSafeInteger(column) && Number.isSafeInteger(row) && cellKey(column, row) === key && isCellEligible(s.geometry, column, row);
   };
-  if (!s.candidates.every((c: any) => c && typeof c === 'object' && typeof c.id === 'string' && c.id.length > 0 && (c.coordinate === undefined || c.coordinate === null || (c.coordinate && Number.isFinite(c.coordinate.latitude) && c.coordinate.latitude >= -90 && c.coordinate.latitude <= 90 && Number.isFinite(c.coordinate.longitude) && c.coordinate.longitude >= -180 && c.coordinate.longitude <= 180)) && ['inside', 'outside', 'unverified'].includes(c.classification) && typeof c.sourceCell === 'string' && typeof c.observationId === 'string' && typeof c.attemptId === 'string' && (c.verifiedCanonicalKey === undefined || (typeof c.verifiedCanonicalKey === 'string' && c.verifiedCanonicalKey.trim().length > 0)) && Number.isSafeInteger(c.occurrence) && c.occurrence > 0) || !s.gaps.every((g: any) => g && typeof g === 'object' && typeof g.cellKey === 'string' && ['failed', 'unrecognized', 'uncertain'].includes(g.cause) && (g.scope === undefined || ['isolated', 'global'].includes(g.scope)) && (g.status === undefined || ['unresolved', 'resolved', 'skipped'].includes(g.status))) || !s.blocked.every((key: any) => typeof key === 'string' && validCellKey(key)) || new Set(s.queue).size !== s.queue.length || s.admitted.length > s.limits.cells || new Set(s.admitted).size !== s.admitted.length || !s.admitted.every((key: unknown) => typeof key === 'string' && validCellKey(key) && !!s.cells[key]) || !Object.keys(s.cells).every((key: string) => validCellKey(key) && s.admitted.includes(key)) || !s.queue.every((key: string) => s.cells[key]?.outcome === 'queued' && s.admitted.includes(key)) || !Object.entries(s.cells).every(([key, cell]: [string, any]) => cell && typeof cell === 'object' && ['queued', 'running', 'parked', 'nonempty', 'empty', 'failed', 'unrecognized'].includes(cell.outcome) && (cell.outcome !== 'queued' || s.queue.includes(key))) || !s.attempts.every((a: any) => validCellKey(a.cellKey))) throw new Error('Corrupt traversal checkpoint');
+  if (!s.candidates.every((c: any) => c && typeof c === 'object' && typeof c.id === 'string' && c.id.length > 0 && (c.name === undefined || (typeof c.name === 'string' && c.name.trim().length > 0)) && (c.coordinate === undefined || c.coordinate === null || (c.coordinate && Number.isFinite(c.coordinate.latitude) && c.coordinate.latitude >= -90 && c.coordinate.latitude <= 90 && Number.isFinite(c.coordinate.longitude) && c.coordinate.longitude >= -180 && c.coordinate.longitude <= 180)) && ['inside', 'outside', 'unverified'].includes(c.classification) && typeof c.sourceCell === 'string' && typeof c.observationId === 'string' && typeof c.attemptId === 'string' && (c.verifiedCanonicalKey === undefined || (typeof c.verifiedCanonicalKey === 'string' && c.verifiedCanonicalKey.trim().length > 0)) && Number.isSafeInteger(c.occurrence) && c.occurrence > 0) || !s.gaps.every((g: any) => g && typeof g === 'object' && typeof g.cellKey === 'string' && ['failed', 'unrecognized', 'uncertain', 'partial'].includes(g.cause) && (g.scope === undefined || ['isolated', 'global'].includes(g.scope)) && (g.status === undefined || ['unresolved', 'resolved', 'skipped'].includes(g.status))) || !s.blocked.every((key: any) => typeof key === 'string' && validCellKey(key)) || new Set(s.queue).size !== s.queue.length || s.admitted.length > s.limits.cells || new Set(s.admitted).size !== s.admitted.length || !s.admitted.every((key: unknown) => typeof key === 'string' && validCellKey(key) && !!s.cells[key]) || !Object.keys(s.cells).every((key: string) => validCellKey(key) && s.admitted.includes(key)) || !s.queue.every((key: string) => s.cells[key]?.outcome === 'queued' && s.admitted.includes(key)) || !Object.entries(s.cells).every(([key, cell]: [string, any]) => cell && typeof cell === 'object' && ['queued', 'running', 'parked', 'nonempty', 'partial', 'empty', 'failed', 'unrecognized'].includes(cell.outcome) && (cell.outcome !== 'queued' || s.queue.includes(key))) || !s.attempts.every((a: any) => validCellKey(a.cellKey))) throw new Error('Corrupt traversal checkpoint');
 }
 
 /** Durable checkpoint foundation; this does not implement restartable discovery. */
@@ -129,8 +149,7 @@ export function readOnlyCheckpointSnapshot(path: string): ReadOnlyCheckpointSnap
     validate(JSON.parse(String(checkpoint.payload)));
     const binding = db.prepare('SELECT payload FROM operator_binding WHERE id=1').get();
     if (!binding) throw new Error('Corrupt state: missing operator binding');
-    const parsedBinding = JSON.parse(String(binding.payload));
-    if (!parsedBinding || typeof parsedBinding !== 'object' || Array.isArray(parsedBinding) || Object.keys(parsedBinding).length !== 2 || parsedBinding.version !== 1 || typeof parsedBinding.fixtureIdentity !== 'string' || !/^[a-f0-9]{64}$/.test(parsedBinding.fixtureIdentity)) throw new Error('Corrupt state: invalid operator binding');
+    storedBinding(binding.payload);
     const row = db.prepare('SELECT payload FROM traversal WHERE id=1').get();
     if (!row) throw new Error('Corrupt state: missing traversal');
     const traversal = JSON.parse(String(row.payload));
@@ -151,8 +170,16 @@ export function readOnlyCheckpointSnapshot(path: string): ReadOnlyCheckpointSnap
 export class DurableState {
   #ownerReleased = false;
   private constructor(private db: DatabaseSync) {}
-  static createBound(path: string, fixtureIdentity: string, traversal: TraversalState): void {
-    if (typeof fixtureIdentity !== 'string' || !/^[a-f0-9]{64}$/.test(fixtureIdentity)) throw new Error('Invalid fixture identity');
+  /** Return the validated provider binding from this acquired checkpoint. */
+  providerBinding(): ProviderBinding {
+    const row = this.db.prepare('SELECT payload FROM operator_binding WHERE id=1').get();
+    if (!row) throw new Error('Missing operator binding');
+    const binding = storedBinding(row.payload);
+    if (binding.version !== 2) throw new Error('Checkpoint is not provider-bound');
+    return binding;
+  }
+  static createBound(path: string, fixtureIdentity: string | ProviderBinding, traversal: TraversalState): void {
+    const operatorBinding = requestedBinding(fixtureIdentity);
     const serializedTraversal = JSON.stringify(traversal);
     validateTraversal(JSON.parse(serializedTraversal));
     if (traversal.timeUnit !== 'milliseconds') throw new Error('Durable traversal time unit is unmarked; explicit migration required');
@@ -169,7 +196,7 @@ export class DurableState {
       try {
         staged.exec('PRAGMA journal_mode=DELETE; CREATE TABLE checkpoint (id INTEGER PRIMARY KEY CHECK(id=1), version INTEGER NOT NULL, payload TEXT NOT NULL); CREATE TABLE owner (id INTEGER PRIMARY KEY CHECK(id=1), pid INTEGER NOT NULL); CREATE TABLE operator_binding (id INTEGER PRIMARY KEY CHECK(id=1), payload TEXT NOT NULL); CREATE TABLE traversal (id INTEGER PRIMARY KEY CHECK(id=1), payload TEXT NOT NULL);');
         staged.prepare('INSERT INTO checkpoint VALUES(1,1,?)').run('{"version":1,"work":[],"observations":[],"gaps":[]}');
-        staged.prepare('INSERT INTO operator_binding VALUES(1,?)').run(JSON.stringify({ version: 1, fixtureIdentity }));
+        staged.prepare('INSERT INTO operator_binding VALUES(1,?)').run(JSON.stringify(operatorBinding));
         staged.prepare('INSERT INTO traversal VALUES(1,?)').run(serializedTraversal);
         staged.close();
       } catch (error) {
@@ -195,9 +222,7 @@ export class DurableState {
       validate(JSON.parse(String(checkpoint.payload)));
       const binding = db.prepare('SELECT payload FROM operator_binding WHERE id=1').get();
       if (!binding) throw new Error('Corrupt state: missing operator binding');
-      let parsedBinding: unknown;
-      try { parsedBinding = JSON.parse(String(binding.payload)); } catch { throw new Error('Corrupt state: invalid operator binding'); }
-      if (!parsedBinding || typeof parsedBinding !== 'object' || Array.isArray(parsedBinding) || Object.keys(parsedBinding).length !== 2 || (parsedBinding as any).version !== 1 || typeof (parsedBinding as any).fixtureIdentity !== 'string' || !/^[a-f0-9]{64}$/.test((parsedBinding as any).fixtureIdentity)) throw new Error('Corrupt state: invalid operator binding');
+      storedBinding(binding.payload);
       const traversalRow = db.prepare('SELECT payload FROM traversal WHERE id=1').get();
       if (!traversalRow) throw new Error('Corrupt state: missing traversal');
       const traversal = JSON.parse(String(traversalRow.payload));
@@ -226,8 +251,8 @@ export class DurableState {
       throw error;
     }
   }
-  static openBound(path: string, fixtureIdentity: string): DurableState {
-    if (typeof fixtureIdentity !== 'string' || !/^[a-f0-9]{64}$/.test(fixtureIdentity)) throw new Error('Invalid fixture identity');
+  static openBound(path: string, fixtureIdentity: string | ProviderBinding): DurableState {
+    const operatorBinding = requestedBinding(fixtureIdentity);
     const db = new DatabaseSync(path);
     try {
       db.exec('BEGIN IMMEDIATE');
@@ -238,10 +263,8 @@ export class DurableState {
       validate(JSON.parse(String(checkpoint.payload)));
       const binding = db.prepare('SELECT payload FROM operator_binding WHERE id=1').get();
       if (!binding) throw new Error('Corrupt state: missing operator binding');
-      let parsedBinding: unknown;
-      try { parsedBinding = JSON.parse(String(binding.payload)); } catch { throw new Error('Corrupt state: invalid operator binding'); }
-      if (!parsedBinding || typeof parsedBinding !== 'object' || Array.isArray(parsedBinding) || Object.keys(parsedBinding).length !== 2 || (parsedBinding as any).version !== 1 || typeof (parsedBinding as any).fixtureIdentity !== 'string' || !/^[a-f0-9]{64}$/.test((parsedBinding as any).fixtureIdentity)) throw new Error('Corrupt state: invalid operator binding');
-      if ((parsedBinding as any).fixtureIdentity !== fixtureIdentity) throw new Error('Fixture identity does not match checkpoint binding');
+      const parsedBinding = storedBinding(binding.payload);
+      if (JSON.stringify(parsedBinding) !== JSON.stringify(operatorBinding)) throw new Error('Operator identity does not match checkpoint binding');
       const traversalRow = db.prepare('SELECT payload FROM traversal WHERE id=1').get();
       if (!traversalRow) throw new Error('Corrupt state: missing traversal');
       const traversal = JSON.parse(String(traversalRow.payload));

@@ -10,6 +10,17 @@ export interface SyntheticTransport {
   observe(id: string): Promise<Response>;
 }
 export interface HandoffBounds { requestMilliseconds: number; activeUntil: number; credential?: string }
+
+/** Retrieve ready snapshot records separately from progress observation. */
+export async function retrieveOnce(transport: { retrieve(id: string): Promise<Response> }, id: string, limit: number, bounds: HandoffBounds): Promise<ReturnType<typeof mapResultsResponse>> {
+  const wait = remaining(bounds);
+  if (wait <= 0) return { kind: 'gap', reason: 'deadline-or-invalid-bounds' };
+  const requestDeadline = Date.now() + bounds.requestMilliseconds;
+  const result = await bounded(() => transport.retrieve(id), wait, bounds, requestDeadline);
+  if ('preDispatchCutoff' in result || 'timeout' in result || remaining(bounds) <= 0 || Date.now() >= requestDeadline) return { kind: 'gap', reason: 'retrieval-timeout' };
+  if ('error' in result) return { kind: 'gap', reason: sanitizeProviderDiagnostic(result.error, bounds.credential) };
+  return mapResultsResponse(result.value.status, result.value.body, limit);
+}
 type Gap = { kind: 'gap'; reason: string };
 type SubmitResult = Gap | { kind: 'uncertain'; reason: string } | { kind: 'acknowledged'; id: string; retryAfterSeconds?: number; gap?: string } | ReturnType<typeof mapResultsResponse>;
 type ObservationResult = Gap | ReturnType<typeof mapProgressResponse>;

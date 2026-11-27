@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { validateGeometry, createTraversal, admitNextCell, reserveSubmission, authorizeResend, markUncertain } from '../dist/index.js';
 import { DurableState } from '../dist/durable-state.js';
-import { executeDurableDiscovery, executeDurableDiscoveryAsync, setDurableDiscoveryBoundaryHookForTest } from '../dist/durable-discovery.js';
+import { executeDurableDiscovery, executeDurableDiscoveryAsync, resolveDurableRecoveryDebit, setDurableDiscoveryBoundaryHookForTest } from '../dist/durable-discovery.js';
 import { mkdtempSync, rmSync, writeFileSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -865,6 +865,253 @@ test('async durable discovery persists dispatch before awaiting send and ID befo
     const result = await operation;
     assert.equal(result.cells['0,0'].outcome, 'empty');
     assert.equal(result.submissions, 1);
+    state.close();
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('async observation timeout persists exhausted known ID and resume neither polls nor resubmits', async () => {
+  const { dir, path } = temp();
+  try {
+    let state = DurableState.open(path);
+    state.writeTraversal(createTraversal(geometry, { cells: 1, submissions: 1, activeTime: 100 }));
+    let sends = 0;
+    let polls = 0;
+    let releaseLateObservation;
+    const lateObservation = new Promise(resolve => { releaseLateObservation = () => resolve({ result: { status: 'empty' }, elapsed: 0 }); });
+    setTimeout(releaseLateObservation, 50);
+    await assert.rejects(executeDurableDiscoveryAsync(state, async () => { sends++; return { id: 'expiring-id' }; }, async () => { polls++; return lateObservation; }, 'isolated', { observationCeiling: 0, observationTimeoutMs: 5, knownSafeObservationError: () => false }, { monotonicNow: () => 0, epochNow: () => 1000 }));
+    assert.equal(state.readTraversal().attempts.at(-1).knownId, 'expiring-id');
+    assert.equal(state.readTraversal().attempts.at(-1).observationDisposition, 'exhausted');
+    assert.ok(state.readTraversal().gaps.some(g => g.cause === 'uncertain' && g.status === 'unresolved'));
+    await new Promise(resolve => setTimeout(resolve, 60));
+    assert.equal(state.readTraversal().candidates.length, 0);
+    assert.deepEqual(state.readTraversal().queue, []);
+    assert.equal(state.readTraversal().attempts.at(-1).observationRetryCeiling, 0);
+    state.close();
+    const durableUrl = new URL('../dist/durable-state.js', import.meta.url).href;
+    const executorUrl = new URL('../dist/durable-discovery.js', import.meta.url).href;
+    const resumeScript = `import {DurableState} from ${JSON.stringify(durableUrl)}; import {executeDurableDiscoveryAsync} from ${JSON.stringify(executorUrl)}; const d=DurableState.open(${JSON.stringify(path)}); let sends=0,polls=0; const s=await executeDurableDiscoveryAsync(d,async()=>{sends++;return{id:'duplicate'}},async()=>{polls++;return{result:{status:'empty'},elapsed:0}},'isolated',{observationCeiling:0,observationTimeoutMs:10,knownSafeObservationError:()=>false},{monotonicNow:()=>0,epochNow:()=>1020}); console.log(JSON.stringify({sends,polls,knownId:s.attempts.at(-1).knownId,disposition:s.attempts.at(-1).observationDisposition,gaps:s.gaps,cells:s.cells})); d.close();`;
+    const resumedChild = spawnSync(process.execPath, ['--input-type=module', '-e', resumeScript], { encoding: 'utf8', timeout: 5000 });
+    assert.equal(resumedChild.status, 0, resumedChild.stderr);
+    const resumed = JSON.parse(resumedChild.stdout.trim());
+    assert.equal(resumed.knownId, 'expiring-id');
+    assert.equal(resumed.disposition, 'exhausted');
+    assert.equal(resumed.sends, 0);
+    assert.equal(resumed.polls, 0);
+    assert.ok(resumed.gaps.some(g => g.cause === 'uncertain' && g.status === 'unresolved'));
+    assert.equal(resumed.cells['0,0'].outcome, 'parked');
+    assert.equal(sends, 1);
+    assert.equal(polls, 1);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('local abort while awaiting observation retains ID and gap and ignores late success', async () => {
+  const { dir, path } = temp();
+  try {
+    const state = DurableState.open(path);
+    state.writeTraversal(createTraversal(geometry, { cells: 1, submissions: 1, activeTime: 100 }));
+    const controller = new AbortController();
+    let releaseObservation;
+    const pending = new Promise(resolve => { releaseObservation = () => resolve({ result: { status: 'success', candidates: [{ id: 'late' }] }, elapsed: 0 }); });
+    const releaseTimer = setTimeout(() => releaseObservation(), 50);
+    let polls = 0;
+    const operation = executeDurableDiscoveryAsync(state, async () => ({ id: 'stopped-id' }), async () => { polls++; return pending; }, 'isolated', { observationCeiling: 0, observationTimeoutMs: 5000, knownSafeObservationError: () => false }, { monotonicNow: () => 0, epochNow: () => 2000, signal: controller.signal });
+    await new Promise(resolve => setImmediate(resolve));
+    controller.abort();
+    await assert.rejects(operation, /stopped locally/);
+    assert.equal(state.readTraversal().attempts.at(-1).knownId, 'stopped-id');
+    assert.equal(state.readTraversal().attempts.at(-1).observationDisposition, 'stopped');
+    assert.equal(state.readTraversal().candidates.length, 0);
+    assert.equal(state.readTraversal().queue.length, 0);
+    clearTimeout(releaseTimer);
+    releaseObservation();
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(state.readTraversal().candidates.length, 0);
+    assert.ok(state.readTraversal().gaps.some(g => g.cause === 'uncertain'));
+    assert.equal(polls, 1);
+    state.close();
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('active budget stops an in-flight async observation and settles actual elapsed time', async () => {
+  const { dir, path } = temp();
+  let state;
+  try {
+    state = DurableState.open(path);
+    state.writeTraversal(createTraversal(geometry, { cells: 1, submissions: 1, activeTime: 5 }));
+    let now = 0;
+    const pending = Promise.withResolvers();
+    let polls = 0;
+    let localSignal;
+    const timer = setTimeout(() => { now = 12; pending.resolve({ result: { status: 'empty' }, elapsed: 0 }); }, 60);
+    const operation = executeDurableDiscoveryAsync(state, async () => ({ id: 'cutoff-id' }), (_id, signal) => { localSignal = signal; polls++; now = 9; return pending.promise; }, 'isolated', { observationCeiling: 0, observationTimeoutMs: 5000, knownSafeObservationError: () => false }, { monotonicNow: () => now, epochNow: () => 2000 });
+    try { await assert.rejects(operation, /stopped locally/); } finally { clearTimeout(timer); }
+    const stopped = state.readTraversal();
+    assert.equal(stopped.activeTime, 9);
+    assert.equal(localSignal.aborted, true);
+    assert.equal(stopped.activeInterval, false);
+    assert.equal(stopped.attempts.at(-1).knownId, 'cutoff-id');
+    assert.ok(stopped.gaps.some(g => g.cause === 'uncertain'));
+    pending.resolve({ result: { status: 'empty' }, elapsed: 0 });
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(state.readTraversal().cells['0,0'].outcome, 'parked');
+    assert.equal(polls, 1);
+  } finally { state?.close(); rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('clean stopped known ID resumes after active budget extension without resubmission', async () => {
+  const { dir, path } = temp();
+  let state;
+  try {
+    state = DurableState.open(path);
+    state.writeTraversal(createTraversal(geometry, { cells: 1, submissions: 1, activeTime: 5 }));
+    const controller = new AbortController();
+    const pending = Promise.withResolvers();
+    let now = 0;
+    let sends = 0;
+    const policy = { observationCeiling: 0, observationTimeoutMs: 5000, knownSafeObservationError: () => false };
+    const operation = executeDurableDiscoveryAsync(state, async () => { sends++; return { id: 'resume-exact-id' }; }, () => pending.promise, 'isolated', policy, { monotonicNow: () => now, epochNow: () => 2000, signal: controller.signal });
+    await new Promise(resolve => setImmediate(resolve));
+    now = 5;
+    controller.abort();
+    await assert.rejects(operation, /stopped locally/);
+    assert.equal(state.readTraversal().activeInterval, false);
+    assert.equal(state.readTraversal().attempts.at(-1).knownId, 'resume-exact-id');
+    state.close();
+    state = DurableState.open(path);
+    assert.equal(state.readTraversal().recoveryPending, false);
+    state.transitionTraversal(value => ({ ...value, limits: { ...value.limits, activeTime: 10 } }));
+    const observed = [];
+    const result = await executeDurableDiscoveryAsync(state, async () => { sends++; return { id: 'duplicate' }; }, async id => { observed.push(id); return { result: { status: 'empty' }, elapsed: 0 }; }, 'isolated', policy, { monotonicNow: () => now, epochNow: () => 2001 });
+    assert.deepEqual(observed, ['resume-exact-id']);
+    assert.equal(sends, 1);
+    assert.equal(result.submissions, 1);
+    assert.equal(result.cells['0,0'].outcome, 'empty');
+  } finally { state?.close(); rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('fresh process resumes async observation by persisted ID without duplicate submission', async () => {
+  const { dir, path } = temp();
+  try {
+    let state = DurableState.open(path);
+    state.writeTraversal(createTraversal(geometry, { cells: 1, submissions: 1, activeTime: 100 }));
+    state.close();
+    const durableUrl = new URL('../dist/durable-state.js', import.meta.url).href;
+    const executorUrl = new URL('../dist/durable-discovery.js', import.meta.url).href;
+    const script = `import {DurableState} from ${JSON.stringify(durableUrl)}; import {executeDurableDiscoveryAsync,setDurableDiscoveryBoundaryHookForTest} from ${JSON.stringify(executorUrl)}; const d=DurableState.open(${JSON.stringify(path)}); setDurableDiscoveryBoundaryHookForTest(x=>{if(x==='observing') process.exit(42)}); await executeDurableDiscoveryAsync(d,async()=>({id:'crash-id'}),async()=>({result:{status:'empty'},elapsed:0}),'isolated',undefined,{monotonicNow:()=>0,epochNow:()=>1000});`;
+    const crashed = spawnSync(process.execPath, ['--input-type=module', '-e', script], { encoding: 'utf8', timeout: 5000 });
+    assert.equal(crashed.status, 42, crashed.stderr);
+    state = DurableState.open(path);
+    assert.equal(state.readTraversal().recoveryPending, true);
+    assert.equal(state.readTraversal().attempts.at(-1).knownId, 'crash-id');
+    resolveDurableRecoveryDebit(state, 1, 'synthetic interrupted async observation');
+    const resumed = await executeDurableDiscoveryAsync(state, async () => { assert.fail('must not resubmit'); }, async id => {
+      assert.equal(id, 'crash-id');
+      return { result: { status: 'empty' }, elapsed: 0 };
+    }, 'isolated', undefined, { monotonicNow: () => 0, epochNow: () => 1001 });
+    assert.equal(resumed.submissions, 1);
+    assert.equal(resumed.cells['0,0'].outcome, 'empty');
+    assert.deepEqual(resumed.gaps, []);
+    state.close();
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('async retry persists epoch eligibility and waits only remaining time after restart', async () => {
+  const { dir, path } = temp();
+  try {
+    let state = DurableState.open(path);
+    state.writeTraversal(createTraversal(geometry, { cells: 1, submissions: 1, activeTime: 100 }));
+    const interruptedPolicy = { observationCeiling: 1, observationTimeoutMs: 5000, knownSafeObservationError: () => true, retryBaseDelayMs: 30, retryMaxDelayMs: 30, wait: () => { throw new Error('simulated interruption after authorization'); } };
+    await assert.rejects(executeDurableDiscoveryAsync(state, async () => ({ id: 'retry-id' }), async () => { throw new Error('transient poll'); }, 'isolated', interruptedPolicy, { monotonicNow: () => 0, epochNow: () => 5000 }), /simulated interruption/);
+    assert.equal(state.readTraversal().attempts.at(-1).nextObservationEligibleEpochMs, 5030);
+    state.close();
+    state = DurableState.open(path);
+    const waits = [];
+    const resumed = await executeDurableDiscoveryAsync(state, async () => assert.fail('must not resubmit'), async () => ({ result: { status: 'empty' }, elapsed: 0 }), 'isolated', { ...interruptedPolicy, wait: ms => waits.push(ms) }, { monotonicNow: () => 0, epochNow: () => 5010 });
+    assert.deepEqual(waits, [20]);
+    assert.equal(resumed.cells['0,0'].outcome, 'empty');
+    assert.equal(resumed.submissions, 1);
+    state.close();
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('malformed persisted async observation timestamps fail closed', async () => {
+  const { dir, path } = temp();
+  try {
+    const state = DurableState.open(path);
+    state.writeTraversal(createTraversal(geometry, { cells: 1, submissions: 1, activeTime: 100 }));
+    await executeDurableDiscoveryAsync(state, async () => ({ id: 'timestamp-id' }), async () => ({ result: { status: 'empty' }, elapsed: 0 }), 'isolated', { observationCeiling: 0, observationTimeoutMs: 1000, knownSafeObservationError: () => false }, { monotonicNow: () => 0, epochNow: () => 4000 });
+    state.close();
+    const raw = new DatabaseSync(path);
+    const original = JSON.parse(raw.prepare('SELECT payload FROM traversal WHERE id=1').get().payload);
+    assert.equal(original.attempts[0].observationDeadlineEpochMs, 5000);
+    original.attempts[0].observationDeadlineEpochMs = 'not-an-epoch';
+    const corrupted = JSON.stringify(original);
+    raw.prepare('UPDATE traversal SET payload=? WHERE id=1').run(corrupted);
+    raw.close();
+    assert.throws(() => DurableState.open(path), /Corrupt traversal checkpoint/);
+    const verify = new DatabaseSync(path);
+    assert.equal(verify.prepare('SELECT payload FROM traversal WHERE id=1').get().payload, corrupted);
+    verify.close();
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('fresh process crash after async dispatch preserves unknown outcome and blocks resend', async () => {
+  const { dir, path } = temp();
+  try {
+    let state = DurableState.open(path);
+    state.writeTraversal(createTraversal(geometry, { cells: 1, submissions: 1, activeTime: 100 }));
+    state.close();
+    const durableUrl = new URL('../dist/durable-state.js', import.meta.url).href;
+    const executorUrl = new URL('../dist/durable-discovery.js', import.meta.url).href;
+    const script = `import {DurableState} from ${JSON.stringify(durableUrl)}; import {executeDurableDiscoveryAsync,setDurableDiscoveryBoundaryHookForTest} from ${JSON.stringify(executorUrl)}; const d=DurableState.open(${JSON.stringify(path)}); setDurableDiscoveryBoundaryHookForTest(x=>{if(x==='dispatched') process.exit(43)}); await executeDurableDiscoveryAsync(d,async()=>({id:'never-persisted'}),async()=>({result:{status:'empty'},elapsed:0}),'isolated',undefined,{monotonicNow:()=>0,epochNow:()=>6000});`;
+    const crashed = spawnSync(process.execPath, ['--input-type=module', '-e', script], { encoding: 'utf8', timeout: 5000 });
+    assert.equal(crashed.status, 43, crashed.stderr);
+    state = DurableState.open(path);
+    assert.equal(state.readTraversal().recoveryPending, true);
+    resolveDurableRecoveryDebit(state, 1, 'synthetic interrupted dispatch');
+    let sends = 0;
+    await assert.rejects(executeDurableDiscoveryAsync(state, async () => { sends++; return { id: 'duplicate' }; }, async () => ({ result: { status: 'empty' }, elapsed: 0 }), 'isolated', undefined, { monotonicNow: () => 0, epochNow: () => 6001 }), /unknown outcome|refusing resend/i);
+    assert.equal(sends, 0);
+    assert.equal(state.readTraversal().attempts[0].knownId, undefined);
+    assert.ok(state.readTraversal().gaps.some(g => g.cause === 'uncertain'));
+    state.close();
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('local stop during awaited send persists returned ID but never begins observation', async () => {
+  const { dir, path } = temp();
+  try {
+    const state = DurableState.open(path);
+    state.writeTraversal(createTraversal(geometry, { cells: 1, submissions: 1, activeTime: 100 }));
+    const controller = new AbortController();
+    const deferredSend = Promise.withResolvers();
+    let observations = 0;
+    const operation = executeDurableDiscoveryAsync(state, () => deferredSend.promise, async () => { observations++; return { result: { status: 'empty' }, elapsed: 0 }; }, 'isolated', undefined, { monotonicNow: () => 0, epochNow: () => 7000, signal: controller.signal });
+    await new Promise(resolve => setImmediate(resolve));
+    controller.abort();
+    deferredSend.resolve({ id: 'send-finished-id' });
+    await assert.rejects(operation, /stopped locally/);
+    assert.equal(state.readTraversal().attempts.at(-1).knownId, 'send-finished-id');
+    assert.equal(state.readTraversal().attempts.at(-1).observationDisposition, 'stopped');
+    assert.equal(observations, 0);
+    assert.ok(state.readTraversal().gaps.some(g => g.cause === 'uncertain'));
+    state.close();
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('expired known-ID deadline after restart becomes durable exhaustion', async () => {
+  const { dir, path } = temp();
+  try {
+    let state = DurableState.open(path);
+    state.writeTraversal(createTraversal(geometry, { cells: 1, submissions: 1, activeTime: 100 }));
+    await assert.rejects(executeDurableDiscoveryAsync(state, async () => ({ id: 'restart-expired-id' }), async () => { throw new Error('poll interrupted'); }, 'isolated', { observationCeiling: 0, observationTimeoutMs: 10, knownSafeObservationError: () => false }, { monotonicNow: () => 0, epochNow: () => 8000 }), /poll interrupted/);
+    state.close();
+    state = DurableState.open(path);
+    await assert.rejects(executeDurableDiscoveryAsync(state, async () => assert.fail('must not resubmit'), async () => assert.fail('deadline already expired'), 'isolated', { observationCeiling: 0, observationTimeoutMs: 10, knownSafeObservationError: () => false }, { monotonicNow: () => 0, epochNow: () => 8010 }), /deadline expired/);
+    assert.equal(state.readTraversal().attempts.at(-1).knownId, 'restart-expired-id');
+    assert.equal(state.readTraversal().attempts.at(-1).observationDisposition, 'exhausted');
+    assert.ok(state.readTraversal().gaps.some(g => g.cause === 'uncertain'));
     state.close();
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });

@@ -1,4 +1,19 @@
 // Pure mapping only: no credentials, network, scheduling or provider identity claims.
+import { cellCenter, cellKey, isCellEligible } from './index.js';
+import type { Attempt, TraversalState } from './traversal.js';
+import type { ProviderBinding } from './durable-state.js';
+
+/** Maps a persisted dispatched attempt, not a work-ID-derived coordinate. No transport is performed. */
+export function mapAdmittedDiscoveryRequest(state: TraversalState, attempt: Attempt, binding: ProviderBinding) {
+  const persisted = state.attempts.find(item => item.id === attempt.id);
+  const key = attempt.cellKey;
+  const match = /^(-?\d+),(-?\d+)$/.exec(key);
+  if (!persisted || persisted.cellKey !== key || persisted.status !== 'dispatched' || !state.admitted.includes(key) || state.cells[key]?.outcome !== 'running' || !match) throw new Error('Attempt is not for an admitted eligible running cell');
+  const column = Number(match[1]), row = Number(match[2]);
+  if (!Number.isSafeInteger(column) || !Number.isSafeInteger(row) || cellKey(column, row) !== key || !isCellEligible(state.geometry, column, row)) throw new Error('Attempt is not for an admitted eligible cell');
+  const center = cellCenter(state.geometry, column, row);
+  return mapDiscoveryRequest({ country: binding.country, keyword: binding.keyword, zoom: binding.zoom, limit: binding.limitPerInput, lat: center.latitude, lon: center.longitude });
+}
 type RecordValue = Record<string, unknown>;
 type Gap = { kind: 'gap'; reason: string };
 type Candidate = { name: string; placeId: string; coordinates?: { lat: number; lon: number } };

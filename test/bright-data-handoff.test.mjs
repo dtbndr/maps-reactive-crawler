@@ -35,6 +35,19 @@ test('valid retry hint and ready results are mapped conservatively', async () =>
   const observed = await handoff.observeOnce({ observe: async () => ({ status: 200, body: { status: 'ready' } }) }, 'id', opts);
   assert.deepEqual(observed, { kind: 'progress', state: 'ready' });
 });
+test('ready requires separate bounded retrieval of records', async () => {
+  let calls = 0;
+  const observed = await handoff.observeOnce({ observe: async () => ({ status: 200, body: { status: 'ready' } }) }, 'snapshot', { requestMilliseconds: 100, activeUntil: Date.now() + 1000 });
+  assert.deepEqual(observed, { kind: 'progress', state: 'ready' }); // positive control
+  const result = await handoff.retrieveOnce({ retrieve: async id => { calls++; assert.equal(id, 'snapshot'); return { status: 200, body: [{ name: 'Cafe', place_id: 'p1' }] }; } }, 'snapshot', 10, { requestMilliseconds: 100, activeUntil: Date.now() + 1000 });
+  assert.equal(calls, 1);
+  assert.equal(result.kind, 'results');
+  assert.equal(result.expand, true);
+  assert.equal(result.candidates[0].placeId, 'p1');
+  const stopped = await handoff.retrieveOnce({ retrieve: async () => { calls++; } }, 'snapshot', 10, { requestMilliseconds: 100, activeUntil: Date.now() - 1 });
+  assert.equal(stopped.kind, 'gap');
+  assert.equal(calls, 1);
+});
 test('an ID returned at active cutoff is retained with a gap', async () => {
   const original = Date.now;
   let now = 100;

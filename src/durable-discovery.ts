@@ -99,7 +99,21 @@ export function executeDurableDetail(state: DurableState, workId: string, send: 
    }, clock); } catch (error) { throw error; }
   }
 }
-export type DurableRetryPolicy = { observationCeiling: number; knownSafeObservationError: (error: unknown) => boolean; submissionCeiling?: number; knownSafeSubmissionError?: (error: unknown) => boolean; retryBaseDelayMs?: number; retryMaxDelayMs?: number; wait?: (milliseconds: number) => void };
+export type DurableRetryPolicy = { observationCeiling: number; knownSafeObservationError: (error: unknown) => boolean; observationTimeoutMs?: number; submissionCeiling?: number; knownSafeSubmissionError?: (error: unknown) => boolean; retryBaseDelayMs?: number; retryMaxDelayMs?: number; wait?: (milliseconds: number) => void };
+class DurableObservationStop extends Error { constructor(readonly disposition: 'exhausted' | 'stopped') { super(disposition === 'exhausted' ? 'Observation deadline expired' : 'Observation stopped locally'); } }
+async function awaitDurableObservation<T>(operation: (signal: AbortSignal) => Promise<T>, milliseconds: number, signal?: AbortSignal, activeMilliseconds = Infinity): Promise<T> {
+  if (!Number.isFinite(milliseconds) || milliseconds < 0) throw new Error('Invalid observation deadline');
+  if (signal?.aborted) throw new DurableObservationStop('stopped');
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  let onAbort: (() => void) | undefined;
+  const controller = new AbortController();
+  const activeFirst = activeMilliseconds <= milliseconds;
+  try { return await Promise.race([operation(controller.signal), new Promise<T>((_, reject) => {
+    timer = setTimeout(() => { reject(new DurableObservationStop(activeFirst ? 'stopped' : 'exhausted')); controller.abort(); }, Math.max(0, Math.min(milliseconds, activeMilliseconds)));
+    if (signal) { onAbort = () => { reject(new DurableObservationStop('stopped')); controller.abort(); }; signal.addEventListener('abort', onAbort, { once: true }); }
+  })]); }
+  finally { if (timer) clearTimeout(timer); if (signal && onAbort) signal.removeEventListener('abort', onAbort); }
+}
 function retryDelay(policy: DurableRetryPolicy | undefined, ordinal: number): number {
   const base = policy?.retryBaseDelayMs ?? 0;
   const cap = policy?.retryMaxDelayMs ?? base;
@@ -288,7 +302,7 @@ function executeDurableDiscoveryImpl(state: DurableState, send: SyntheticSend, o
 }
 
 
-async function executeDurableDiscoveryAsyncImpl(state: DurableState, send: (workId: string) => { id: string } | Promise<{ id: string }>, observe: (id: string) => { result: DiscoveryResult; elapsed: number } | Promise<{ result: DiscoveryResult; elapsed: number }>, uncertaintyScope: 'isolated' | 'global', retryPolicy: DurableRetryPolicy | undefined, reservedRetryId?: string, targetKey?: string, settle?: (change?: (value: TraversalState) => TraversalState) => void): Promise<TraversalState> {
+async function executeDurableDiscoveryAsyncImpl(state: DurableState, send: (workId: string) => { id: string } | Promise<{ id: string }>, observe: (id: string, signal?: AbortSignal) => { result: DiscoveryResult; elapsed: number } | Promise<{ result: DiscoveryResult; elapsed: number }>, uncertaintyScope: 'isolated' | 'global', retryPolicy: DurableRetryPolicy | undefined, reservedRetryId?: string, targetKey?: string, settle?: (change?: (value: TraversalState) => TraversalState) => void, epochNow: () => number = Date.now, signal?: AbortSignal): Promise<TraversalState> {
   let current = state.readTraversal();
   if (current.recoveryPending) throw new DurableStopError('recovery-pending', 'Recovery accounting is unresolved');
   if (current.paused || current.cancelled) throw new Error(current.paused ? 'Traversal is paused' : 'Traversal is cancelled');
@@ -328,7 +342,7 @@ async function executeDurableDiscoveryAsyncImpl(state: DurableState, send: (work
     settle?.();
     if (state.readTraversal().activeTime >= state.readTraversal().limits.activeTime) throw new DurableStopError('active-time-limit', 'Active-time limit reached before retry reservation');
     state.transitionTraversal(value => authorizeSafeRetryReservation(value, running!, auth.ordinal, auth.ceiling));
-    return await executeDurableDiscoveryAsyncImpl(state, send, observe, uncertaintyScope, retryPolicy, state.readTraversal().attempts.at(-1)!.id, undefined, settle);
+    return await executeDurableDiscoveryAsyncImpl(state, send, observe, uncertaintyScope, retryPolicy, state.readTraversal().attempts.at(-1)!.id, undefined, settle, epochNow, signal);
   }
   if (latestForCell?.status === 'uncertain' && !latestForCell.knownId) {
     throw new Error('Dispatched attempt has unknown outcome; refusing resend');
@@ -394,7 +408,7 @@ async function executeDurableDiscoveryAsyncImpl(state: DurableState, send: (work
           return authorizeSafeRetry(uncertain, running!, retryOrdinal, submissionCeiling, retryDelay(retryPolicy, retryOrdinal));
         });
         boundaryHook?.('retry-authorized');
-        return await executeDurableDiscoveryAsyncImpl(state, send, observe, uncertaintyScope, retryPolicy, state.readTraversal().attempts.at(-1)!.id, undefined, settle);
+        return await executeDurableDiscoveryAsyncImpl(state, send, observe, uncertaintyScope, retryPolicy, state.readTraversal().attempts.at(-1)!.id, undefined, settle, epochNow, signal);
       }
       state.transitionTraversal(value => markUncertain(value, running!, uncertaintyScope));
       throw error;
@@ -408,17 +422,48 @@ async function executeDurableDiscoveryAsyncImpl(state: DurableState, send: (work
     state.transitionTraversal(value => ({ ...value, attempts: value.attempts.map(item => item.id === attempt!.id ? { ...item, knownId: response.id } : item) }));
     boundaryHook?.('id-persisted');
   }
-  const id = state.readTraversal().attempts.find(item => item.id === attempt!.id)!.knownId!;
+  let durableAttempt = state.readTraversal().attempts.find(item => item.id === attempt!.id)!;
+  const id = durableAttempt.knownId!;
+  const epoch = epochNow();
+  if (!Number.isSafeInteger(epoch) || epoch < 0) throw new Error('Invalid epoch clock sample');
+  const timeoutMs = retryPolicy?.observationTimeoutMs ?? 60_000;
+  if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 0 || !Number.isSafeInteger(epoch + timeoutMs)) throw new Error('Invalid observation timeout');
+  if (durableAttempt.observationDeadlineEpochMs === undefined) {
+    state.transitionTraversal(value => ({ ...value, attempts: value.attempts.map(item => item.id === attempt!.id ? { ...item, observationDeadlineEpochMs: epoch + timeoutMs, observationRetryCeiling: item.observationRetryCeiling ?? retryPolicy?.observationCeiling ?? 0, observationDisposition: 'active' as const } : item) }));
+    durableAttempt = state.readTraversal().attempts.find(item => item.id === attempt!.id)!;
+  }
+  if (durableAttempt.observationDeadlineEpochMs! <= epoch || durableAttempt.observationDisposition === 'exhausted' || (durableAttempt.observationDisposition === 'stopped' && state.readTraversal().activeTime >= state.readTraversal().limits.activeTime)) {
+    const disposition = durableAttempt.observationDisposition === 'stopped' && durableAttempt.observationDeadlineEpochMs! > epoch ? 'stopped' : 'exhausted';
+    state.transitionTraversal(value => ({ ...value, attempts: value.attempts.map(item => item.id === attempt!.id ? { ...item, status: 'uncertain' as const, knownId: id, observationDisposition: disposition } : item), cells: { ...value.cells, [running!]: { outcome: 'parked' } }, paused: value.paused || uncertaintyScope === 'global', gaps: [...value.gaps, { cellKey: running!, cause: 'uncertain', scope: uncertaintyScope, status: 'unresolved' }] }));
+    throw new DurableObservationStop(disposition);
+  }
   let response: { result: DiscoveryResult; elapsed: number };
-  state.transitionTraversal(value => ({ ...value, attempts: value.attempts.map(item => item.id === attempt!.id ? { ...item, status: 'observing' } : item) }));
+  state.transitionTraversal(value => ({ ...value, attempts: value.attempts.map(item => item.id === attempt!.id ? { ...item, status: 'observing', observationDisposition: 'active' } : item) }));
   boundaryHook?.('observing');
   const pending = state.readTraversal().attempts.find(item => item.id === attempt!.id)!.observationRetryPendingDelayMs;
   if (pending !== undefined) {
-    waitForRetry(retryPolicy, pending);
+    const now = epochNow();
+    const eligible = durableAttempt.nextObservationEligibleEpochMs ?? now + pending;
+    if (!Number.isSafeInteger(now) || now < 0 || !Number.isSafeInteger(eligible) || eligible < 0) throw new Error('Invalid persisted observation eligibility time');
+    waitForRetry(retryPolicy, Math.max(0, eligible - now));
     state.transitionTraversal(value => ({ ...value, attempts: value.attempts.map(item => { if (item.id !== attempt!.id) return item; const { observationRetryPendingDelayMs: _, ...rest } = item; return rest; }) }));
   }
-  try { response = await observe(id); }
+  const observeBounded = async () => {
+    settle?.();
+    const current = state.readTraversal();
+    const remaining = current.limits.activeTime - current.activeTime;
+    if (remaining <= 0) throw new DurableObservationStop('stopped');
+    const result = await awaitDurableObservation(localSignal => Promise.resolve().then(() => observe(id, localSignal)), Math.max(0, durableAttempt.observationDeadlineEpochMs! - epochNow()), signal, remaining);
+    settle?.();
+    if (state.readTraversal().activeTime >= state.readTraversal().limits.activeTime) throw new DurableObservationStop('stopped');
+    return result;
+  };
+  try { response = await observeBounded(); }
   catch (error) {
+    if (error instanceof DurableObservationStop) {
+      state.transitionTraversal(value => ({ ...value, attempts: value.attempts.map(item => item.id === attempt!.id ? { ...item, status: 'uncertain' as const, knownId: id, observationDisposition: error.disposition } : item), cells: { ...value.cells, [running!]: { outcome: 'parked' } }, paused: value.paused || uncertaintyScope === 'global', gaps: [...value.gaps, { cellKey: running!, cause: 'uncertain', scope: uncertaintyScope, status: 'unresolved' }] }));
+      throw error;
+    }
     if (!retryPolicy?.knownSafeObservationError(error)) {
       state.transitionTraversal(value => markUncertain(value, running!, uncertaintyScope, id));
       throw error;
@@ -435,12 +480,19 @@ async function executeDurableDiscoveryAsyncImpl(state: DurableState, send: (work
     while (true) {
       const ordinal = (state.readTraversal().attempts.find(item => item.id === attempt!.id)!.retryOrdinal ?? 0) + 1;
       const delay = retryDelay(retryPolicy, ordinal);
-      state.transitionTraversal(value => { const next = retryKnownIdObservation(value, running!, storedCeiling); return { ...next, attempts: next.attempts.map(item => item.id === attempt!.id ? { ...item, observationRetryPendingDelayMs: delay } : item) }; });
-      waitForRetry(retryPolicy, delay);
+      const retryEpoch = epochNow();
+      const eligibleEpoch = retryEpoch + delay;
+      if (!Number.isSafeInteger(retryEpoch) || retryEpoch < 0 || !Number.isSafeInteger(eligibleEpoch)) throw new Error('Invalid epoch clock sample');
+      state.transitionTraversal(value => { const next = retryKnownIdObservation(value, running!, storedCeiling); return { ...next, attempts: next.attempts.map(item => item.id === attempt!.id ? { ...item, observationRetryPendingDelayMs: delay, nextObservationEligibleEpochMs: eligibleEpoch } : item) }; });
+      waitForRetry(retryPolicy, Math.max(0, eligibleEpoch - epochNow()));
       settle?.();
       state.transitionTraversal(value => ({ ...value, attempts: value.attempts.map(item => { if (item.id !== attempt!.id) return item; const { observationRetryPendingDelayMs: _, ...rest } = item; return rest; }) }));
-      try { response = await observe(id); break; }
+      try { response = await observeBounded(); break; }
       catch (retryError) {
+        if (retryError instanceof DurableObservationStop) {
+          state.transitionTraversal(value => ({ ...value, attempts: value.attempts.map(item => item.id === attempt!.id ? { ...item, status: 'uncertain' as const, knownId: id, observationDisposition: retryError.disposition } : item), cells: { ...value.cells, [running!]: { outcome: 'parked' } }, paused: value.paused || uncertaintyScope === 'global', gaps: [...value.gaps, { cellKey: running!, cause: 'uncertain', scope: uncertaintyScope, status: 'unresolved' }] }));
+          throw retryError;
+        }
         if ((state.readTraversal().attempts.find(item => item.id === attempt!.id)!.retryOrdinal ?? 0) >= storedCeiling || !retryPolicy.knownSafeObservationError(retryError)) {
           state.transitionTraversal(value => markUncertain(value, running!, uncertaintyScope, id));
           throw retryError;
@@ -512,13 +564,16 @@ export function executeDurableDiscovery(state: DurableState, send: SyntheticSend
 }
 
 export type AsyncSyntheticSend = (workId: string) => { id: string } | Promise<{ id: string }>;
-export type AsyncSyntheticObserve = (id: string) => { result: DiscoveryResult; elapsed: number } | Promise<{ result: DiscoveryResult; elapsed: number }>;
+export type AsyncSyntheticObserve = (id: string, signal?: AbortSignal) => { result: DiscoveryResult; elapsed: number } | Promise<{ result: DiscoveryResult; elapsed: number }>;
 
 /** Async-compatible durable execution; the synchronous fixture API remains unchanged. */
-export async function executeDurableDiscoveryAsync(state: DurableState, send: AsyncSyntheticSend, observe: AsyncSyntheticObserve, uncertaintyScope: 'isolated' | 'global' = 'global', retryPolicy?: DurableRetryPolicy, clock: { monotonicNow: () => number } = { monotonicNow: () => Number(process.hrtime.bigint()) / 1_000_000 }): Promise<TraversalState> {
+export async function executeDurableDiscoveryAsync(state: DurableState, send: AsyncSyntheticSend, observe: AsyncSyntheticObserve, uncertaintyScope: 'isolated' | 'global' = 'global', retryPolicy?: DurableRetryPolicy, clock: { monotonicNow: () => number; epochNow?: () => number; signal?: AbortSignal } = { monotonicNow: () => Number(process.hrtime.bigint()) / 1_000_000 }): Promise<TraversalState> {
   const current = state.readTraversal();
+  const epochNow = clock.epochNow ?? Date.now;
   if (current.recoveryPending) throw new DurableStopError('recovery-pending', 'Recovery accounting is unresolved');
-  if (current.paused || current.cancelled || (!current.queue.length && !Object.values(current.cells).some(cell => cell.outcome === 'running') && !current.attempts.some(item => ['uncertain', 'dispatched', 'observing'].includes(item.status) && item.knownId))) return executeDurableDiscoveryAsyncImpl(state, send, observe, uncertaintyScope, retryPolicy);
+  const recoverableKnownId = current.attempts.some(item => ['uncertain', 'dispatched', 'observing'].includes(item.status) && item.knownId && item.observationDisposition !== 'exhausted' && (item.observationDisposition !== 'stopped' || current.activeTime < current.limits.activeTime));
+  if (!current.queue.length && !Object.values(current.cells).some(cell => cell.outcome === 'running') && !recoverableKnownId && current.attempts.some(item => item.observationDisposition === 'exhausted' || item.observationDisposition === 'stopped')) return current;
+  if (current.paused || current.cancelled || (!current.queue.length && !Object.values(current.cells).some(cell => cell.outcome === 'running') && !recoverableKnownId)) return executeDurableDiscoveryAsyncImpl(state, send, observe, uncertaintyScope, retryPolicy, undefined, undefined, undefined, epochNow, clock.signal);
   state.beginActiveInterval();
   let last = clock.monotonicNow();
   if (!Number.isFinite(last)) throw new Error('Invalid monotonic clock sample');
@@ -537,7 +592,7 @@ export async function executeDurableDiscoveryAsync(state: DurableState, send: As
     } catch (error) { settlementFailed = true; throw error; }
   };
   try {
-    const result = await executeDurableDiscoveryAsyncImpl(state, send, observe, uncertaintyScope, retryPolicy, undefined, undefined, settle);
+    const result = await executeDurableDiscoveryAsyncImpl(state, send, observe, uncertaintyScope, retryPolicy, undefined, undefined, settle, epochNow, clock.signal);
     settle();
     state.endActiveInterval();
     return result;
