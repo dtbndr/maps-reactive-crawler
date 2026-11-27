@@ -10,6 +10,10 @@ import { runSyntheticBrightData } from './durable-bright-data-submission.js';
 import { projectOperatorStatus } from './operator.js';
 import { cancelCheckpoint, exportResults, resume, start, status, type OperatorResumeOptions, type OperatorStartOptions } from './operator.js';
 
+// The documented synchronous scrape acknowledgement can take one minute.
+// Allow a 15-second buffer; the handoff still enforces remaining active time.
+export const PROVIDER_REQUEST_MILLISECONDS = 75000;
+
 export type CliIo = { stdout: (text: string) => void; stderr: (text: string) => void };
 export type CliLibrary = {
   start: (options: OperatorStartOptions) => Promise<unknown>;
@@ -149,8 +153,8 @@ async function providerPreview(args: string[], io: CliIo): Promise<number> {
     }
     const now = Date.now();
     const deadline = now + Math.max(0, limits.activeTime - state.readTraversal().activeTime);
-    const transport = createBrightDataHttpCandidate(key, 30000);
-    const outcome = await runSyntheticBrightData(state, transport, { requestMilliseconds: 30000, activeUntil: deadline, observationDeadline: deadline, maxObservations: 20, credential: key });
+    const transport = createBrightDataHttpCandidate(key, PROVIDER_REQUEST_MILLISECONDS);
+    const outcome = await runSyntheticBrightData(state, transport, { requestMilliseconds: PROVIDER_REQUEST_MILLISECONDS, activeUntil: deadline, observationDeadline: deadline, maxObservations: 20, credential: key });
     state.releaseOwner();
     io.stdout(`${JSON.stringify({ version: 1, command, status: projectOperatorStatus(state.readTraversalSnapshot()), reason: outcome.reason })}\n`);
     return 0;
