@@ -44,6 +44,24 @@ test('an ID returned at active cutoff is retained with a gap', async () => {
     assert.deepEqual(result, { kind: 'acknowledged', id: 'id', gap: 'active-time-cutoff' });
   } finally { Date.now = original; }
 });
+test('response after request deadline is not accepted when timer callback is delayed', async () => {
+  const original = Date.now;
+  let now = 100;
+  Date.now = () => now;
+  try {
+    const result = await handoff.observeOnce({ observe: async () => { now = 111; return { status: 200, body: { status: 'ready' } }; } }, 'id', { requestMilliseconds: 10, activeUntil: 200 });
+    assert.deepEqual(result, { kind: 'gap', reason: 'observation-timeout' });
+  } finally { Date.now = original; }
+});
+test('malformed dispatched submission at active cutoff remains uncertain', async () => {
+  const original = Date.now;
+  let now = 100;
+  Date.now = () => now;
+  try {
+    const result = await handoff.submitOnce({ submit: async () => { now = 110; return { status: 202, body: {} }; } }, request, { requestMilliseconds: 50, activeUntil: 110 });
+    assert.equal(result.kind, 'uncertain');
+  } finally { Date.now = original; }
+});
 test('late observation cannot expand or return results', async () => {
   const result = await handoff.observeOnce({ observe: () => new Promise(resolve => setTimeout(() => resolve({ status: 200, body: { status: 'ready' } }), 40)) }, 'id', { requestMilliseconds: 5, activeUntil: Date.now() + 100 });
   assert.equal(result.kind, 'gap');
