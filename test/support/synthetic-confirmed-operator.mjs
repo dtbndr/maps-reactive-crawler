@@ -13,7 +13,7 @@ export async function runConfirmedSyntheticOperator(command, input, affirm, tran
   if (JSON.stringify(binding) !== JSON.stringify(options.binding)) throw new Error('Checkpoint binding mismatch');
   const geometry = resume?.geometry ?? options.geometry;
   const limits = resume?.limits ?? options.limits;
-  const invocation = { operation: command, query: { keyword: binding.keyword, country: binding.country }, geometry, limits, account: options.account, dataset: options.dataset };
+  const invocation = { operation: command, query: { keyword: binding.keyword, country: binding.country }, geometry, limits, account: options.account, dataset: options.dataset, zoom: binding.zoom, limitPerInput: binding.limitPerInput };
   const preview = previewProviderInvocation({ invocation, evidence: options.evidence, estimate: options.estimate });
   if (preview.kind === 'blocked') throw new Error(preview.reason);
   if (await affirm(structuredClone(preview)) !== true) throw new Error('Synthetic confirmation declined');

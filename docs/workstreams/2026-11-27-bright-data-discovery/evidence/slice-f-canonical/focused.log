@@ -1,0 +1,46 @@
+✔ start and resume do not call transport without production evidence and invocation approval (0.737208ms)
+✔ start and resume do not call transport without invocation approval when other gates pass (0.507709ms)
+✔ resume does not call transport without observation evidence when other gates pass (0.110792ms)
+✔ submission evidence cannot enable starts when retrieval evidence is absent (0.096375ms)
+✔ known-ID-only mode never submits (0.114ms)
+▶ pricing and rights gates independently disable provider operations
+  ✔ {"invocation":true,"pricing":false,"rights":true} (0.116125ms)
+  ✔ {"invocation":true,"pricing":true,"rights":false} (0.073125ms)
+✔ pricing and rights gates independently disable provider operations (0.535167ms)
+✔ provider diagnostic sanitizer preserves useful text and removes credentials (0.473958ms)
+✔ transport errors are reduced to credential-free diagnostics (0.167125ms)
+✔ separate public CLI processes resume durable seed work, preserve provenance, and export distinct neighbor results (294.178666ms)
+✔ fresh B7 harness processes witness discovery ordering and replay separately from durable detail records (234.481042ms)
+✔ discovery exhaustion remains distinct from isolated failure, unrecognized, global uncertainty, recovery, and cancellation (350.174375ms)
+✔ an original injected send fault remains an error; a later public resume reports unresolved recovery (125.938291ms)
+✔ harness cancellation is a separate durable outcome with its own public response condition (73.93225ms)
+✔ increasing the cell cap does not promote neighbors blocked at expansion (131.30025ms)
+✔ direct detail executor boundary leaves pending work undispatched when cancelled (6.927583ms)
+✔ start accepts negative coordinates and routes parsed configuration (1.5755ms)
+✔ command parser rejects missing, duplicate, unknown and malformed numeric options (0.288292ms)
+✔ resume forwards explicit equal or decreased caps to library without CLI validation (0.216125ms)
+✔ preflight is written to stderr before start collection and returned blocked result succeeds (0.197208ms)
+✔ library rejection and unexpected exceptions fail with empty stdout (0.412375ms)
+✔ cancel routes checkpoint and emits returned result (0.140584ms)
+✔ valid provider evidence reaches fail-closed terminal confirmation without creating checkpoint (2405.057709ms)
+✔ child PTY resume previews effective checkpoint and never changes logical state or ownership (2651.360375ms)
+✔ positive controls for start and resume snapshot non-authorizing attestations (2.97725ms)
+✔ each evidence category requires current complete dated evidence (2.108542ms)
+✔ technical attestations bind their method and entire effective invocation (2.090709ms)
+✔ pricing and rights attest to each use and the entire displayed invocation (1.24625ms)
+✔ canonical dataset and request settings are required and bound in every attestation (1.145875ms)
+✔ invalid estimate and invocation remain blocked (0.414208ms)
+✔ resume preview uses bound state and effective increased limits without mutation (9.416625ms)
+✔ invalid limits and corrupt or fixture bindings fail closed (8.683708ms)
+✔ preview retains known provider ID and actionable gap from a synthetic failure (15.388208ms)
+✔ preview limits match effective synthetic resume and preview performs no transport (8.58975ms)
+✔ guarded acquisition rejects stale state without writes and accepts unchanged preview (8.253542ms)
+✔ guard detects checkpoint and owner changes before recovery writes (7.827458ms)
+ℹ tests 37
+ℹ suites 0
+ℹ pass 37
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 5133.061334

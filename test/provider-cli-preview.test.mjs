@@ -6,18 +6,31 @@ import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { DatabaseSync } from 'node:sqlite';
 import { DurableState } from '../dist/durable-state.js';
+import { mapDiscoveryRequest } from '../dist/bright-data-mapping.js';
 import { createTraversal, admitNextCell, reserveSubmission, markUncertain } from '../dist/traversal.js';
 
 test('valid provider evidence reaches fail-closed terminal confirmation without creating checkpoint', () => {
  const dir = mkdtempSync(join(tmpdir(), 'cli-preview-'));
  try {
   const checkpoint = join(dir, 'checkpoint'); const evidence = join(dir, 'evidence.json');
-  const invocation = { operation:'start', query:{keyword:'pizza',country:'GB'}, geometry:{seed:{latitude:1,longitude:2},spacing:500,area:{type:'radius',radius:1000}}, limits:{cells:4,submissions:3,activeTime:1000}, account:'synthetic', dataset:'synthetic' };
+  const invocation = { operation:'start', query:{keyword:'pizza',country:'GB'}, geometry:{seed:{latitude:1,longitude:2},spacing:500,area:{type:'radius',radius:1000}}, limits:{cells:4,submissions:3,activeTime:1000}, account:'synthetic', dataset:'gd_m8ebnr0q2qlklc02fz', zoom:15, limitPerInput:20 };
   const doc = {reference:'synthetic',date:'2020-01-01',validThrough:'2099-01-01',scope:'synthetic'};
   const technical = method => ({...doc,attestation:{method,invocation:structuredClone(invocation)}});
   const commercial = () => ({...doc,attestation:{invocation,collection:true,storage:true,export:true}});
-  writeFileSync(evidence, JSON.stringify({evidence:{submission:technical('submission'),observation:technical('observation'),retrieval:technical('retrieval'),pricing:commercial(),rights:commercial()},estimate:{currency:'USD',amount:5,assumptions:'three submissions',uncertainty:'may differ',pricingReference:'synthetic'}}));
-  const args = ['dist/cli.js','start','--provider','bright-data','--checkpoint',checkpoint,'--evidence',evidence,'--account','synthetic','--dataset','synthetic','--keyword','pizza','--country','GB','--lat','1','--lon','2','--spacing-m','500','--radius-m','1000','--cells','4','--submissions','3','--active-ms','1000'];
+  const record = {evidence:{submission:technical('submission'),observation:technical('observation'),retrieval:technical('retrieval'),pricing:commercial(),rights:commercial()},estimate:{currency:'USD',amount:5,assumptions:'three submissions',uncertainty:'may differ',pricingReference:'synthetic'}};
+  writeFileSync(evidence, JSON.stringify(record));
+  const args = ['dist/cli.js','start','--provider','bright-data','--checkpoint',checkpoint,'--evidence',evidence,'--account','synthetic','--dataset','gd_m8ebnr0q2qlklc02fz','--zoom','15','--limit-per-input','20','--keyword','pizza','--country','GB','--lat','1','--lon','2','--spacing-m','500','--radius-m','1000','--cells','4','--submissions','3','--active-ms','1000'];
+  const mismatchArgs = [...args]; mismatchArgs[mismatchArgs.indexOf('--dataset') + 1] = 'other';
+  const mismatch = spawnSync('/usr/bin/python3',['test/helpers/provider-cli-pty.py','expect-blocked',process.execPath,...mismatchArgs],{encoding:'utf8',timeout:15000});
+  assert.equal(mismatch.status,0,mismatch.stderr + mismatch.stdout); assert.match(mismatch.stdout,/unsupported maps dataset/i); assert.doesNotMatch(mismatch.stdout,/READY: Type yes/); assert.equal(existsSync(checkpoint),false);
+  for (const category of Object.keys(record.evidence)) for (const key of ['zoom','limitPerInput']) for (const omit of [true,false]) {
+   const invalid = structuredClone(record); const attested = invalid.evidence[category].attestation.invocation;
+   if (omit) delete attested[key]; else attested[key]++;
+   writeFileSync(evidence,JSON.stringify(invalid));
+   const blocked = spawnSync('/usr/bin/python3',['test/helpers/provider-cli-pty.py','expect-blocked',process.execPath,...args],{encoding:'utf8',timeout:15000});
+   assert.equal(blocked.status,0,blocked.stderr + blocked.stdout); assert.match(blocked.stdout,/missing or invalid/i); assert.doesNotMatch(blocked.stdout,/READY: Type yes/); assert.equal(existsSync(checkpoint),false);
+  }
+  writeFileSync(evidence,JSON.stringify(record));
   const result = spawnSync(process.execPath,args,{encoding:'utf8'});
   assert.equal(result.status,1); assert.match(result.stderr,/confirmation.*terminal/i); assert.equal(existsSync(checkpoint),false);
   for (const answer of ['yes', 'no']) {
@@ -25,6 +38,10 @@ test('valid provider evidence reaches fail-closed terminal confirmation without 
    assert.equal(pty.status,0,pty.stderr + pty.stdout);
    assert.ok(pty.stdout.indexOf('"uncertainty": "may differ"') < pty.stdout.indexOf('READY: Type yes'));
    assert.match(pty.stdout,/"submissions": 3/); assert.match(pty.stdout,/Direct API/);
+   const mapped = mapDiscoveryRequest({country:'GB',keyword:'pizza',lat:1,lon:2,zoom:15,limit:20});
+   assert.match(pty.stdout, new RegExp(`"dataset": "${mapped.query.dataset_id}"`));
+   assert.match(pty.stdout, new RegExp(`"zoom": ${mapped.body.input[0].zoom_level}`));
+   assert.match(pty.stdout, new RegExp(`"limitPerInput": ${mapped.body.limit_per_input}`));
    assert.match(pty.stdout,answer === 'yes' ? /not yet implemented/i : /declined or unavailable/i);
    assert.equal(existsSync(checkpoint),false);
   }
@@ -46,12 +63,12 @@ test('child PTY resume previews effective checkpoint and never changes logical s
   DurableState.createBound(checkpoint, binding, state);
   const snapshot = () => { const db = new DatabaseSync(checkpoint, {readOnly:true}); try { return ['checkpoint','operator_binding','traversal','owner'].map(t => db.prepare(`SELECT * FROM ${t}`).all()); } finally { db.close(); } };
   const before = snapshot();
-  const invocation = {operation:'resume',query:{keyword:'cafe',country:'GB'},geometry,limits:{...limits,submissions:9},account:'synthetic',dataset:'synthetic'};
+  const invocation = {operation:'resume',query:{keyword:'cafe',country:'GB'},geometry,limits:{...limits,submissions:9},account:'synthetic',dataset:'gd_m8ebnr0q2qlklc02fz',zoom:15,limitPerInput:20};
   const doc = {reference:'synthetic',date:'2020-01-01',validThrough:'2099-01-01',scope:'synthetic'};
   const technical = method => ({...doc,attestation:{method,invocation:structuredClone(invocation)}});
   const commercial = () => ({...doc,attestation:{invocation,collection:true,storage:true,export:true}});
   const record = {evidence:{submission:technical('submission'),observation:technical('observation'),retrieval:technical('retrieval'),pricing:commercial(),rights:commercial()},estimate:{currency:'USD',amount:5,assumptions:'synthetic',uncertainty:'synthetic',pricingReference:'synthetic'}};
-  const args = ['dist/cli.js','resume','--provider','bright-data','--checkpoint',checkpoint,'--evidence',evidencePath,'--account','synthetic','--dataset','synthetic','--submissions','9'];
+  const args = ['dist/cli.js','resume','--provider','bright-data','--checkpoint',checkpoint,'--evidence',evidencePath,'--account','synthetic','--dataset','gd_m8ebnr0q2qlklc02fz','--submissions','9'];
   writeFileSync(evidencePath, JSON.stringify(record));
   for (const answer of ['yes','no','buffered-yes-then-no']) {
    const pty = spawnSync('/usr/bin/python3',['test/helpers/provider-cli-pty.py',answer,process.execPath,...args],{encoding:'utf8',timeout:15000});
@@ -64,6 +81,13 @@ test('child PTY resume previews effective checkpoint and never changes logical s
   }
   const nonTty = spawnSync(process.execPath,args,{encoding:'utf8',input:'yes\n'});
   assert.equal(nonTty.status,1); assert.match(nonTty.stderr,/confirmation.*terminal/i); assert.deepEqual(snapshot(),before);
+  for (const category of Object.keys(record.evidence)) for (const key of ['zoom','limitPerInput']) for (const omit of [true,false]) {
+   const invalid = structuredClone(record); const attested = invalid.evidence[category].attestation.invocation;
+   if (omit) delete attested[key]; else attested[key]++;
+   writeFileSync(evidencePath,JSON.stringify(invalid));
+   const result = spawnSync('/usr/bin/python3',['test/helpers/provider-cli-pty.py','expect-blocked',process.execPath,...args],{encoding:'utf8',timeout:15000});
+   assert.equal(result.status,0,result.stderr + result.stdout); assert.match(result.stdout,/missing or invalid/i); assert.doesNotMatch(result.stdout,/READY: Type yes/); assert.deepEqual(snapshot(),before);
+  }
   for (const invalid of [{...record,evidence:{}},{...record,estimate:undefined}]) {
    writeFileSync(evidencePath,JSON.stringify(invalid));
    const result = spawnSync('/usr/bin/python3',['test/helpers/provider-cli-pty.py','expect-blocked',process.execPath,...args],{encoding:'utf8',timeout:15000});

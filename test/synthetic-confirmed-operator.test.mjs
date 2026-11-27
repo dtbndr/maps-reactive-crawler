@@ -24,8 +24,8 @@ test('stale resume is rejected before owner mutation; fresh resume dispatches in
  try {
   DurableState.createBound(checkpoint, binding, createTraversal(geometry, limits));
   const requested = { submissions: 3 }; const effective = previewProviderResume(checkpoint, requested);
-  const invocation = { operation: 'resume', query: { keyword: binding.keyword, country: binding.country }, geometry, limits: effective.limits, account: 'synthetic', dataset: 'synthetic' };
-  const opts = { checkpoint, binding, limits: requested, bounds: bounds(), account: 'synthetic', dataset: 'synthetic', ...evidence(invocation) };
+  const invocation = { operation: 'resume', query: { keyword: binding.keyword, country: binding.country }, geometry, limits: effective.limits, account: 'synthetic', dataset: 'gd_m8ebnr0q2qlklc02fz', zoom: binding.zoom, limitPerInput: binding.limitPerInput };
+  const opts = { checkpoint, binding, limits: requested, bounds: bounds(), account: 'synthetic', dataset: 'gd_m8ebnr0q2qlklc02fz', ...evidence(invocation) };
   const calls = []; const transport = { submit: async () => { calls.push('submit'); return { status: 202, body: { snapshot_id: 'resume-id' } }; }, observe: async id => { calls.push(`observe:${id}`); return { status: 200, body: { status: 'ready' } }; }, retrieve: async id => { calls.push(`retrieve:${id}`); return { status: 200, body: [] }; } };
   let changed;
   await assert.rejects(runConfirmedSyntheticOperator('resume', opts, async () => {
@@ -43,8 +43,8 @@ test('synthetic start and guarded resume require fresh preview affirmation befor
  const dir = mkdtempSync(join(tmpdir(), 'confirmed-')); const checkpoint = join(dir, 'db');
  try {
   const calls = []; const transport = { submit: async () => { calls.push('submit'); return { status: 202, body: { snapshot_id: 'id-1' } }; }, observe: async id => { calls.push(`observe:${id}`); return { status: 200, body: { status: 'ready' } }; }, retrieve: async id => { calls.push(`retrieve:${id}`); return { status: 200, body: [] }; } };
-  const invocation = { operation: 'start', query: { keyword: binding.keyword, country: binding.country }, geometry, limits, account: 'synthetic', dataset: 'synthetic' };
-  const opts = { checkpoint, geometry, limits, binding, bounds: bounds(), account: 'synthetic', dataset: 'synthetic', ...evidence(invocation) };
+  const invocation = { operation: 'start', query: { keyword: binding.keyword, country: binding.country }, geometry, limits, account: 'synthetic', dataset: 'gd_m8ebnr0q2qlklc02fz', zoom: binding.zoom, limitPerInput: binding.limitPerInput };
+  const opts = { checkpoint, geometry, limits, binding, bounds: bounds(), account: 'synthetic', dataset: 'gd_m8ebnr0q2qlklc02fz', ...evidence(invocation) };
   await assert.rejects(runConfirmedSyntheticOperator('start', opts, async () => false, transport));
   assert.equal(existsSync(checkpoint), false); assert.deepEqual(calls, []);
   await assert.rejects(runConfirmedSyntheticOperator('start', { ...opts, estimate: undefined }, async () => true, transport));
@@ -55,7 +55,7 @@ test('synthetic start and guarded resume require fresh preview affirmation befor
   assert.deepEqual(calls, ['submit', 'observe:id-1', 'retrieve:id-1']);
   const resumeLimits = { submissions: 3 }; const effective = previewProviderResume(checkpoint, resumeLimits);
   const resumeInvocation = { ...invocation, operation: 'resume', limits: effective.limits };
-  const resumeOpts = { checkpoint, binding, limits: resumeLimits, bounds: bounds(), account: 'synthetic', dataset: 'synthetic', ...evidence(resumeInvocation) };
+  const resumeOpts = { checkpoint, binding, limits: resumeLimits, bounds: bounds(), account: 'synthetic', dataset: 'gd_m8ebnr0q2qlklc02fz', ...evidence(resumeInvocation) };
   const count = calls.length;
   await assert.rejects(runConfirmedSyntheticOperator('resume', resumeOpts, async () => false, transport));
   assert.equal(previewProviderResume(checkpoint, resumeLimits).fingerprint, effective.fingerprint); assert.equal(calls.length, count);

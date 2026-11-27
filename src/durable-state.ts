@@ -16,6 +16,11 @@ function parseBinding(value: unknown): OperatorBinding {
   if (Object.keys(b).length === 6 && b.version === 2 && b.mode === 'bright-data' && typeof b.keyword === 'string' && !!b.keyword.trim() && typeof b.country === 'string' && /^[A-Z]{2}$/.test(b.country) && Number.isSafeInteger(b.zoom) && (b.zoom as number) >= 0 && (b.zoom as number) <= 21 && Number.isSafeInteger(b.limitPerInput) && (b.limitPerInput as number) >= 1 && (b.limitPerInput as number) <= 200) return { version: 2, mode: 'bright-data', keyword: b.keyword, country: b.country, zoom: b.zoom as number, limitPerInput: b.limitPerInput as number };
   throw new Error('Corrupt state: invalid operator binding');
 }
+export function validateProviderBinding(value: unknown): ProviderBinding {
+  const binding = parseBinding(value);
+  if (binding.version !== 2) throw new Error('Invalid provider binding');
+  return binding;
+}
 function requestedBinding(value: string | ProviderBinding): OperatorBinding {
   if (typeof value === 'string') {
     if (!/^[a-f0-9]{64}$/.test(value)) throw new Error('Invalid fixture identity');

@@ -1,11 +1,12 @@
 import { isDeepStrictEqual } from 'node:util';
-import { readOnlyBoundSnapshot, type ProviderBinding } from './durable-state.js';
+import { readOnlyBoundSnapshot, validateProviderBinding, type ProviderBinding } from './durable-state.js';
+import { MAPS_DATASET } from './bright-data-mapping.js';
 import { validateOperatorConfig, type OperatorConfig } from './operator.js';
 import { effectiveResumeLimits, providerResumeFingerprint } from './provider-resume-fingerprint.js';
 export { effectiveResumeLimits } from './provider-resume-fingerprint.js';
 import type { TraversalLimits, TraversalState } from './traversal.js';
 
-type Invocation = OperatorConfig & { operation: 'start' | 'resume'; query: { keyword: string; country: string }; account: string; dataset: string };
+type Invocation = OperatorConfig & { operation: 'start' | 'resume'; query: { keyword: string; country: string }; account: string; dataset: string; zoom: number; limitPerInput: number };
 type Document = Record<string, unknown> & { reference: string; date: string; validThrough: string; scope: string };
 type TechnicalDocument = Document & { attestation: { method: string; invocation: Invocation } };
 type CommercialDocument = Document & { attestation: { invocation: Invocation; collection: true; storage: true; export: true } };
@@ -29,7 +30,11 @@ export function previewProviderInvocation(input: unknown, today: string = new Da
   if (!object(input) || !object(input.invocation)) return blocked('Invalid effective invocation');
   const invocation = input.invocation;
   if ((invocation.operation !== 'start' && invocation.operation !== 'resume') || !object(invocation.query) || !text(invocation.query.keyword) || !text(invocation.query.country) || !text(invocation.account) || !text(invocation.dataset)) return blocked('Invalid effective invocation');
-  try { validateOperatorConfig({ geometry: invocation.geometry, limits: invocation.limits } as OperatorConfig); }
+  try {
+    if (invocation.dataset !== MAPS_DATASET) return blocked('Invalid effective invocation');
+    validateProviderBinding({ version: 2, mode: 'bright-data', keyword: invocation.query.keyword, country: invocation.query.country, zoom: invocation.zoom, limitPerInput: invocation.limitPerInput });
+    validateOperatorConfig({ geometry: invocation.geometry, limits: invocation.limits } as OperatorConfig);
+  }
   catch { return blocked('Invalid effective invocation'); }
   const evidence = object(input.evidence) ? input.evidence : {};
   for (const category of ['submission', 'observation', 'retrieval', 'pricing', 'rights'] as const) {

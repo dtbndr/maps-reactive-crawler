@@ -2,6 +2,8 @@ import { pathToFileURL } from 'node:url';
 import { readFileSync } from 'node:fs';
 import { previewProviderInvocation, previewProviderResume } from './provider-preview.js';
 import { terminalPrompt } from './terminal-prompt.js';
+import { MAPS_DATASET } from './bright-data-mapping.js';
+import { validateProviderBinding, type ProviderBinding } from './durable-state.js';
 import { cancelCheckpoint, exportResults, resume, start, status, type OperatorResumeOptions, type OperatorStartOptions } from './operator.js';
 
 export type CliIo = { stdout: (text: string) => void; stderr: (text: string) => void };
@@ -96,7 +98,7 @@ async function providerPreview(args: string[], io: CliIo): Promise<number> {
   for (let i = 0; i < tokens.length; i += 2) {
     const flag = tokens[i]!; const value = tokens[i + 1];
     if (!flag.startsWith('--') || value === undefined || value.startsWith('--')) throw new Error(`Invalid option ${flag}`);
-    if (['--provider', '--evidence', '--account', '--dataset', '--keyword', '--country'].includes(flag)) {
+    if (['--provider', '--evidence', '--account', '--dataset', '--keyword', '--country', '--zoom', '--limit-per-input'].includes(flag)) {
       if (extra.has(flag)) throw new Error(`Duplicate option: ${flag}`);
       extra.set(flag, value);
     } else {
@@ -108,24 +110,25 @@ async function providerPreview(args: string[], io: CliIo): Promise<number> {
   const required = (name: string): string => { const value = extra.get(name); if (!value) throw new Error(`Missing required option ${name}; direct API use (MCP optional) requires contract and lifecycle, pricing, rights and confirmation; execution is not implemented`); return value; };
   const evidencePath = required('--evidence');
   const account = required('--account'); const dataset = required('--dataset');
+  if (dataset !== MAPS_DATASET) throw new Error('Unsupported Maps dataset');
   ordinary.push('--fixture', 'unused');
   const parsed = parseArgs(ordinary);
   if (parsed.command !== 'start' && parsed.command !== 'resume') throw new Error('Unsupported provider command');
-  let geometry; let limits; let query; let resumeDetails;
+  let geometry; let limits; let binding: ProviderBinding; let resumeDetails;
   if (parsed.command === 'start') {
     geometry = parsed.options.geometry; limits = parsed.options.limits;
-    query = { keyword: required('--keyword'), country: required('--country') };
+    binding = validateProviderBinding({ version: 2, mode: 'bright-data', keyword: required('--keyword'), country: required('--country'), zoom: strictNumber(required('--zoom'), 'zoom'), limitPerInput: strictNumber(required('--limit-per-input'), 'limit-per-input') });
   } else {
-    if (extra.has('--keyword') || extra.has('--country')) throw new Error('Resume query is bound to checkpoint');
+    if (['--keyword', '--country', '--zoom', '--limit-per-input'].some(flag => extra.has(flag))) throw new Error('Resume query and request settings are bound to checkpoint');
     resumeDetails = previewProviderResume(parsed.options.checkpoint, parsed.options.limits);
     geometry = resumeDetails.geometry; limits = resumeDetails.limits;
-    query = { keyword: resumeDetails.binding.keyword, country: resumeDetails.binding.country };
+    binding = resumeDetails.binding;
   }
   let record: unknown;
   try { record = JSON.parse(readFileSync(evidencePath, 'utf8')); } catch { throw new Error('Cannot read valid evidence record'); }
   if (!record || typeof record !== 'object' || Array.isArray(record)) throw new Error('Invalid evidence record');
   const value = record as Record<string, unknown>;
-  const preview = previewProviderInvocation({ invocation: { operation: command, query, geometry, limits, account, dataset }, evidence: value.evidence, estimate: value.estimate });
+  const preview = previewProviderInvocation({ invocation: { operation: command, query: { keyword: binding.keyword, country: binding.country }, geometry, limits, account, dataset, zoom: binding.zoom, limitPerInput: binding.limitPerInput }, evidence: value.evidence, estimate: value.estimate });
   if (preview.kind === 'blocked') throw new Error(preview.reason);
   const display = JSON.stringify({ notice: 'Direct API use; MCP is optional. Estimate is not a quote or cost cap; evidence is operator attestation, not independent verification. No provider execution is implemented.', ...preview, ...(resumeDetails ? { resume: resumeDetails } : {}) }, null, 2);
   if (!await terminalPrompt(display)) throw new Error('Confirmation requires fresh affirmative terminal input; declined or unavailable. No checkpoint changed or provider called.');

@@ -4,7 +4,7 @@ import { previewProviderInvocation } from '../dist/provider-preview.js';
 
 const today = '2026-06-01';
 const input = (operation = 'start') => {
-  const invocation = { operation, query: { keyword: 'pizza', country: 'GB' }, geometry: { seed: { latitude: 1, longitude: 2 }, spacing: 500, area: { type: 'radius', radius: 1000 } }, limits: { cells: 4, submissions: 3, activeTime: 1000 }, account: 'synthetic-account', dataset: 'synthetic-dataset' };
+  const invocation = { operation, query: { keyword: 'pizza', country: 'GB' }, geometry: { seed: { latitude: 1, longitude: 2 }, spacing: 500, area: { type: 'radius', radius: 1000 } }, limits: { cells: 4, submissions: 3, activeTime: 1000 }, account: 'synthetic-account', dataset: 'gd_m8ebnr0q2qlklc02fz', zoom: 15, limitPerInput: 20 };
   const document = { reference: 'fake document', date: '2026-01-01', validThrough: '2026-12-31', scope: 'fake scope' };
   const technical = method => ({ ...document, attestation: { method, invocation: structuredClone(invocation) } });
   const commercial = () => ({ ...document, account: invocation.account, dataset: invocation.dataset, attestation: { invocation: structuredClone(invocation), collection: true, storage: true, export: true } });
@@ -52,6 +52,18 @@ test('pricing and rights attest to each use and the entire displayed invocation'
       const value = input(); mutate(value.evidence[category].attestation.invocation);
       assert.equal(preview(value).kind, 'blocked', category);
     }
+  }
+});
+
+test('canonical dataset and request settings are required and bound in every attestation', () => {
+  for (const mutate of [i => { i.dataset = 'other'; }, i => { delete i.zoom; }, i => { delete i.limitPerInput; }]) {
+    const value = input(); mutate(value.invocation); for (const c of categories) mutate(value.evidence[c].attestation.invocation);
+    assert.equal(preview(value).kind, 'blocked');
+  }
+  for (const category of categories) for (const key of ['zoom', 'limitPerInput']) for (const omitted of [true, false]) {
+    const value = input(); const invocation = value.evidence[category].attestation.invocation;
+    if (omitted) delete invocation[key]; else invocation[key]++;
+    assert.equal(preview(value).kind, 'blocked', `${category} ${key} ${omitted}`);
   }
 });
 
