@@ -75,6 +75,7 @@ Documented contract matrix, adapter seam and explicit blockers.
 - [ ] Characterize `src/durable-discovery.ts` and `src/durable-state.ts`; demonstrate RED for async dispatch ordering, lost acknowledgment, ID persistence and restart.
 - [ ] Implement durable reserve/dispatch-before-send, ID-before-observation and explicit evidence-backed recovery. Persist finite observation budgets and deadlines across restart; preserve uncertainty and IDs on exhaustion/cancellation.
 - [ ] Extend `test/durable-discovery.test.mjs` and focused recovery tests for crash before ID persistence, restart after ID persistence, perpetual pending, transient errors and no duplicate submissions. Fresh-process tests must crash after dispatch or observation debit before response, exercise hung requests and cancellation during awaited I/O, and show exhausted known IDs survive without resubmission.
+- [ ] Deliver and test in the shared executor an exact-ID-only observation mode that cannot fall back to submission or other work, including with queued work and spare capacity. Define and test normalized scheduler transitions for partial and capped results: retain candidates and gap without expansion; confirmed raw-nonempty success expands subject to existing admission limits even if duplicate-only. Test frontier, provenance and final status together.
 - [ ] Persist a durable exhaustion disposition that retains the ID and gap but excludes it from ordinary observation selection; test a fresh resume makes no poll or resubmission and returns with the gap visible.
 - [ ] Persist the versioned non-secret execution/query/provider binding and observation debits, deadline and next-eligible time; retain fixture binding. Extend read-only checkpoint inspection and cancel-only acquisition for provider bindings while preserving existing fixture checkpoints. Test provider-bound status, export and local cancellation without a key or transport; this does not imply remote cancellation. Test same-ID fresh-process resume and reject changed query and fixture/provider crossover before any mutation or transport.
 - [ ] Run focused and full checks, distinguish baseline failures, and commit only after slice verification.
@@ -86,7 +87,7 @@ No network I/O in an open SQLite transaction; do not mistake local cancellation 
 `mise exec -- node --test test/durable-discovery.test.mjs test/durable-recovery.test.mjs`; `mise exec -- npm run check`.
 
 #### Carry-forward
-Async lifecycle contract, persistent observation budget and recovery transitions.
+Async lifecycle contract, shared exact-ID-only executor mode, normalized scheduler transitions, persistent observation budget and recovery transitions.
 
 ### Slice C: Bounded operator discovery
 **Goal:** Wire the supported operator inputs to discovery when verified, and report blockers safely otherwise.
@@ -98,7 +99,6 @@ Async lifecycle contract, persistent observation budget and recovery transitions
 - [ ] Expose a minimal supported operator reconciliation interface using the existing evidence-bearing active-time debit, never bypassing recoveryPending. Through that interface test fresh-process resume refuses transport before reconciliation, then after evidenced debit and separately approved invocation observes the same ID within remaining allowance without resubmission. With a recoverable ID, queued work and submission capacity remaining, test through fresh-process public resume with a nonempty result that known-ID-only mode observes that ID, makes zero submission calls and neither dequeues nor dispatches existing queued work, while allowing eligible neighbors from the recovered result to be appended.
 - [ ] Wire a supported local CLI stop such as SIGINT through the abort signal during awaited I/O. In a child-process CLI test, send SIGINT after a hung synthetic observation starts; prove the observation receives the abort and the CLI exits through its handled stop path within a bounded time. Assert no further outbound requests and a visible known ID and gap; do not claim remote cancellation.
 - [ ] Test a CLI-level synthetic transport failure containing a fake key in its error: useful diagnostics remain while neither CLI output nor persisted state exposes the key.
-- [ ] Define normalized scheduler transitions for partial and capped results: retain candidates and gap, do not expand. Confirmed raw-nonempty success expands even if duplicate-only. Test frontier, provenance and final status together.
 - [ ] Update `README.md` for BYOK, direct API notice, optional MCP and unresolved live-use, cost and rights gates; never include actual credentials.
 - [ ] Run focused and full checks, distinguish baseline failures, and commit only after slice verification.
 
