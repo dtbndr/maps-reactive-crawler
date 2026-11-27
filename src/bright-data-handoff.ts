@@ -18,12 +18,12 @@ function remaining(bounds: HandoffBounds): number {
   if (!Number.isFinite(bounds.requestMilliseconds) || bounds.requestMilliseconds <= 0 || !Number.isFinite(bounds.activeUntil)) return 0;
   return Math.max(0, Math.min(bounds.requestMilliseconds, bounds.activeUntil - Date.now(), 2147483647));
 }
-async function bounded<T>(action: () => Promise<T>, milliseconds: number, bounds: HandoffBounds): Promise<{ value: T } | { timeout: true } | { error: unknown }> {
+async function bounded<T>(action: () => Promise<T>, milliseconds: number, bounds: HandoffBounds): Promise<{ value: T } | { timeout: true } | { preDispatchCutoff: true } | { error: unknown }> {
   let timer: ReturnType<typeof setTimeout> | undefined;
   try {
     return await Promise.race([
-      Promise.resolve().then(async (): Promise<{ value: T } | { timeout: true } | { error: unknown }> => {
-        if (remaining(bounds) <= 0) return { timeout: true };
+      Promise.resolve().then(async (): Promise<{ value: T } | { preDispatchCutoff: true } | { error: unknown }> => {
+        if (remaining(bounds) <= 0) return { preDispatchCutoff: true };
         try { return { value: await action() }; } catch (error) { return { error }; }
       }),
       new Promise<{ timeout: true }>(resolve => { timer = setTimeout(() => resolve({ timeout: true }), milliseconds); }),
@@ -38,6 +38,7 @@ export async function submitOnce(transport: Pick<SyntheticTransport, 'submit'>, 
   if (wait <= 0) return { kind: 'gap', reason: 'deadline-or-invalid-bounds' };
   const requestDeadline = Date.now() + bounds.requestMilliseconds;
   const result = await bounded(() => transport.submit(request), wait, bounds);
+  if ('preDispatchCutoff' in result) return { kind: 'gap', reason: 'active-time-cutoff' };
   if ('timeout' in result) return { kind: 'uncertain', reason: 'submission-timeout' };
   if ('error' in result) return { kind: 'uncertain', reason: sanitizeProviderDiagnostic(result.error, bounds.credential) };
   const mapped = mapSubmitResponse(result.value.status, result.value.body, result.value.retryAfter);
@@ -58,7 +59,7 @@ export async function observeOnce(transport: Pick<SyntheticTransport, 'observe'>
   if (wait <= 0) return { kind: 'gap', reason: 'deadline-or-invalid-bounds' };
   const requestDeadline = Date.now() + bounds.requestMilliseconds;
   const result = await bounded(() => transport.observe(id), wait, bounds);
-  if ('timeout' in result || remaining(bounds) <= 0 || Date.now() >= requestDeadline) return { kind: 'gap', reason: 'observation-timeout' };
+  if ('preDispatchCutoff' in result || 'timeout' in result || remaining(bounds) <= 0 || Date.now() >= requestDeadline) return { kind: 'gap', reason: 'observation-timeout' };
   if ('error' in result) return { kind: 'gap', reason: sanitizeProviderDiagnostic(result.error, bounds.credential) };
   return mapProgressResponse(result.value.status, result.value.body);
 }

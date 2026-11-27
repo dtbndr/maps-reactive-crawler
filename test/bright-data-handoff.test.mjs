@@ -53,6 +53,17 @@ test('response after request deadline is not accepted when timer callback is del
     assert.deepEqual(result, { kind: 'gap', reason: 'observation-timeout' });
   } finally { Date.now = original; }
 });
+test('pre-dispatch active cutoff reports a gap and makes zero submit calls', async () => {
+  const original = Date.now;
+  let reads = 0;
+  let calls = 0;
+  Date.now = () => ++reads <= 2 ? 100 : 110;
+  try {
+    const result = await handoff.submitOnce({ submit: async () => { calls++; return { status: 202, body: {} }; } }, request, { requestMilliseconds: 50, activeUntil: 110 });
+    assert.equal(calls, 0);
+    assert.deepEqual(result, { kind: 'gap', reason: 'active-time-cutoff' });
+  } finally { Date.now = original; }
+});
 test('malformed dispatched submission at active cutoff remains uncertain', async () => {
   const original = Date.now;
   let now = 100;
