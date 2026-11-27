@@ -12,13 +12,12 @@ export function mapDiscoveryRequest(input: MappingInput) {
   if (!/^[A-Z]{2}$/.test(input.country) || !text(input.keyword) || !Number.isFinite(input.lat) || Math.abs(input.lat) > 90 || !Number.isFinite(input.lon) || Math.abs(input.lon) > 180 || !Number.isFinite(input.zoom) || !Number.isInteger(input.limit) || input.limit < 1 || input.limit > 200) return gap('invalid-input');
   return { method: 'POST', path: '/datasets/v3/scrape', query: { dataset_id: 'gd_m8ebnr0q2qlklc02fz', notify: 'false', include_errors: 'true', type: 'discover_new', discover_by: 'location' }, body: { input: [{ country: input.country, keyword: input.keyword, lat: input.lat, long: input.lon, zoom_level: input.zoom }], limit_per_input: input.limit } };
 }
-export function mapSubmitResponse(status: number, body: unknown, retryAfter?: string): Gap | { kind: 'pending'; snapshotId: string; retryAfterSeconds?: number } | { kind: 'inline'; records: unknown[] } {
+export function mapSubmitResponse(status: number, body: unknown, retryAfter?: string): Gap | { kind: 'pending'; snapshotId: string; retryAfterSeconds?: number; retryAfterInvalid?: true } | { kind: 'inline'; records: unknown[] } {
   if (status === 429) return gap('rate-limited');
   if (status === 200 && Array.isArray(body)) return { kind: 'inline', records: body };
   if (status !== 202 || !record(body) || !text(body.snapshot_id)) return gap();
-  if (retryAfter !== undefined && !/^\d+$/.test(retryAfter)) return gap();
   const seconds = retryAfter === undefined ? undefined : Number(retryAfter);
-  if (seconds !== undefined && !Number.isSafeInteger(seconds)) return gap();
+  if (retryAfter !== undefined && (!/^\d+$/.test(retryAfter) || !Number.isSafeInteger(seconds))) return { kind: 'pending', snapshotId: body.snapshot_id, retryAfterInvalid: true };
   return { kind: 'pending', snapshotId: body.snapshot_id, ...(seconds === undefined ? {} : { retryAfterSeconds: seconds }) };
 }
 export function mapProgressResponse(status: number, body: unknown): Gap | { kind: 'progress'; state: 'starting' | 'running' | 'ready' | 'failed' | 'canceled' } {
@@ -34,15 +33,17 @@ export function mapResultsResponse(status: number, body: unknown, limit: number)
   if (status === 429) return gap('rate-limited');
   if (status !== 200 || !Array.isArray(body) || !Number.isInteger(limit) || limit < 1 || limit > 200) return gap();
   const candidates: Candidate[] = [];
+  let incomplete = false;
   for (const item of body) {
-    if (!record(item) || !text(item.name) || !text(item.place_id) || 'error' in item) return gap();
+    if (!record(item) || !text(item.name) || !text(item.place_id) || 'error' in item) { incomplete = true; continue; }
     const candidate: Candidate = { name: item.name, placeId: item.place_id };
     if (item.lat !== undefined || item.lon !== undefined) {
-      if (typeof item.lat !== 'number' || !Number.isFinite(item.lat) || Math.abs(item.lat) > 90 || typeof item.lon !== 'number' || !Number.isFinite(item.lon) || Math.abs(item.lon) > 180) return gap();
+      if (typeof item.lat !== 'number' || !Number.isFinite(item.lat) || Math.abs(item.lat) > 90 || typeof item.lon !== 'number' || !Number.isFinite(item.lon) || Math.abs(item.lon) > 180) { incomplete = true; continue; }
       candidate.coordinates = { lat: item.lat, lon: item.lon };
     }
     candidates.push(candidate);
   }
-  const capped = body.length >= limit;
-  return { kind: 'results', candidates, gap: capped, expand: !capped && candidates.length > 0 };
+  if (incomplete && candidates.length === 0) return gap();
+  const hasGap = incomplete || body.length >= limit;
+  return { kind: 'results', candidates, gap: hasGap, expand: !hasGap && candidates.length > 0 };
 }
