@@ -88,7 +88,9 @@ export async function observeDurableBrightData(state: DurableState, transport: {
       });
       return;
     }
-    const stopped = elapsed() >= remainingActive || (activeDeadline <= bounds.activeUntil && activeDeadline <= bounds.observationDeadline && Date.now() >= activeDeadline);
+    // Any elapsed local observation deadline is a bounded stop, not a remote cancellation.
+    // The caller's deadline can precede activeDeadline by scheduling overhead.
+    const stopped = elapsed() >= remainingActive || Date.now() >= deadline;
     state.transitionTraversal(s => { const uncertain = markUncertain(s, attempt.cellKey, 'isolated', id); return stopped ? { ...uncertain, attempts: uncertain.attempts.map(a => a.id === attempt.id ? { ...a, observationDisposition: 'stopped' } : a) } : uncertain; });
   } finally {
     const spent = elapsed();
