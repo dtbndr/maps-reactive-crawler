@@ -15,8 +15,8 @@ type ParsedCommand =
   | { command: 'resume'; options: OperatorResumeOptions }
   | { command: 'cancel' | 'status' | 'export'; checkpoint: string };
 
-const startOptions = new Set(['checkpoint', 'fixture', 'lat', 'lon', 'spacing-m', 'radius-m', 'bbox', 'cells', 'submissions', 'active-ms']);
-const resumeOptions = new Set(['checkpoint', 'fixture', 'cells', 'submissions', 'active-ms']);
+const startOptions = new Set(['checkpoint', 'fixture', 'provider', 'lat', 'lon', 'spacing-m', 'radius-m', 'bbox', 'cells', 'submissions', 'active-ms']);
+const resumeOptions = new Set(['checkpoint', 'fixture', 'provider', 'cells', 'submissions', 'active-ms']);
 
 function strictNumber(value: string, flag: string): number {
   if (!/^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?$/.test(value)) throw new Error(`Invalid number for --${flag}`);
@@ -39,6 +39,10 @@ function parseArgs(args: string[]): ParsedCommand {
     const value = tokens[++index];
     if (value === undefined || value.startsWith('--')) throw new Error(`Missing value for ${token}`);
     values.set(name, value);
+  }
+  if (values.has('provider')) {
+    if (values.get('provider') !== 'bright-data') throw new Error('Unsupported provider');
+    throw new Error('Bright Data CLI execution is not implemented. Independent contract and lifecycle evidence, account and dataset pricing evidence, rights evidence, and fresh invocation confirmation are required; none authorizes execution until a safe production boundary is implemented. No checkpoint was changed or provider called.');
   }
   const required = (name: string): string => {
     const value = values.get(name);

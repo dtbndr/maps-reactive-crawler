@@ -68,13 +68,22 @@ test('CLI emits successful status and export documents for an existing checkpoin
   const fixtureIdentity = createHash('sha256').update('synthetic fixture identity').digest('hex');
   try {
     DurableState.createBound(checkpoint, fixtureIdentity, createTraversal(validateGeometry(geometry), { cells: 1, submissions: 2, activeTime: 100 }));
+    const expectedStatus = {
+      version: 1, state: 'idle', headline: 'ready', conditions: [],
+      geometry: { seed: { latitude: 0, longitude: 0 }, spacing: 100, area: { type: 'radius', radius: 200 } },
+      limits: { cells: 1, submissions: 2, activeTime: 100 },
+      counters: { admitted: 1, submissions: 0, activeTime: 0 },
+      frontier: { queued: ['0,0'], running: [], parked: [], blocked: [], discoveryExhausted: false },
+      discoveryGaps: [], detailGaps: [], pendingDetails: [],
+      coverage: { cellCenterEligibility: true, returnedPlacesFiltered: false, exhaustive: false, detailComplete: false },
+    };
     for (const command of ['status', 'export']) {
       const result = spawnSync(process.execPath, [new URL(cli).pathname, command, '--checkpoint', checkpoint], { encoding: 'utf8' });
       assert.equal(result.status, 0, result.stderr);
       assert.equal(result.stderr, '');
       const document = JSON.parse(result.stdout);
-      if (command === 'status') assert.deepEqual(document, operator.status({ checkpoint }));
-      else assert.deepEqual(document, operator.exportResults({ checkpoint }));
+      if (command === 'status') assert.deepEqual(document, expectedStatus);
+      else assert.deepEqual(document, { version: 1, status: expectedStatus, verifiedPlaces: [], unverifiedObservations: [] });
     }
   } finally { rmSync(directory, { recursive: true, force: true }); }
 });

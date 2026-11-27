@@ -40,6 +40,10 @@ mise exec -- node dist/cli.js export --checkpoint ./crawl.db
 
 Coverage is heuristic, not exhaustive. In status, `cells` means neighbors were blocked when results were expanded; it does not necessarily mean the cell limit was reached. Raising a limit does not promote neighbors blocked at expansion. Pending detail work is recorded but is not executed by this path. Export preserves source provenance and separates unverified observations from fixture-verified identity groups; this is not a claim about real-provider identity. See [the happy path](docs/happy-path.md) for further boundaries.
 
+Provider execution is not available: `start` or `resume` with `--provider bright-data` fails closed before checkpoint mutation or provider calls. Local `status` and `export` also inspect existing provider-bound checkpoints without provider access. The synthetic provider runner is internal test infrastructure, not authorization or a production transport. No CLI evidence or confirmation input is accepted yet.
+
+Before live execution can be enabled, a later increment must implement a safe production HTTP boundary, independently verified contract and lifecycle evidence, account- and dataset-specific pricing evidence, data rights evidence, and fresh confirmation of the displayed effective invocation with an evidence-backed estimate and its assumptions and uncertainty. Missing evidence, an unestimable invocation, or missing/declined confirmation must block execution. Approval alone does not establish price or rights. Direct API use will require notice. A local stop does not cancel a remote job; preserve known IDs and unresolved gaps for manual provider-side investigation rather than automatically resending uncertain work. A dense seed may be capped and cannot establish complete coverage.
+
 The example environment file contains a placeholder, not a working integration. Never commit credentials, provider data or checkpoint files. Live provider calls may incur charges and require explicit operator approval.
 
 ## Contributing and license
