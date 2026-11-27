@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { validateGeometry, createTraversal, admitNextCell, reserveSubmission, authorizeResend, markUncertain } from '../dist/index.js';
 import { DurableState } from '../dist/durable-state.js';
-import { executeDurableDiscovery, setDurableDiscoveryBoundaryHookForTest } from '../dist/durable-discovery.js';
+import { executeDurableDiscovery, executeDurableDiscoveryAsync, setDurableDiscoveryBoundaryHookForTest } from '../dist/durable-discovery.js';
 import { mkdtempSync, rmSync, writeFileSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -837,5 +837,34 @@ test('fresh-process recovery does not revive exhausted retry using a raised call
       assert.equal(readFileSync(ledgerPath, 'utf8'), ledgerBeforeExhaustion);
       const verify = DurableState.open(path); assert.equal(JSON.stringify(verify.readTraversal()), payloadBeforeExhaustion); verify.close();
     }
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('async durable discovery persists dispatch before awaiting send and ID before awaiting observation', async () => {
+  const { dir, path } = temp();
+  try {
+    const state = DurableState.open(path);
+    state.writeTraversal(createTraversal(geometry, { cells: 1, submissions: 1, activeTime: 100 }));
+    const events = [];
+    const pendingSend = Promise.withResolvers();
+    const pendingObserve = Promise.withResolvers();
+    const operation = executeDurableDiscoveryAsync(state, workId => {
+      events.push(['send', state.readTraversal().attempts.at(-1).status, workId]);
+      return pendingSend.promise;
+    }, id => {
+      events.push(['observe', state.readTraversal().attempts.at(-1).knownId, id]);
+      return pendingObserve.promise;
+    }, 'global', undefined, { monotonicNow: () => 0 });
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(state.readTraversal().attempts.at(-1).status, 'dispatched');
+    pendingSend.resolve({ id: 'async-id' });
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(state.readTraversal().attempts.at(-1).knownId, 'async-id');
+    assert.deepEqual(events, [['send', 'dispatched', 'work:0,0'], ['observe', 'async-id', 'async-id']]);
+    pendingObserve.resolve({ result: { status: 'empty' }, elapsed: 0 });
+    const result = await operation;
+    assert.equal(result.cells['0,0'].outcome, 'empty');
+    assert.equal(result.submissions, 1);
+    state.close();
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
