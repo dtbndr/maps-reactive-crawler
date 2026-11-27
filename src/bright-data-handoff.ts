@@ -6,17 +6,17 @@ import { sanitizeProviderDiagnostic } from './bright-data-discovery.js';
 
 type Response = { status: number; body: unknown; retryAfter?: string };
 export interface SyntheticTransport {
-  submit(request: ReturnType<typeof mapDiscoveryRequest>): Promise<Response>;
-  observe(id: string): Promise<Response>;
+  submit(request: ReturnType<typeof mapDiscoveryRequest>, signal?: AbortSignal): Promise<Response>;
+  observe(id: string, signal?: AbortSignal): Promise<Response>;
 }
 export interface HandoffBounds { requestMilliseconds: number; activeUntil: number; credential?: string }
 
 /** Retrieve ready snapshot records separately from progress observation. */
-export async function retrieveOnce(transport: { retrieve(id: string): Promise<Response> }, id: string, limit: number, bounds: HandoffBounds): Promise<ReturnType<typeof mapResultsResponse>> {
+export async function retrieveOnce(transport: { retrieve(id: string, signal?: AbortSignal): Promise<Response> }, id: string, limit: number, bounds: HandoffBounds): Promise<ReturnType<typeof mapResultsResponse>> {
   const wait = remaining(bounds);
   if (wait <= 0) return { kind: 'gap', reason: 'deadline-or-invalid-bounds' };
   const requestDeadline = Date.now() + bounds.requestMilliseconds;
-  const result = await bounded(() => transport.retrieve(id), wait, bounds, requestDeadline);
+  const result = await bounded(signal => transport.retrieve(id, signal), wait, bounds, requestDeadline);
   if ('preDispatchCutoff' in result || 'timeout' in result || remaining(bounds) <= 0 || Date.now() >= requestDeadline) return { kind: 'gap', reason: 'retrieval-timeout' };
   if ('error' in result) return { kind: 'gap', reason: sanitizeProviderDiagnostic(result.error, bounds.credential) };
   return mapResultsResponse(result.value.status, result.value.body, limit);
@@ -29,17 +29,18 @@ function remaining(bounds: HandoffBounds): number {
   if (!Number.isFinite(bounds.requestMilliseconds) || bounds.requestMilliseconds <= 0 || !Number.isFinite(bounds.activeUntil)) return 0;
   return Math.max(0, Math.min(bounds.requestMilliseconds, bounds.activeUntil - Date.now(), 2147483647));
 }
-async function bounded<T>(action: () => Promise<T>, milliseconds: number, bounds: HandoffBounds, requestDeadline: number): Promise<{ value: T } | { timeout: true } | { preDispatchCutoff: 'active' | 'request' } | { error: unknown }> {
+async function bounded<T>(action: (signal: AbortSignal) => Promise<T>, milliseconds: number, bounds: HandoffBounds, requestDeadline: number): Promise<{ value: T } | { timeout: true } | { preDispatchCutoff: 'active' | 'request' } | { error: unknown }> {
   let timer: ReturnType<typeof setTimeout> | undefined;
+  const controller = new AbortController();
   try {
     return await Promise.race([
       Promise.resolve().then(async (): Promise<{ value: T } | { preDispatchCutoff: 'active' | 'request' } | { error: unknown }> => {
         const now = Date.now();
         if (now >= bounds.activeUntil) return { preDispatchCutoff: 'active' };
         if (now >= requestDeadline) return { preDispatchCutoff: 'request' };
-        try { return { value: await action() }; } catch (error) { return { error }; }
+        try { return { value: await action(controller.signal) }; } catch (error) { return { error }; }
       }),
-      new Promise<{ timeout: true }>(resolve => { timer = setTimeout(() => resolve({ timeout: true }), milliseconds); }),
+      new Promise<{ timeout: true }>(resolve => { timer = setTimeout(() => { resolve({ timeout: true }); controller.abort(); }, milliseconds); }),
     ]);
   } finally { if (timer !== undefined) clearTimeout(timer); }
 }
@@ -50,7 +51,7 @@ export async function submitOnce(transport: Pick<SyntheticTransport, 'submit'>, 
   const wait = remaining(bounds);
   if (wait <= 0) return { kind: 'gap', reason: 'deadline-or-invalid-bounds' };
   const requestDeadline = Date.now() + bounds.requestMilliseconds;
-  const result = await bounded(() => transport.submit(request), wait, bounds, requestDeadline);
+  const result = await bounded(signal => transport.submit(request, signal), wait, bounds, requestDeadline);
   if ('preDispatchCutoff' in result) return { kind: 'gap', reason: result.preDispatchCutoff === 'active' ? 'active-time-cutoff' : 'submission-timeout' };
   if ('timeout' in result) return { kind: 'uncertain', reason: 'submission-timeout' };
   if ('error' in result) return { kind: 'uncertain', reason: sanitizeProviderDiagnostic(result.error, bounds.credential) };
@@ -72,7 +73,7 @@ export async function observeOnce(transport: Pick<SyntheticTransport, 'observe'>
   const wait = remaining(bounds);
   if (wait <= 0) return { kind: 'gap', reason: 'deadline-or-invalid-bounds' };
   const requestDeadline = Date.now() + bounds.requestMilliseconds;
-  const result = await bounded(() => transport.observe(id), wait, bounds, requestDeadline);
+  const result = await bounded(signal => transport.observe(id, signal), wait, bounds, requestDeadline);
   if ('preDispatchCutoff' in result || 'timeout' in result || remaining(bounds) <= 0 || Date.now() >= requestDeadline) return { kind: 'gap', reason: 'observation-timeout' };
   if ('error' in result) return { kind: 'gap', reason: sanitizeProviderDiagnostic(result.error, bounds.credential) };
   return mapProgressResponse(result.value.status, result.value.body);

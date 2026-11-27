@@ -15,7 +15,7 @@ function retryReady(state: DurableState, attempt: Attempt, clock: Clock): boolea
 }
 
 /** Offline injected-transport runner. The caller owns the bound checkpoint for the whole invocation. */
-export async function runSyntheticBrightData(state: DurableState, transport: SyntheticTransport & { retrieve(id: string): Promise<{ status: number; body: unknown }> }, bounds: HandoffBounds & { maxObservations: number; observationDeadline: number }, clock: Clock = defaultClock): Promise<{ reason: string }> {
+export async function runSyntheticBrightData(state: DurableState, transport: SyntheticTransport & { retrieve(id: string, signal?: AbortSignal): Promise<{ status: number; body: unknown }> }, bounds: HandoffBounds & { maxObservations: number; observationDeadline: number }, clock: Clock = defaultClock): Promise<{ reason: string }> {
   state.providerBinding();
   for (;;) {
     const current = state.readTraversal();
@@ -52,7 +52,7 @@ export async function runSyntheticBrightData(state: DurableState, transport: Syn
 }
 
 /** Observe only the checkpoint's acknowledged ID. A gap never triggers a resend. */
-export async function observeDurableBrightData(state: DurableState, transport: { observe(id: string): Promise<{ status: number; body: unknown }>; retrieve(id: string): Promise<{ status: number; body: unknown }> }, bounds: HandoffBounds & { maxObservations: number; observationDeadline: number }, clock: Clock = defaultClock): Promise<void> {
+export async function observeDurableBrightData(state: DurableState, transport: { observe(id: string, signal?: AbortSignal): Promise<{ status: number; body: unknown }>; retrieve(id: string, signal?: AbortSignal): Promise<{ status: number; body: unknown }> }, bounds: HandoffBounds & { maxObservations: number; observationDeadline: number }, clock: Clock = defaultClock): Promise<void> {
   if (!Number.isSafeInteger(bounds.maxObservations) || bounds.maxObservations < 1 || !Number.isFinite(bounds.observationDeadline)) throw new Error('Invalid observation bounds');
   const binding = state.providerBinding();
   const current = state.readTraversal();
@@ -128,7 +128,7 @@ export async function submitDurableBrightData(state: DurableState, transport: Pi
     if ('kind' in mapped) { state.transitionTraversal(s => confirmNoSend(s, cell)); return; }
     const item = mapped.body.input[0];
     const remaining = Math.max(0, current.limits.activeTime - current.activeTime);
-    const result = await submitOnce({ submit: request => { called = true; return transport.submit(request); } }, { country: item.country, keyword: item.keyword, lat: item.lat, lon: item.long, zoom: item.zoom_level, limit: mapped.body.limit_per_input }, { ...bounds, activeUntil: Math.min(bounds.activeUntil, Date.now() + remaining) });
+    const result = await submitOnce({ submit: (request, signal) => { called = true; return transport.submit(request, signal); } }, { country: item.country, keyword: item.keyword, lat: item.lat, lon: item.long, zoom: item.zoom_level, limit: mapped.body.limit_per_input }, { ...bounds, activeUntil: Math.min(bounds.activeUntil, Date.now() + remaining) });
     if (result.kind === 'acknowledged') {
       const now = result.retryAfterSeconds ? wallSample(clock) : 0;
       const deadline = now + (result.retryAfterSeconds ?? 0) * 1000;

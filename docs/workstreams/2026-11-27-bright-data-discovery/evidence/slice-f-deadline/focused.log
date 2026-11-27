@@ -1,0 +1,33 @@
+✔ submit aborts local fetch at active deadline and isolates late response (76.68975ms)
+✔ submit aborts local fetch at request deadline and isolates late response (62.091ms)
+✔ observe aborts local fetch at active deadline and isolates late response (59.219709ms)
+✔ observe aborts local fetch at request deadline and isolates late response (60.465709ms)
+✔ retrieve aborts local fetch at active deadline and isolates late response (58.742ms)
+✔ retrieve aborts local fetch at request deadline and isolates late response (62.330834ms)
+✔ positive control: candidate fetch completes and expands before deadlines (16.251041ms)
+✔ submission hands acknowledged ID to executor without observing (1.61825ms)
+✔ unacknowledged timeout is uncertain and late response ignored (72.665791ms)
+✔ observation bounds and unknown or rate limited statuses stop (0.48675ms)
+✔ valid retry hint and ready results are mapped conservatively (0.315958ms)
+✔ ready requires separate bounded retrieval of records (0.41475ms)
+✔ an ID returned at active cutoff is retained with a gap (0.155417ms)
+✔ submission ID available after request deadline is retained with timeout gap (0.158042ms)
+✔ response after request deadline is not accepted when timer callback is delayed (0.14975ms)
+✔ pre-dispatch active cutoff reports a gap and makes zero submit calls (0.145083ms)
+✔ pre-dispatch request deadline prevents submit and observation (0.182333ms)
+✔ pre-dispatch request deadline prevents observation (0.120333ms)
+✔ malformed dispatched submission at active cutoff remains uncertain (0.107292ms)
+✔ late observation cannot expand or return results (57.576917ms)
+✔ failures are sanitized and invalid bounds initiate no work (0.681084ms)
+✔ caller abort cancels a pending fetch; pre-abort dispatches nothing (0.996833ms)
+✔ connected runner dispatches seed and expanded neighbor with durable IDs (23.199ms)
+✔ runner cutoff isolates late observation and resumes its ID after budget increase (92.745291ms)
+✔ runner reopens known stopped ID without another submission (11.609792ms)
+ℹ tests 25
+ℹ suites 0
+ℹ pass 25
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 466.684959
