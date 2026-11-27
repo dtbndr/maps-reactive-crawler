@@ -44,6 +44,17 @@ test('an ID returned at active cutoff is retained with a gap', async () => {
     assert.deepEqual(result, { kind: 'acknowledged', id: 'id', gap: 'active-time-cutoff' });
   } finally { Date.now = original; }
 });
+test('submission ID available after request deadline is retained with timeout gap', async () => {
+  const original = Date.now;
+  let now = 100;
+  let observations = 0;
+  Date.now = () => now;
+  try {
+    const result = await handoff.submitOnce({ submit: async () => { now = 111; return { status: 202, body: { snapshot_id: 'id' }, retryAfter: '2' }; }, observe: async () => { observations++; } }, request, { requestMilliseconds: 10, activeUntil: 200 });
+    assert.deepEqual(result, { kind: 'acknowledged', id: 'id', retryAfterSeconds: 2, gap: 'submission-timeout' });
+    assert.equal(observations, 0);
+  } finally { Date.now = original; }
+});
 test('response after request deadline is not accepted when timer callback is delayed', async () => {
   const original = Date.now;
   let now = 100;

@@ -46,10 +46,11 @@ export async function submitOnce(transport: Pick<SyntheticTransport, 'submit'>, 
   if (mapped.kind === 'pending' && cutoff) {
     return { kind: 'acknowledged', id: mapped.snapshotId, ...(mapped.retryAfterSeconds === undefined ? {} : { retryAfterSeconds: mapped.retryAfterSeconds }), gap: mapped.retryAfterInvalid ? 'invalid-retry-after' : 'active-time-cutoff' };
   }
-  if (Date.now() >= requestDeadline) return { kind: 'uncertain', reason: 'submission-timeout' };
+  const requestTimedOut = Date.now() >= requestDeadline;
   if (mapped.kind === 'pending') {
-    return { kind: 'acknowledged', id: mapped.snapshotId, ...(mapped.retryAfterSeconds === undefined ? {} : { retryAfterSeconds: mapped.retryAfterSeconds }), ...(mapped.retryAfterInvalid ? { gap: 'invalid-retry-after' } : {}) };
+    return { kind: 'acknowledged', id: mapped.snapshotId, ...(mapped.retryAfterSeconds === undefined ? {} : { retryAfterSeconds: mapped.retryAfterSeconds }), ...(mapped.retryAfterInvalid ? { gap: 'invalid-retry-after' } : requestTimedOut ? { gap: 'submission-timeout' } : {}) };
   }
+  if (requestTimedOut) return { kind: 'uncertain', reason: 'submission-timeout' };
   if (mapped.kind === 'inline') return cutoff ? { kind: 'gap', reason: 'active-time-cutoff' } : mapResultsResponse(200, mapped.records, input.limit);
   return mapped.reason === 'rate-limited' && !cutoff ? mapped : { kind: 'uncertain', reason: mapped.reason };
 }
