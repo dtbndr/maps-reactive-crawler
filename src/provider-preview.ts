@@ -1,4 +1,7 @@
+import { createHash } from 'node:crypto';
+import { readOnlyBoundSnapshot, type ProviderBinding } from './durable-state.js';
 import { validateOperatorConfig, type OperatorConfig } from './operator.js';
+import type { TraversalLimits, TraversalState } from './traversal.js';
 
 type Document = Record<string, unknown> & { reference: string; date: string; scope: string };
 type ScopedDocument = Document & { account: string; dataset: string };
@@ -32,4 +35,37 @@ export function previewProviderInvocation(input: unknown): ProviderPreview {
   if (!object(estimate) || !text(estimate.currency) || typeof estimate.amount !== 'number' || !Number.isFinite(estimate.amount) || estimate.amount < 0 || !text(estimate.assumptions) || !text(estimate.uncertainty) || !object(evidence.pricing) || estimate.pricingReference !== evidence.pricing.reference) return blocked('Missing or invalid cost estimate');
   // Snapshot the displayed values; later caller mutation cannot change the preview.
   return structuredClone({ kind: 'preview', invocation: invocation as Invocation, evidence: evidence as Evidence, estimate: estimate as Estimate, authorization: 'not-authorized' });
+}
+
+export type ProviderResumePreview = {
+  binding: ProviderBinding;
+  geometry: TraversalState['geometry'];
+  limits: TraversalLimits;
+  knownIds: { attemptId: string; id: string }[];
+  gaps: TraversalState['gaps'];
+  fingerprint: string;
+  authorization: 'not-authorized';
+};
+
+/** Read only; the fingerprint is a stale-state detector, not consent or authentication. */
+export function previewProviderResume(path: string, requested: Partial<TraversalLimits> = {}): ProviderResumePreview {
+  const snapshot = readOnlyBoundSnapshot(path);
+  if (snapshot.binding.version !== 2) throw new Error('Checkpoint is not provider-bound');
+  const limits = effectiveResumeLimits(snapshot.traversal, requested);
+  const fingerprint = createHash('sha256').update(JSON.stringify({ version: 1, binding: snapshot.binding, traversal: snapshot.traversal, checkpoint: snapshot.checkpointPayload, ownerPid: snapshot.ownerPid, limits })).digest('hex');
+  return { binding: snapshot.binding, geometry: snapshot.traversal.geometry, limits, knownIds: snapshot.traversal.attempts.filter(a => a.knownId !== undefined).map(a => ({ attemptId: a.id, id: a.knownId! })), gaps: snapshot.traversal.gaps, fingerprint, authorization: 'not-authorized' };
+}
+
+/** Apply exactly the same limit policy used by synthetic resume. */
+export function effectiveResumeLimits(state: TraversalState, requested: Partial<TraversalLimits>): TraversalLimits {
+  if (!object(requested)) throw new Error('Invalid resume limits');
+  for (const key of Object.keys(requested)) {
+    if (!['cells', 'submissions', 'activeTime'].includes(key)) throw new Error('Invalid resume limit name');
+    const name = key as keyof TraversalLimits;
+    const value = requested[name];
+    if (typeof value !== 'number' || !Number.isSafeInteger(value) || value <= state.limits[name]) throw new Error(`Resume ${key} limit must strictly increase`);
+  }
+  const limits = { ...state.limits, ...requested };
+  validateOperatorConfig({ geometry: state.geometry, limits });
+  return limits;
 }

@@ -139,6 +139,12 @@ function validateTraversal(value: unknown): asserts value is TraversalState {
 export type ReadOnlyCheckpointSnapshot = { traversal: TraversalState; ownerPid: number | null; ownerAlive: boolean };
 
 export function readOnlyCheckpointSnapshot(path: string): ReadOnlyCheckpointSnapshot {
+  const { traversal, ownerPid, ownerAlive } = readOnlyBoundSnapshot(path);
+  return { traversal, ownerPid, ownerAlive };
+}
+
+/** A single SQLite read transaction captures all checkpoint rows for later revalidation. */
+export function readOnlyBoundSnapshot(path: string): ReadOnlyCheckpointSnapshot & { binding: OperatorBinding; checkpointPayload: string } {
   const db = new DatabaseSync(path, { readOnly: true });
   try {
     db.exec('BEGIN');
@@ -149,7 +155,7 @@ export function readOnlyCheckpointSnapshot(path: string): ReadOnlyCheckpointSnap
     validate(JSON.parse(String(checkpoint.payload)));
     const binding = db.prepare('SELECT payload FROM operator_binding WHERE id=1').get();
     if (!binding) throw new Error('Corrupt state: missing operator binding');
-    storedBinding(binding.payload);
+    const parsedBinding = storedBinding(binding.payload);
     const row = db.prepare('SELECT payload FROM traversal WHERE id=1').get();
     if (!row) throw new Error('Corrupt state: missing traversal');
     const traversal = JSON.parse(String(row.payload));
@@ -160,7 +166,7 @@ export function readOnlyCheckpointSnapshot(path: string): ReadOnlyCheckpointSnap
     if (ownerPid !== null && (!Number.isSafeInteger(ownerPid) || ownerPid < 1 || ownerPid > 2147483647)) throw new Error('Corrupt state: invalid owner PID');
     const ownerAlive = ownerPid === null ? false : isAlive(ownerPid);
     db.exec('COMMIT');
-    return { traversal, ownerPid, ownerAlive };
+    return { traversal, ownerPid, ownerAlive, binding: parsedBinding, checkpointPayload: String(checkpoint.payload) };
   } catch (error) {
     try { db.exec('ROLLBACK'); } catch { /* Preserve snapshot error. */ }
     throw error;

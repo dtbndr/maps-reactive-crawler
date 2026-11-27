@@ -4,6 +4,7 @@ import { runSyntheticBrightData } from './durable-bright-data-submission.js';
 import type { SyntheticTransport, HandoffBounds } from './bright-data-handoff.js';
 import { validateOperatorConfig, projectOperatorStatus, type OperatorRunResult } from './operator.js';
 import { createTraversal, type TraversalLimits } from './traversal.js';
+import { effectiveResumeLimits } from './provider-preview.js';
 import type { GeometryInput } from './index.js';
 
 type Bounds = HandoffBounds & { maxObservations: number; observationDeadline: number };
@@ -27,16 +28,8 @@ export async function runSyntheticOperator(command: 'start' | 'resume', options:
   try {
     const current = state.readTraversal();
     const requested = command === 'resume' ? (options as Resume).limits ?? {} : {};
-    if (typeof requested !== 'object' || requested === null || Array.isArray(requested)) throw new Error('Invalid resume limits');
-    for (const key of Object.keys(requested)) {
-      if (!['cells', 'submissions', 'activeTime'].includes(key)) throw new Error('Invalid resume limit name');
-      const name = key as keyof TraversalLimits;
-      const value = requested[name];
-      if (typeof value !== 'number' || !Number.isSafeInteger(value) || value <= current.limits[name]) throw new Error(`Resume ${key} limit must strictly increase`);
-    }
+    const limits = effectiveResumeLimits(current, requested);
     if (Object.keys(requested).length) {
-      const limits = { ...current.limits, ...requested };
-      validateOperatorConfig({ geometry: current.geometry, limits });
       state.writeTraversal({ ...current, limits });
     }
     await runSyntheticBrightData(state, transport, options.bounds);
