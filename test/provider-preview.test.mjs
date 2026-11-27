@@ -6,7 +6,7 @@ const today = '2026-06-01';
 const input = (operation = 'start') => {
   const invocation = { operation, query: { keyword: 'pizza', country: 'GB' }, geometry: { seed: { latitude: 1, longitude: 2 }, spacing: 500, area: { type: 'radius', radius: 1000 } }, limits: { cells: 4, submissions: 3, activeTime: 1000 }, account: 'synthetic-account', dataset: 'synthetic-dataset' };
   const document = { reference: 'fake document', date: '2026-01-01', validThrough: '2026-12-31', scope: 'fake scope' };
-  const technical = method => ({ ...document, attestation: { method, operation, dataset: invocation.dataset } });
+  const technical = method => ({ ...document, attestation: { method, invocation: structuredClone(invocation) } });
   const commercial = () => ({ ...document, account: invocation.account, dataset: invocation.dataset, attestation: { invocation: structuredClone(invocation), collection: true, storage: true, export: true } });
   return { invocation, evidence: { submission: technical('submission'), observation: technical('observation'), retrieval: technical('retrieval'), pricing: commercial(), rights: commercial() }, estimate: { currency: 'USD', amount: 5, assumptions: 'up to three submissions', uncertainty: 'actual charges may differ', pricingReference: 'fake document' } };
 };
@@ -32,12 +32,12 @@ test('each evidence category requires current complete dated evidence', () => {
   assert.equal(previewProviderInvocation(input(), 'bad-date').kind, 'blocked');
 });
 
-test('technical attestations match each method, operation and dataset', () => {
-  for (const category of categories.slice(0, 3)) for (const [key, bad] of [['method', 'other'], ['operation', 'resume'], ['dataset', 'other']]) {
-    const value = input(); value.evidence[category].attestation[key] = bad;
-    assert.equal(preview(value).kind, 'blocked', `${category} ${key}`);
-    delete value.evidence[category].attestation[key];
-    assert.equal(preview(value).kind, 'blocked', `${category} missing ${key}`);
+test('technical attestations bind their method and entire effective invocation', () => {
+  for (const category of categories.slice(0, 3)) {
+    for (const mutate of [a => { a.method = 'other'; }, a => { delete a.method; }, a => { delete a.invocation; }, a => { a.invocation.operation = 'resume'; }, a => { a.invocation.dataset = 'other'; }, a => { a.invocation.account = 'other'; }, a => { a.invocation.query.keyword = 'other'; }, a => { a.invocation.query.country = 'other'; }, a => { a.invocation.geometry.area.radius++; }, a => { a.invocation.limits.cells++; }, a => { a.invocation.limits.submissions++; }, a => { a.invocation.limits.activeTime++; }]) {
+      const value = input(); mutate(value.evidence[category].attestation);
+      assert.deepEqual(preview(value), { kind: 'blocked', reason: `Missing or invalid ${category} evidence` }, category);
+    }
   }
 });
 

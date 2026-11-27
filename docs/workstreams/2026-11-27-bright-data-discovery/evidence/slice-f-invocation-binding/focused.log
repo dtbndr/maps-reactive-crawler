@@ -1,0 +1,15 @@
+✔ valid provider evidence reaches fail-closed terminal confirmation without creating checkpoint (357.993583ms)
+✔ child PTY resume previews effective checkpoint and never changes logical state or ownership (702.883459ms)
+✔ positive controls for start and resume snapshot non-authorizing attestations (2.819959ms)
+✔ each evidence category requires current complete dated evidence (1.889667ms)
+✔ technical attestations bind their method and entire effective invocation (1.874375ms)
+✔ pricing and rights attest to each use and the entire displayed invocation (1.223375ms)
+✔ invalid estimate and invocation remain blocked (0.3985ms)
+ℹ tests 7
+ℹ suites 0
+ℹ pass 7
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 1126.250833

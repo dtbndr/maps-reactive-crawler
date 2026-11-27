@@ -1,0 +1,304 @@
+✖ positive controls for start and resume snapshot non-authorizing attestations (5.398708ms)
+✖ each evidence category requires current complete dated evidence (0.788916ms)
+✖ technical attestations bind their method and entire effective invocation (0.747833ms)
+✔ pricing and rights attest to each use and the entire displayed invocation (0.85825ms)
+✔ invalid estimate and invocation remain blocked (0.283791ms)
+ℹ tests 5
+ℹ suites 0
+ℹ pass 2
+ℹ fail 3
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 76.777334
+
+✖ failing tests:
+
+test at test/provider-preview.test.mjs:16:1
+✖ positive controls for start and resume snapshot non-authorizing attestations (5.398708ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:
+  + actual - expected
+
+    {
+  +   kind: 'blocked',
+  +   reason: 'Missing or invalid submission evidence'
+  -   authorization: 'not-authorized',
+  -   estimate: {
+  -     amount: 5,
+  -     assumptions: 'up to three submissions',
+  -     currency: 'USD',
+  -     pricingReference: 'fake document',
+  -     uncertainty: 'actual charges may differ'
+  -   },
+  -   evidence: {
+  -     observation: {
+  -       attestation: {
+  -         invocation: {
+  -           account: 'synthetic-account',
+  -           dataset: 'synthetic-dataset',
+  -           geometry: {
+  -             area: {
+  -               radius: 1000,
+  -               type: 'radius'
+  -             },
+  -             seed: {
+  -               latitude: 1,
+  -               longitude: 2
+  -             },
+  -             spacing: 500
+  -           },
+  -           limits: {
+  -             activeTime: 1000,
+  -             cells: 4,
+  -             submissions: 3
+  -           },
+  -           operation: 'start',
+  -           query: {
+  -             country: 'GB',
+  -             keyword: 'pizza'
+  -           }
+  -         },
+  -         method: 'observation'
+  -       },
+  -       date: '2026-01-01',
+  -       reference: 'fake document',
+  -       scope: 'fake scope',
+  -       validThrough: '2026-12-31'
+  -     },
+  -     pricing: {
+  -       account: 'synthetic-account',
+  -       attestation: {
+  -         collection: true,
+  -         export: true,
+  -         invocation: {
+  -           account: 'synthetic-account',
+  -           dataset: 'synthetic-dataset',
+  -           geometry: {
+  -             area: {
+  -               radius: 1000,
+  -               type: 'radius'
+  -             },
+  -             seed: {
+  -               latitude: 1,
+  -               longitude: 2
+  -             },
+  -             spacing: 500
+  -           },
+  -           limits: {
+  -             activeTime: 1000,
+  -             cells: 4,
+  -             submissions: 3
+  -           },
+  -           operation: 'start',
+  -           query: {
+  -             country: 'GB',
+  -             keyword: 'pizza'
+  -           }
+  -         },
+  -         storage: true
+  -       },
+  -       dataset: 'synthetic-dataset',
+  -       date: '2026-01-01',
+  -       reference: 'fake document',
+  -       scope: 'fake scope',
+  -       validThrough: '2026-12-31'
+  -     },
+  -     retrieval: {
+  -       attestation: {
+  -         invocation: {
+  -           account: 'synthetic-account',
+  -           dataset: 'synthetic-dataset',
+  -           geometry: {
+  -             area: {
+  -               radius: 1000,
+  -               type: 'radius'
+  -             },
+  -             seed: {
+  -               latitude: 1,
+  -               longitude: 2
+  -             },
+  -             spacing: 500
+  -           },
+  -           limits: {
+  -             activeTime: 1000,
+  -             cells: 4,
+  -             submissions: 3
+  -           },
+  -           operation: 'start',
+  -           query: {
+  -             country: 'GB',
+  -             keyword: 'pizza'
+  -           }
+  -         },
+  -         method: 'retrieval'
+  -       },
+  -       date: '2026-01-01',
+  -       reference: 'fake document',
+  -       scope: 'fake scope',
+  -       validThrough: '2026-12-31'
+  -     },
+  -     rights: {
+  -       account: 'synthetic-account',
+  -       attestation: {
+  -         collection: true,
+  -         export: true,
+  -         invocation: {
+  -           account: 'synthetic-account',
+  -           dataset: 'synthetic-dataset',
+  -           geometry: {
+  -             area: {
+  -               radius: 1000,
+  -               type: 'radius'
+  -             },
+  -             seed: {
+  -               latitude: 1,
+  -               longitude: 2
+  -             },
+  -             spacing: 500
+  -           },
+  -           limits: {
+  -             activeTime: 1000,
+  -             cells: 4,
+  -             submissions: 3
+  -           },
+  -           operation: 'start',
+  -           query: {
+  -             country: 'GB',
+  -             keyword: 'pizza'
+  -           }
+  -         },
+  -         storage: true
+  -       },
+  -       dataset: 'synthetic-dataset',
+  -       date: '2026-01-01',
+  -       reference: 'fake document',
+  -       scope: 'fake scope',
+  -       validThrough: '2026-12-31'
+  -     },
+  -     submission: {
+  -       attestation: {
+  -         invocation: {
+  -           account: 'synthetic-account',
+  -           dataset: 'synthetic-dataset',
+  -           geometry: {
+  -             area: {
+  -               radius: 1000,
+  -               type: 'radius'
+  -             },
+  -             seed: {
+  -               latitude: 1,
+  -               longitude: 2
+  -             },
+  -             spacing: 500
+  -           },
+  -           limits: {
+  -             activeTime: 1000,
+  -             cells: 4,
+  -             submissions: 3
+  -           },
+  -           operation: 'start',
+  -           query: {
+  -             country: 'GB',
+  -             keyword: 'pizza'
+  -           }
+  -         },
+  -         method: 'submission'
+  -       },
+  -       date: '2026-01-01',
+  -       reference: 'fake document',
+  -       scope: 'fake scope',
+  -       validThrough: '2026-12-31'
+  -     }
+  -   },
+  -   invocation: {
+  -     account: 'synthetic-account',
+  -     dataset: 'synthetic-dataset',
+  -     geometry: {
+  -       area: {
+  -         radius: 1000,
+  -         type: 'radius'
+  -       },
+  -       seed: {
+  -         latitude: 1,
+  -         longitude: 2
+  -       },
+  -       spacing: 500
+  -     },
+  -     limits: {
+  -       activeTime: 1000,
+  -       cells: 4,
+  -       submissions: 3
+  -     },
+  -     operation: 'start',
+  -     query: {
+  -       country: 'GB',
+  -       keyword: 'pizza'
+  -     }
+  -   },
+  -   kind: 'preview'
+    }
+
+      at TestContext.<anonymous> (file:///Users/dtbndr/Development/node-ws/maps-reactive-crawler/test/provider-preview.test.mjs:19:12)
+      at Test.runInAsyncScope (node:async_hooks:226:14)
+      at Test.run (node:internal/test_runner/test:1402:25)
+      at Test.start (node:internal/test_runner/test:1262:17)
+      at startSubtestAfterBootstrap (node:internal/test_runner/harness:387:17) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: { kind: 'blocked', reason: 'Missing or invalid submission evidence' },
+    expected: { kind: 'preview', invocation: { operation: 'start', query: [Object], geometry: [Object], limits: [Object], account: 'synthetic-account', dataset: 'synthetic-dataset' }, evidence: { submission: [Object], observation: [Object], retrieval: [Object], pricing: [Object], rights: [Object] }, estimate: { currency: 'USD', amount: 5, assumptions: 'up to three submissions', uncertainty: 'actual charges may differ', pricingReference: 'fake document' }, authorization: 'not-authorized' },
+    operator: 'deepStrictEqual',
+    diff: 'simple'
+  }
+
+test at test/provider-preview.test.mjs:25:1
+✖ each evidence category requires current complete dated evidence (0.788916ms)
+  AssertionError [ERR_ASSERTION]: observation
+  + actual - expected
+
+    {
+      kind: 'blocked',
+  +   reason: 'Missing or invalid submission evidence'
+  -   reason: 'Missing or invalid observation evidence'
+    }
+
+      at TestContext.<anonymous> (file:///Users/dtbndr/Development/node-ws/maps-reactive-crawler/test/provider-preview.test.mjs:29:14)
+      at Test.runInAsyncScope (node:async_hooks:226:14)
+      at Test.run (node:internal/test_runner/test:1402:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:974:18)
+      at Test.postRun (node:internal/test_runner/test:1542:19)
+      at Test.run (node:internal/test_runner/test:1467:12)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:387:3) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: { kind: 'blocked', reason: 'Missing or invalid submission evidence' },
+    expected: { kind: 'blocked', reason: 'Missing or invalid observation evidence' },
+    operator: 'deepStrictEqual',
+    diff: 'simple'
+  }
+
+test at test/provider-preview.test.mjs:35:1
+✖ technical attestations bind their method and entire effective invocation (0.747833ms)
+  AssertionError [ERR_ASSERTION]: observation
+  + actual - expected
+
+    {
+      kind: 'blocked',
+  +   reason: 'Missing or invalid submission evidence'
+  -   reason: 'Missing or invalid observation evidence'
+    }
+
+      at TestContext.<anonymous> (file:///Users/dtbndr/Development/node-ws/maps-reactive-crawler/test/provider-preview.test.mjs:39:14)
+      at Test.runInAsyncScope (node:async_hooks:226:14)
+      at Test.run (node:internal/test_runner/test:1402:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:974:18)
+      at Test.postRun (node:internal/test_runner/test:1542:19)
+      at Test.run (node:internal/test_runner/test:1467:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: { kind: 'blocked', reason: 'Missing or invalid submission evidence' },
+    expected: { kind: 'blocked', reason: 'Missing or invalid observation evidence' },
+    operator: 'deepStrictEqual',
+    diff: 'simple'
+  }

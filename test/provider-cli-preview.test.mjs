@@ -14,7 +14,7 @@ test('valid provider evidence reaches fail-closed terminal confirmation without 
   const checkpoint = join(dir, 'checkpoint'); const evidence = join(dir, 'evidence.json');
   const invocation = { operation:'start', query:{keyword:'pizza',country:'GB'}, geometry:{seed:{latitude:1,longitude:2},spacing:500,area:{type:'radius',radius:1000}}, limits:{cells:4,submissions:3,activeTime:1000}, account:'synthetic', dataset:'synthetic' };
   const doc = {reference:'synthetic',date:'2020-01-01',validThrough:'2099-01-01',scope:'synthetic'};
-  const technical = method => ({...doc,attestation:{method,operation:'start',dataset:'synthetic'}});
+  const technical = method => ({...doc,attestation:{method,invocation:structuredClone(invocation)}});
   const commercial = () => ({...doc,attestation:{invocation,collection:true,storage:true,export:true}});
   writeFileSync(evidence, JSON.stringify({evidence:{submission:technical('submission'),observation:technical('observation'),retrieval:technical('retrieval'),pricing:commercial(),rights:commercial()},estimate:{currency:'USD',amount:5,assumptions:'three submissions',uncertainty:'may differ',pricingReference:'synthetic'}}));
   const args = ['dist/cli.js','start','--provider','bright-data','--checkpoint',checkpoint,'--evidence',evidence,'--account','synthetic','--dataset','synthetic','--keyword','pizza','--country','GB','--lat','1','--lon','2','--spacing-m','500','--radius-m','1000','--cells','4','--submissions','3','--active-ms','1000'];
@@ -48,7 +48,7 @@ test('child PTY resume previews effective checkpoint and never changes logical s
   const before = snapshot();
   const invocation = {operation:'resume',query:{keyword:'cafe',country:'GB'},geometry,limits:{...limits,submissions:9},account:'synthetic',dataset:'synthetic'};
   const doc = {reference:'synthetic',date:'2020-01-01',validThrough:'2099-01-01',scope:'synthetic'};
-  const technical = method => ({...doc,attestation:{method,operation:'resume',dataset:'synthetic'}});
+  const technical = method => ({...doc,attestation:{method,invocation:structuredClone(invocation)}});
   const commercial = () => ({...doc,attestation:{invocation,collection:true,storage:true,export:true}});
   const record = {evidence:{submission:technical('submission'),observation:technical('observation'),retrieval:technical('retrieval'),pricing:commercial(),rights:commercial()},estimate:{currency:'USD',amount:5,assumptions:'synthetic',uncertainty:'synthetic',pricingReference:'synthetic'}};
   const args = ['dist/cli.js','resume','--provider','bright-data','--checkpoint',checkpoint,'--evidence',evidencePath,'--account','synthetic','--dataset','synthetic','--submissions','9'];

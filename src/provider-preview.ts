@@ -7,7 +7,7 @@ import type { TraversalLimits, TraversalState } from './traversal.js';
 
 type Invocation = OperatorConfig & { operation: 'start' | 'resume'; query: { keyword: string; country: string }; account: string; dataset: string };
 type Document = Record<string, unknown> & { reference: string; date: string; validThrough: string; scope: string };
-type TechnicalDocument = Document & { attestation: { method: string; operation: Invocation['operation']; dataset: string } };
+type TechnicalDocument = Document & { attestation: { method: string; invocation: Invocation } };
 type CommercialDocument = Document & { attestation: { invocation: Invocation; collection: true; storage: true; export: true } };
 type Evidence = { submission: TechnicalDocument; observation: TechnicalDocument; retrieval: TechnicalDocument; pricing: CommercialDocument; rights: CommercialDocument };
 type Estimate = { currency: string; amount: number; assumptions: string; uncertainty: string; pricingReference: string };
@@ -38,7 +38,7 @@ export function previewProviderInvocation(input: unknown, today: string = new Da
     const attestation = item.attestation;
     const applicable = category === 'pricing' || category === 'rights'
       ? attestation.collection === true && attestation.storage === true && attestation.export === true && isDeepStrictEqual(attestation.invocation, invocation)
-      : attestation.method === category && attestation.operation === invocation.operation && attestation.dataset === invocation.dataset;
+      : attestation.method === category && isDeepStrictEqual(attestation.invocation, invocation);
     if (!applicable) return blocked(`Missing or invalid ${category} evidence`);
   }
   const estimate = input.estimate;
