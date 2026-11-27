@@ -18,7 +18,7 @@ Connect the bounded crawler to operator-funded discovery without hiding uncertai
 - Persist dispatch, reservations and IDs before dependent actions — recovery must not create duplicate paid work.
 - Stop new submissions at the active-time cutoff, but permit known-ID observation within its separately approved allowance and deadline — observation is independently bounded and local stop does not establish remote cancellation.
 - Use each operator's `BRIGHT_DATA_API_KEY` without persisting or logging it — credentials remain operator-owned; MCP is optional, not runtime infrastructure.
-- Separate evidence to build from authorization to execute — real start and resume require verified contracts, pricing and rights gates, and separate live-invocation approval after an uncertain cost estimate and work/stop limits.
+- Require fresh terminal confirmation for each live start or resume after a cost-uncertain preview of effective limits — noninteractive live use is deferred and contract, pricing and rights gates remain independent.
 - Bind resumed runs to non-secret query and provider contracts — changed inputs must not mix results.
 - Retain partial or capped candidates as gaps without expansion — incomplete results cannot establish coverage.
 
