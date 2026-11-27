@@ -79,4 +79,5 @@ All routes remain deliberately disabled until method-specific submit/observe con
 
 Commits created:
 - `91f13f1 test: specify fail-closed Bright Data discovery boundary`
-- Implementation commit: record after committing the verified slice changes.
+- `ecd68f8 feat: add fail-closed Bright Data discovery adapter`
+- Final report commit records the verified commit list and check results.
