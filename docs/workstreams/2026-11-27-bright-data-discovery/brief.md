@@ -1,32 +1,30 @@
 # Bright Data Discovery Workstream Brief
 
 **Date**: 2026-11-27
-**Status**: Approved
+**Status**: Draft — revised plan awaiting operator approval
 
 ## Why
-Connect the bounded crawler to operator-funded discovery without hiding uncertain paid work or claiming unverified provider behavior.
+Connect the existing bounded crawler to operator-funded discovery with a smaller, honest first-release path. This draft proposes changes to the previously approved plan; it does not replace that approval until the operator approves it.
 
 ## Happy path and acceptance boundary
-- An individual operator supplies a confirmed coordinate, keyword, country, explicit bounds and independent cell, submission and active-time limits; credential-free synthetic tests exercise connected discovery and expansion.
-- Known IDs are durably observed; uncertain submissions remain visible and are never blindly repeated. Empty, failed, partial and capped outcomes remain distinct.
-- Missing method-specific contract evidence blocks the affected provider behavior; a documented blocker is not a live demonstration.
-- Place details, verified identity, geocoding and live acceptance are outside scope. Cell-center bounds do not guarantee returned-place containment or exhaustive coverage.
+- One operator supplies their own key, a confirmed coordinate, keyword, country, radius or bounding box, and independent cell, submission and active-time limits. Synthetic tests exercise one-seed discovery, SQLite persistence and cardinal expansion.
+- Direct HTTP submits and observes bounded work; known IDs are saved and uncertain sends are never blindly retried. Stops, failures and incomplete observations remain visible, not empty successes.
+- Results are conservative candidates, not verified identities; centers are bounded, returned places are not guaranteed inside the area, and coverage is not exhaustive.
+- No geocoding, detail collection, enrichment, remote cancellation or guarantee that every paused observation automatically resumes.
 
 ## Key decisions
-- Prefer project-controlled direct HTTP over the SDK — lifecycle and retry control must be explicit and evidence-backed.
-- Keep provider execution contract-gated — generic async documentation does not establish the Maps-specific async operation.
-- Persist dispatch, reservations and IDs before dependent actions — recovery must not create duplicate paid work.
-- Stop new submissions at the active-time cutoff, but permit known-ID observation within its separately approved allowance and deadline — observation is independently bounded and local stop does not establish remote cancellation.
-- Use each operator's `BRIGHT_DATA_API_KEY` without persisting or logging it — credentials remain operator-owned; MCP is optional, not runtime infrastructure.
-- Require fresh terminal confirmation for each live start or resume after a cost-uncertain preview of effective limits — noninteractive live use is deferred and contract, pricing and rights gates remain independent.
-- Bind resumed runs to non-secret query and provider contracts — changed inputs must not mix results.
-- Retain partial or capped candidates as gaps without expansion — incomplete results cannot establish coverage.
+- Use direct HTTP and the existing traversal and SQLite core — avoid a general provider framework and disclose direct API use; MCP is optional.
+- Use simple bounded waits and preserve known IDs — avoid indefinite polling and duplicate paid submissions.
+- Stop and show unresolved work when recovery is unsupported — the operator retains the checkpoint and ID, checks provider status separately if authorized, and does not resubmit an uncertain send.
+- Obtain applicable current provider, account-pricing and data-rights evidence separately from explicit operator approval before any paid call — the one successful probe establishes none of these guarantees.
+- Protect BYOK credentials and real data — no secrets or raw provider data in shared artifacts, fixtures or logs.
 
 ## Open questions
-- Is the current Maps-specific async request, acknowledgment, result and recovery contract authoritative enough for safe use? Until verified, the affected route remains blocked.
+- Does the operator approve this smaller plan and its explicit recovery and consent trade-offs in place of the earlier approved contract?
+- Are applicable current provider behavior, account pricing and rights sufficiently evidenced for the intended actual use? Until then affected live use is blocked.
 
 ## Final smoke checks
-- None; a live provider demonstration is a separate, explicitly approval-gated workstream outcome.
+- A bounded live demonstration is separately authorized, not included in this draft or the default checks.
 
 ## Pointers
 - Slices (agents only): [slices.md](slices.md)
