@@ -157,3 +157,9 @@ GREEN command: `mise exec -- node --test test/guarded-lifecycle.test.mjs test/gu
 - GREEN: `mise exec -- npm run build >/dev/null && mise exec -- node --test test/location-cli-live.test.mjs test/location-input.test.mjs test/location-cache.test.mjs test/guarded-location-resolver.test.mjs test/nominatim-search.test.mjs > /tmp/location-b1-green.log 2>&1` — 34 passed. Includes fresh and cached CLI in separate processes and concurrent same-key CLI processes using a loopback-only server.
 - GREEN: `mise exec -- npm run check > /tmp/location-b1-check.log 2>&1` — typecheck, 538 tests, and build passed.
 - No external provider calls or credentials were used. Existing P2 concerns remain out of scope.
+
+## Controller historical RED gap record
+
+Slice B1: RED gap: individual guarded assembly timeout, crash, clock, lifecycle and CLI contract assertions — rung 2 tried: detached 61c2d60 restoring a1f14d4 implementation with compiling pass-through stubs; mise exec -- node --test --test-timeout=12000 per focused test file → masked assertions, errors and timeouts alongside some assertion failures — why it fails: cannot isolate entangled tests — worker-attested: generic Not implemented and post-implementation tests are not historical RED — GREEN at 61c2d60
+
+One retrospective reconstruction, detailed in local evidence-B1-reconstruction.md, is fresh evidence only; generic errors, masking and timeouts are not behavioral RED. Tests remain subject to review on their merits.
