@@ -30,7 +30,7 @@ Connect synthetic discovery response attribution and export, preserving provenan
 
 ### Workstream 3 — Location input and live acceptance
 
-Implement a supported geocoder under the settled independent-operator model; do not silently choose a shared public default. Recheck the selected service's current policy, attribution and applicable safeguards. Require explicit country and candidate confirmation for text lookup; confirmed coordinates bypass geocoding. Exercise location handling and the connected operator path with synthetic fixtures, including stop reasons, recovery and coverage limitations.
+Location input and connected operator-path acceptance are complete with synthetic fixtures; live behavior remains unvalidated. See the [completed workstream](../workstreams/2026-11-28-location-input-live-acceptance/brief.md). The independent-operator geocoder model requires explicit country and candidate confirmation for text lookup; confirmed coordinates bypass geocoding. The synthetic acceptance covers stop reasons, recovery and coverage limitations.
 
 **Depends on:** Workstreams 1 and 2 for connected acceptance, and a geocoder choice supported by current evidence. **Outcome:** credential-free integration acceptance and one approved bounded live demonstration, or documented blockers; a blocker is not a successful demonstration. **Risk:** geocoder policy, provider behavior or data rights may prevent safe use or a representative live run.
 
