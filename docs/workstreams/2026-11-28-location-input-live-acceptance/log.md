@@ -17,3 +17,5 @@
 - The owner approved [brief.md](brief.md) after the internal review passed and the verified external confirmation report found no remaining findings. Implementation and live activity remain separately authorized.
 
 Isolation: branch — branch ws/location-input-live-acceptance
+
+Pre-flight: findings — split B and clarified resolver attribution and confirmation-test ownership; resolved in slices.md
