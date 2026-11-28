@@ -6,6 +6,30 @@ import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { DatabaseSync } from 'node:sqlite';
 
+function assertSeedBeforeConfirmation(output) {
+ const marker = 'READY: Type yes and press Enter: ';
+ const prompt = output.indexOf(marker);
+ assert.ok(prompt >= 0, 'confirmation input marker missing');
+ assert.equal(output.split(marker).length - 1, 1, 'expected exactly one confirmation input marker');
+ for (const field of ['"country": "GB"', '"latitude": 1', '"longitude": 2']) {
+  const position = output.indexOf(field);
+  assert.ok(position >= 0 && position < prompt, `${field} missing or after confirmation input`);
+ }
+}
+
+test('preview ordering assertion detects absent, late, and duplicate fields and markers', () => {
+ const fields = ['"country": "GB"', '"latitude": 1', '"longitude": 2'];
+ const marker = 'READY: Type yes and press Enter: ';
+ const good = `${fields.join(' ')} ${marker}`;
+ assertSeedBeforeConfirmation(good);
+ for (const field of fields) {
+  assert.throws(() => assertSeedBeforeConfirmation(good.replace(field, '')));
+  assert.throws(() => assertSeedBeforeConfirmation(`${good.replace(field, '')} ${field}`));
+ }
+ assert.throws(() => assertSeedBeforeConfirmation(fields.join(' ')));
+ assert.throws(() => assertSeedBeforeConfirmation(good + marker));
+});
+
 function logicalState(path) {
  const db = new DatabaseSync(path, {readOnly:true});
  try {
@@ -85,11 +109,7 @@ test('provider confirmation gates credential reads, checkpoint and dispatch', ()
   const env={...process.env,BRIGHT_DATA_API_KEY:'synthetic-key',SYNTHETIC_CALLS:calls,SYNTHETIC_CREDENTIAL_READS:reads,NODE_OPTIONS:'--import ./test/helpers/provider-fetch-preload.mjs --import ./test/helpers/credential-read-preload.mjs'};
   const declined=spawnSync('/usr/bin/python3',['test/helpers/provider-cli-pty.py','no',process.execPath,...args],{encoding:'utf8',timeout:15000,env});
   assert.equal(declined.status,0,declined.stderr+declined.stdout);
-  const prompt=declined.stdout.indexOf('Confirm the displayed seed and provider action');
-  assert.ok(prompt>declined.stdout.indexOf('"country": "GB"'));
-  assert.ok(prompt>declined.stdout.indexOf('"latitude": 1'));
-  assert.ok(prompt>declined.stdout.indexOf('"longitude": 2'));
-  assert.equal(declined.stdout.split('Confirm the displayed seed and provider action').length - 1,1);
+  assertSeedBeforeConfirmation(declined.stdout);
   assert.match(declined.stdout,/declined or unavailable/);
   assert.equal(existsSync(reads),false); assert.equal(existsSync(checkpoint),false); assert.equal(existsSync(calls),false);
   const unavailable=spawnSync(process.execPath,args,{encoding:'utf8',timeout:15000,env,input:'yes\n'});
