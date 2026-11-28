@@ -1,7 +1,7 @@
 # Location Input and Live Acceptance Workstream Brief
 
 **Date**: 2026-11-28
-**Status**: Planned
+**Status**: Done
 
 ## Why
 An operator needs to turn an intentional location into a bounded crawl without guessing or accidentally paying for provider work. This plan connects location selection to synthetic acceptance and preserves the milestone's possible live demonstration or documented blockers.

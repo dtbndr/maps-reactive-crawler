@@ -19,3 +19,22 @@
 Isolation: branch — branch ws/location-input-live-acceptance
 
 Pre-flight: findings — split B and clarified resolver attribution and confirmation-test ownership; resolved in slices.md
+
+Smoke: skipped (agent-verified) — documented blocker alternative; no live demo.
+
+P2/P3: deferred findings (6):
+
+- Slice A: P2: injected unavailable-selection test uses ambiguous /cancel/i assertion; verify selector reached and location-specific cancellation.
+- Slice B: P2: numeric coercion accepts non-decimal coordinate strings such as 0x30.
+- Slice B1 interim: P2: busy timeout conflates healthy contention with abandoned ownership; distinguish retry-later and add slow-owner coverage.
+- Slice B1 interim: P2: tighten assembled monotonic restart, crash recovery and regression evidence.
+- Slice C: P2: mismatch test uses generic diagnostic rather than specific evidence-blocked outcome.
+- Final: P3: archived Slice B1 test-output transcript contains trailing whitespace.
+
+RED gaps: historical test-first evidence limitations (3; not production-defect findings):
+
+- Slice A: RED gap: standalone location individual candidate, cancellation, attribution, error and handoff contracts — rung 2 tried: isolated base 07837ab with committed tests and compiling sentinel, mise exec -- node --test test/location-input.test.mjs → combined assertions mask contracts and one cancellation test passes generic usage — why it fails: entangled test edits and cannot isolate — worker-attested: initial stub RED used generic errors; GREEN at 8140204
+- Slice B: RED gap: endpoint switching, request fields, attribution, structured country and error variants — rung 2 tried: detached 4ac62ca, restored implementation to compiling stub, mise exec -- node --test test/nominatim-search.test.mjs → grouped assertions masked later cases and country test TypeError — why it fails: cannot isolate entangled test assertions — worker-attested: grouped pre-edit RED, no individual failures — GREEN at 4ac62ca
+- Slice B1: RED gap: individual guarded assembly timeout, crash, clock, lifecycle and CLI contract assertions — rung 2 tried: detached 61c2d60 restoring a1f14d4 implementation with compiling pass-through stubs; mise exec -- node --test --test-timeout=12000 per focused test file → masked assertions, errors and timeouts alongside some assertion failures — why it fails: cannot isolate entangled tests — worker-attested: generic Not implemented and post-implementation tests are not historical RED — GREEN at 61c2d60
+
+Final review: clean (at 26dac3f)
