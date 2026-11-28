@@ -88,6 +88,8 @@ test('provider confirmation gates credential reads, checkpoint and dispatch', ()
   const prompt=declined.stdout.indexOf('Confirm the displayed seed and provider action');
   assert.ok(prompt>declined.stdout.indexOf('"country": "GB"'));
   assert.ok(prompt>declined.stdout.indexOf('"latitude": 1'));
+  assert.ok(prompt>declined.stdout.indexOf('"longitude": 2'));
+  assert.equal(declined.stdout.split('Confirm the displayed seed and provider action').length - 1,1);
   assert.match(declined.stdout,/declined or unavailable/);
   assert.equal(existsSync(reads),false); assert.equal(existsSync(checkpoint),false); assert.equal(existsSync(calls),false);
   const unavailable=spawnSync(process.execPath,args,{encoding:'utf8',timeout:15000,env,input:'yes\n'});

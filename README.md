@@ -57,3 +57,19 @@ Contributions are welcome: see [CONTRIBUTING.md](CONTRIBUTING.md), [CODE_OF_COND
 ### Optional v2 result export
 
 The default `exportResults({ checkpoint })` and `export --checkpoint PATH` remain v1. Opt in with `exportResults({ checkpoint, format: 'v2' })` or `export --checkpoint PATH --format v2`. V2 projects stored fields, not new detail requests: missing names and coordinates are null with `not_present` field status. Candidate IDs themselves remain unverified, even when a separate explicitly fixture-verified canonical key was persisted to group occurrences; only verified keys are grouped. Each occurrence retains provenance. Its detail state reflects associated persisted work, with pending mapped to `not_attempted` and legacy absent metadata to `unknown`; it does not prove an occurrence was requested. Discovery gaps can include detail-origin blockers also in detail gaps. Coverage remains non-exhaustive and returned places are not strictly filtered to the requested area.
+
+### Synthetic standalone location selection
+
+Before a coordinate-start crawl, the standalone location command can exercise
+selection with a **local synthetic fixture**, not a live geocoder:
+
+```sh
+mise exec -- node dist/cli.js location --text 'Synthetic place' --country GB --fixture synthetic-locations.json
+```
+
+The JSON fixture has this shape: `{"attribution":"Synthetic source","candidates":[{"label":"Synthetic place","country":"GB","latitude":51.1,"longitude":-0.1}]}`.
+The command displays the country, attribution and candidates on a terminal;
+select a numbered candidate and explicitly answer `yes` to confirm, or cancel.
+It outputs the confirmed country and coordinates as JSON for manual use in a
+separately attested coordinate-start crawl. Selection is not consent to a
+provider call. No live location resolver is provided by this command.

@@ -1,4 +1,6 @@
 import { pathToFileURL } from 'node:url';
+import { resolveLocation, type LocationResolver, type LocationSelection } from './location-input.js';
+import { selectLocationOnTerminal } from './location-terminal.js';
 import { readFileSync } from 'node:fs';
 import { previewProviderInvocation, previewProviderResume } from './provider-preview.js';
 import { terminalPrompt } from './terminal-prompt.js';
@@ -170,8 +172,26 @@ async function providerPreview(args: string[], io: CliIo): Promise<number> {
   } finally { state?.close(); }
 }
 
-export async function runCli(args: string[], library: CliLibrary, io: CliIo): Promise<number> {
+export async function runCli(args: string[], library: CliLibrary, io: CliIo, location?: { resolver: LocationResolver; select: LocationSelection }): Promise<number> {
   try {
+    if (args[0] === 'location') {
+      const values = new Map<string, string>();
+      for (let i = 1; i < args.length; i += 2) {
+        const flag = args[i]!; const value = args[i + 1];
+        if (!['--text', '--country', '--fixture'].includes(flag) || !value || value.startsWith('--') || values.has(flag)) throw new Error('Invalid location option');
+        values.set(flag, value);
+      }
+      if (!values.get('--country')) throw new Error('Missing required option --country');
+      if (!values.get('--text')) throw new Error('Missing required option --text');
+      if (!location && values.has('--fixture')) {
+        const path = values.get('--fixture')!;
+        location = { resolver: async () => JSON.parse(readFileSync(path, 'utf8')), select: selectLocationOnTerminal };
+      }
+      if (!location) throw new Error('Location resolver unavailable; specify a synthetic --fixture');
+      const result = await resolveLocation(values.get('--text')!, values.get('--country')!, location.resolver, location.select);
+      io.stdout(`${JSON.stringify(result)}\n`);
+      return 0;
+    }
     if (args.includes('--provider')) return await providerPreview(args, io);
     const parsed = parseArgs(args);
     let result: unknown;
