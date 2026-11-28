@@ -7,6 +7,38 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { DatabaseSync } from 'node:sqlite';
 
+function assertSelectedSeed(actual, candidate) {
+  assert.deepEqual(actual, { country: candidate.address.country_code.toUpperCase(), latitude: Number(candidate.lat), longitude: Number(candidate.lon) });
+}
+function assertPreviewBeforeConfirmation(output, seed) {
+  const marker = 'READY: Type yes and press Enter: ';
+  const prompt = output.indexOf(marker);
+  assert.ok(prompt >= 0, 'confirmation input marker missing');
+  assert.equal(output.split(marker).length - 1, 1, 'expected exactly one confirmation input marker');
+  for (const [key, value] of Object.entries(seed)) {
+    const field = `${JSON.stringify(key)}: ${JSON.stringify(value)}`;
+    const position = output.indexOf(field);
+    assert.ok(position >= 0 && position < prompt, `${field} missing or after confirmation input`);
+  }
+}
+
+test('selected-seed and preview assertions reject incorrect or missing evidence', () => {
+  const candidate = { lat: '52.12345678901234', lon: '-1.123456789012345', address: { country_code: 'gb' } };
+  const seed = { country: 'GB', latitude: Number(candidate.lat), longitude: Number(candidate.lon) };
+  assertSelectedSeed(seed, candidate);
+  for (const changed of [{ ...seed, latitude: 51.1 }, { ...seed, latitude: 52.123457 }, { ...seed, longitude: -0.1 }, { ...seed, country: 'US' }]) assert.throws(() => assertSelectedSeed(changed, candidate));
+  const fields = Object.entries(seed).map(([key, value]) => `${JSON.stringify(key)}: ${JSON.stringify(value)}`);
+  const marker = 'READY: Type yes and press Enter: ';
+  const good = `${fields.join(' ')} ${marker}`;
+  assertPreviewBeforeConfirmation(good, seed);
+  for (const field of fields) {
+    assert.throws(() => assertPreviewBeforeConfirmation(good.replace(field, ''), seed));
+    assert.throws(() => assertPreviewBeforeConfirmation(`${good.replace(field, '')} ${field}`, seed));
+  }
+  assert.throws(() => assertPreviewBeforeConfirmation(fields.join(' '), seed));
+  assert.throws(() => assertPreviewBeforeConfirmation(good + marker, seed));
+});
+
 function location(args) {
   return new Promise((resolve, reject) => {
     const child = spawn('/usr/bin/python3', ['test/helpers/location-cli-pty.py', 'multiple', process.execPath, 'dist/cli.js', 'location', '--text', 'synthetic place', '--country', 'GB', ...args]);
@@ -27,7 +59,8 @@ function evidence(path, invocation) {
 
 test('confirmed resolver seed connects to bounded provider start and fresh-process recovery', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'location-connected-')); let resolverCalls = 0;
-  const server = createServer((_req, res) => { resolverCalls++; res.end(JSON.stringify([{ display_name: 'PRIVATE FIRST CANDIDATE', lat: '51.1', lon: '-0.1', address: { country_code: 'gb' } }, { display_name: 'PRIVATE SELECTED CANDIDATE', lat: '52.12345678901234', lon: '-1.123456789012345', address: { country_code: 'gb' } }])); });
+  const selectedCandidate = { display_name: 'PRIVATE SELECTED CANDIDATE', lat: '52.12345678901234', lon: '-1.123456789012345', address: { country_code: 'gb' } };
+  const server = createServer((_req, res) => { resolverCalls++; res.end(JSON.stringify([{ display_name: 'PRIVATE FIRST CANDIDATE', lat: '51.1', lon: '-0.1', address: { country_code: 'gb' } }, selectedCandidate])); });
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   try {
     const selected = await location(['--endpoint', `http://127.0.0.1:${server.address().port}/search`, '--cache', join(dir, 'cache'), '--user-agent', 'SyntheticTest/1.0']);
@@ -36,6 +69,7 @@ test('confirmed resolver seed connects to bounded provider start and fresh-proce
     const match = selected.output.match(/\{"country":"GB","latitude":-?[\d.]+,"longitude":-?[\d.]+\}/);
     assert.ok(match, selected.output);
     const { country, latitude, longitude } = JSON.parse(match[0]);
+    assertSelectedSeed({ country, latitude, longitude }, selectedCandidate);
     const invocation = { operation: 'start', query: { keyword: 'pizza', country }, geometry: { seed: { latitude, longitude }, spacing: 500, area: { type: 'radius', radius: 1000 } }, limits: { cells: 1, submissions: 1, activeTime: 2000 }, account: 'synthetic', dataset: 'gd_m8ebnr0q2qlklc02fz', zoom: 15, limitPerInput: 20 };
     const checkpoint = join(dir, 'checkpoint'), evidencePath = join(dir, 'evidence'), calls = join(dir, 'calls');
     const env = { ...process.env, BRIGHT_DATA_API_KEY: 'synthetic-key', SYNTHETIC_CALLS: calls, SYNTHETIC_SCENARIO: 'known-id', NODE_OPTIONS: '--import ./test/helpers/provider-fetch-preload.mjs' };
@@ -49,7 +83,7 @@ test('confirmed resolver seed connects to bounded provider start and fresh-proce
     evidence(evidencePath, invocation);
     const started = run(start, 'start'); assert.equal(started.status, 0, started.stderr + started.stdout);
     assert.match(started.stdout, /Confirm the displayed seed and provider action/);
-    assert.ok(started.stdout.indexOf(String(latitude)) < started.stdout.indexOf('READY: Type yes'));
+    assertPreviewBeforeConfirmation(started.stdout, { country, latitude, longitude });
     const stopped = snapshot(checkpoint);
     assert.deepEqual(stopped.geometry, invocation.geometry);
     assert.equal(stopped.attempts[0].knownId, 'synthetic-id');
