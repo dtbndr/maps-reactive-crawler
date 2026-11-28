@@ -10,6 +10,7 @@ import { DurableState } from '../dist/durable-state.js';
 import { recordDurableCleanPause } from '../dist/durable-discovery.js';
 import { createTraversal, validateGeometry } from '../dist/index.js';
 import * as operator from '../dist/operator.js';
+import { projectV2Checkpoint } from '../dist/operator-v2-projection-internal.js';
 
 const cli = new URL('../dist/cli.js', import.meta.url);
 const geometry = { seed: { latitude: 0, longitude: 0 }, spacing: 100, area: { type: 'radius', radius: 200 } };
@@ -92,6 +93,34 @@ test('CLI emits successful status and export documents for an existing checkpoin
         assert.equal(result.stdout, `${JSON.stringify(expectedExport)}\n`);
       }
     }
+  } finally { rmSync(directory, { recursive: true, force: true }); }
+});
+
+test('explicit v2 library and CLI export select the internal projection', () => {
+  const directory = mkdtempSync(join(tmpdir(), 'inspection-v2-'));
+  const checkpoint = join(directory, 'state.db');
+  try {
+    DurableState.createBound(checkpoint, createHash('sha256').update('fixture').digest('hex'), createTraversal(validateGeometry(geometry), { cells: 1, submissions: 2, activeTime: 100 }));
+    const v1 = operator.exportResults({ checkpoint });
+    assert.equal(v1.version, 1);
+    const v2 = operator.exportResults({ checkpoint, format: 'v2' });
+    assert.equal(v2.version, 2);
+    assert.deepEqual(v2, projectV2Checkpoint({ checkpoint }));
+  } finally { rmSync(directory, { recursive: true, force: true }); }
+});
+
+test('CLI accepts explicit v2 export and rejects unknown and repeated formats', () => {
+  const directory = mkdtempSync(join(tmpdir(), 'inspection-v2-cli-'));
+  const checkpoint = join(directory, 'state.db');
+  try {
+    DurableState.createBound(checkpoint, createHash('sha256').update('fixture').digest('hex'), createTraversal(validateGeometry(geometry), { cells: 1, submissions: 2, activeTime: 100 }));
+    const invoke = (...args) => spawnSync(process.execPath, [new URL(cli).pathname, 'export', '--checkpoint', checkpoint, ...args], { encoding: 'utf8' });
+    assert.equal(JSON.parse(invoke().stdout).version, 1);
+    assert.notEqual(invoke('--format', 'unknown').status, 0);
+    assert.notEqual(invoke('--format', 'v2', '--format', 'v2').status, 0);
+    const result = invoke('--format', 'v2');
+    assert.equal(result.status, 0);
+    assert.equal(JSON.parse(result.stdout).version, 2);
   } finally { rmSync(directory, { recursive: true, force: true }); }
 });
 

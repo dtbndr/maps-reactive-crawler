@@ -20,13 +20,15 @@ export type CliLibrary = {
   resume: (options: OperatorResumeOptions) => Promise<unknown>;
   cancelCheckpoint: (options: { checkpoint: string }) => unknown;
   status: (options: { checkpoint: string }) => unknown;
-  exportResults: (options: { checkpoint: string }) => unknown;
+  exportResults: (options: { checkpoint: string; format?: 'v2' }) => unknown;
 };
 
 type ParsedCommand =
   | { command: 'start'; options: Omit<OperatorStartOptions, 'onPreflight'> }
   | { command: 'resume'; options: OperatorResumeOptions }
-  | { command: 'cancel' | 'status' | 'export'; checkpoint: string };
+  | { command: 'cancel'; checkpoint: string }
+  | { command: 'status'; checkpoint: string }
+  | { command: 'export'; checkpoint: string; format?: 'v2' };
 
 const startOptions = new Set(['checkpoint', 'fixture', 'provider', 'lat', 'lon', 'spacing-m', 'radius-m', 'bbox', 'cells', 'submissions', 'active-ms']);
 const resumeOptions = new Set(['checkpoint', 'fixture', 'provider', 'cells', 'submissions', 'active-ms']);
@@ -41,7 +43,7 @@ function strictNumber(value: string, flag: string): number {
 function parseArgs(args: string[]): ParsedCommand {
   const [command, ...tokens] = args;
   if (command !== 'start' && command !== 'resume' && command !== 'cancel' && command !== 'status' && command !== 'export') throw new Error('Expected command: start, resume, cancel, status, or export');
-  const allowed = command === 'start' ? startOptions : command === 'resume' ? resumeOptions : new Set(['checkpoint']);
+  const allowed = command === 'start' ? startOptions : command === 'resume' ? resumeOptions : command === 'export' ? new Set(['checkpoint', 'format']) : new Set(['checkpoint']);
   const values = new Map<string, string>();
   for (let index = 0; index < tokens.length; index++) {
     const token = tokens[index]!;
@@ -65,7 +67,12 @@ function parseArgs(args: string[]): ParsedCommand {
   const optionalNumber = (name: string): number | undefined => values.has(name) ? strictNumber(values.get(name)!, name) : undefined;
   const requiredNumber = (name: string): number => strictNumber(required(name), name);
   const checkpoint = required('checkpoint');
-  if (command === 'cancel' || command === 'status' || command === 'export') return { command, checkpoint };
+  if (command === 'export') {
+    const format = values.get('format');
+    if (format !== undefined && format !== 'v2') throw new Error('Unsupported export format');
+    return { command, checkpoint, ...(format ? { format } : {}) };
+  }
+  if (command === 'cancel' || command === 'status') return { command, checkpoint };
   const fixture = required('fixture');
   if (command === 'resume') {
     const limits: NonNullable<OperatorResumeOptions['limits']> = {};
@@ -175,7 +182,7 @@ export async function runCli(args: string[], library: CliLibrary, io: CliIo): Pr
     } else if (parsed.command === 'resume') result = await library.resume(parsed.options);
     else if (parsed.command === 'cancel') result = library.cancelCheckpoint({ checkpoint: parsed.checkpoint });
     else if (parsed.command === 'status') result = library.status({ checkpoint: parsed.checkpoint });
-    else result = library.exportResults({ checkpoint: parsed.checkpoint });
+    else result = library.exportResults({ checkpoint: parsed.checkpoint, ...(parsed.format ? { format: parsed.format } : {}) });
     io.stdout(`${JSON.stringify(result)}\n`);
     return 0;
   } catch (error) {

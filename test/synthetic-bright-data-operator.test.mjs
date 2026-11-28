@@ -32,6 +32,8 @@ test('synthetic operator connects bounded expansion and local inspection, reject
   const v1 = exportResults({ checkpoint });
   assert.equal(v1.unverifiedObservations[0].id, 'one');
   assert.equal('name' in v1.unverifiedObservations[0], false);
+  const v2 = exportResults({ checkpoint, format: 'v2' });
+  assert.deepEqual(v2.unverifiedObservations.map(item => [item.candidateId, item.name, item.fieldStatus.name, item.detailState]), [['one', 'Synthetic', 'present', 'not_attempted']]);
   const before = exportResults({ checkpoint });
   await assert.rejects(runSyntheticOperator('resume', { checkpoint, geometry, binding: { ...binding, keyword: 'other' }, bounds: bounds() }, transport));
   assert.equal(requests.length, 2); assert.deepEqual(exportResults({ checkpoint }), before);
@@ -39,6 +41,7 @@ test('synthetic operator connects bounded expansion and local inspection, reject
   assert.equal(requests.length, 2); assert.deepEqual(exportResults({ checkpoint }), before);
   const resumed = await runSyntheticOperator('resume', { checkpoint, geometry, binding, limits: { submissions: 3 }, bounds: bounds() }, transport);
   assert.equal(resumed.command, 'resume'); assert.equal(resumed.status.limits.submissions, 3); assert.equal(requests.length, 2);
+  assert.deepEqual(exportResults({ checkpoint, format: 'v2' }).unverifiedObservations, v2.unverifiedObservations);
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
@@ -61,6 +64,8 @@ test('local submission-limit stop resumes queued work without replaying the comp
   assert.equal(started.status.counters.submissions, 1);
   assert.equal(requests.length, 1);
   const before = read();
+  const beforeExport = exportResults({ checkpoint, format: 'v2' });
+  assert.deepEqual(beforeExport.unverifiedObservations.map(item => [item.candidateId, item.name, item.sourceCell]), [['seed-place', 'Seed place', '0,0']]);
   assert.equal(before.cells['0,0'].outcome, 'nonempty');
   assert.deepEqual(before.candidates.map(candidate => [candidate.id, candidate.name, candidate.sourceCell, candidate.occurrence]), [['seed-place', 'Seed place', '0,0', 1]]);
 
@@ -70,6 +75,7 @@ test('local submission-limit stop resumes queued work without replaying the comp
   assert.equal(requests.length, 2);
   const after = read();
   assert.deepEqual(after.candidates, before.candidates);
+  assert.deepEqual(exportResults({ checkpoint, format: 'v2' }).unverifiedObservations, beforeExport.unverifiedObservations);
   assert.equal(after.attempts.filter(attempt => attempt.cellKey === '0,0').length, 1);
   assert.equal(after.attempts.length, 2);
  } finally { rmSync(dir, { recursive: true, force: true }); }
@@ -110,5 +116,21 @@ test('raised local limits do not reopen a capped partial checkpoint or replay it
   assert.equal(after.cells['0,0'].outcome, 'partial');
   assert.deepEqual(after.queue, []);
   assert.deepEqual([submissions, observations, retrievals], callsBeforeResume);
+ } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('inline discovery persists names for public v2 inspection without detail or replay', async () => {
+ const dir = mkdtempSync(join(tmpdir(), 'synthetic-inline-')); const checkpoint = join(dir, 'state.db');
+ let submits = 0, otherCalls = 0;
+ const unexpected = async () => { otherCalls++; throw new Error('unexpected observation or retrieval'); };
+ const transport = { submit: async () => { submits++; return { status: 200, body: [{ name: 'Inline place', place_id: 'inline-id' }] }; }, observe: unexpected, retrieve: unexpected };
+ try {
+  await runSyntheticOperator('start', { checkpoint, geometry, limits: { cells: 1, submissions: 1, activeTime: 10000 }, binding, bounds: bounds() }, transport);
+  const before = exportResults({ checkpoint, format: 'v2' });
+  assert.deepEqual(before.unverifiedObservations.map(item => [item.candidateId, item.name, item.fieldStatus.name, item.sourceCell, item.detailState]), [['inline-id', 'Inline place', 'present', '0,0', 'not_attempted']]);
+  assert.deepEqual(before.status, status({ checkpoint }));
+  await runSyntheticOperator('resume', { checkpoint, geometry, binding, limits: { submissions: 2 }, bounds: bounds() }, transport);
+  assert.deepEqual(exportResults({ checkpoint, format: 'v2' }).unverifiedObservations, before.unverifiedObservations);
+  assert.equal(submits, 1); assert.equal(otherCalls, 0);
  } finally { rmSync(dir, { recursive: true, force: true }); }
 });

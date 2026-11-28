@@ -19,3 +19,7 @@ Status: **target, not implemented end to end**. The offline bounded traversal co
 ## Out of scope for the first release
 
 Prospecting CRM, enrichment and scoring, web UI, hosted or multi-tenant service, bundled credentials, whole-city batch seeding, an LLM-controlled scheduler and a new MCP server.
+
+### Optional v2 result export
+
+The default `exportResults({ checkpoint })` and `export --checkpoint PATH` remain v1. Opt in with `exportResults({ checkpoint, format: 'v2' })` or `export --checkpoint PATH --format v2`. V2 projects stored fields, not new detail requests: missing names and coordinates are null with `not_present` field status. Candidate IDs remain unverified unless a verified canonical key was persisted; only verified keys are grouped. Each occurrence retains provenance. Its detail state reflects associated persisted work, with pending mapped to `not_attempted` and legacy absent metadata to `unknown`; it does not prove an occurrence was requested. Discovery gaps can include detail-origin blockers also in detail gaps. Coverage remains non-exhaustive and returned places are not strictly filtered to the requested area.

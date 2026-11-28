@@ -22,7 +22,7 @@ Use synthetic integration tests for submission, polling, bounded failure handlin
 
 ### Workstream 2 — Place details and result identity
 
-Verify whether discovery supplies the fields needed for useful place records; integrate bounded detail collection where necessary and supported by the verified contract. Connect candidate discovery to place output, preserving provenance and distinguishing verified identity, missing fields and unresolved detail gaps. Test the connected discovery → details where needed → deduplication → export path using synthetic responses, including recovery and partial outcomes.
+Connect synthetic discovery response attribution and export, preserving provenance and distinguishing verified identity, missing fields and unresolved detail gaps. This output work does not execute detail requests; detail request admission and recovery remain separate future work requiring a verified contract. Synthetic acceptance includes recovery and partial outcomes, not a live demonstration. Before any later live demonstration, reassess GitHub #4 and #5 and applicable contract, rights and pricing evidence.
 
 **Depends on:** Workstream 1 and verified discovery/detail contracts. **Outcome:** useful deduplicated place output with provenance in credential-free integration tests, or a documented blocker if neither verified route supports it. Candidate URLs alone are not place records. **Risk:** provider identifiers, coordinates and completeness remain unverified; do not claim strict returned-place filtering or exhaustive coverage.
 

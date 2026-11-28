@@ -1,3 +1,4 @@
+import { projectV2Checkpoint } from './operator-v2-projection-internal.js';
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { DurableState, readOnlyCheckpointSnapshot } from './durable-state.js';
@@ -318,7 +319,10 @@ export function status(options: { checkpoint: string }): OperatorStatus {
 
 export type OperatorOccurrence = { id: string; coordinate: { latitude: number; longitude: number } | null; classification: string; sourceCell: string; workId: string; attemptId: string; observationId: string; occurrence: number };
 export type OperatorExport = { version: 1; status: OperatorStatus; verifiedPlaces: { canonicalKey: string; observations: OperatorOccurrence[] }[]; unverifiedObservations: OperatorOccurrence[] };
-export function exportResults(options: { checkpoint: string }): OperatorExport {
+export function exportResults(options: { checkpoint: string; format: 'v2' }): ReturnType<typeof projectV2Checkpoint>;
+export function exportResults(options: { checkpoint: string }): OperatorExport;
+export function exportResults(options: { checkpoint: string; format?: 'v2' }): OperatorExport | ReturnType<typeof projectV2Checkpoint> {
+  if (options.format === 'v2') return projectV2Checkpoint(options);
   const snapshot = readOnlyCheckpointSnapshot(options.checkpoint);
   const state = snapshot.traversal;
   const occurrences = state.candidates.map(candidate => {

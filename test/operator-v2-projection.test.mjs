@@ -155,3 +155,28 @@ test('both observation collections use lexical IDs rather than numeric ordinals'
 }, Array.from({ length: 12 }, (_, index) => index % 2 === 0
   ? { id: 'same', verifiedCanonicalKey: 'place:shared' }
   : { id: 'same' })));
+
+
+test('public v2 export preserves representative internal projection and fails closed', () => fixture(({ checkpoint, state }) => {
+  const work = state.detailWork[0];
+  work.status = 'completed';
+  work.attempts = [{ id: `${work.id}:attempt:1`, status: 'completed', knownId: 'synthetic-detail' }];
+  state.submissions++; state.limits.submissions++;
+  let durable = DurableState.openBound(checkpoint, 'a'.repeat(64)); durable.writeTraversal(state); durable.close();
+  const before = readFileSync(checkpoint);
+  const result = exportResults({ checkpoint, format: 'v2' });
+  assert.deepEqual(result, projectV2Checkpoint({ checkpoint }));
+  assert.equal(result.verifiedPlaces.find(group => group.canonicalKey === 'place:a').observations[0].detailState, 'completed');
+  assert.equal(result.unverifiedObservations[0].detailState, 'not_attempted');
+  assert.deepEqual(readFileSync(checkpoint), before);
+  delete state.detailWork; state.submissions--;
+  durable = DurableState.openBound(checkpoint, 'a'.repeat(64)); durable.writeTraversal(state); durable.close();
+  assert.equal(exportResults({ checkpoint, format: 'v2' }).unverifiedObservations[0].detailState, 'unknown');
+  const corrupt = structuredClone(state);
+  corrupt.detailWork = [];
+  const db = new DatabaseSync(checkpoint);
+  db.prepare('UPDATE traversal SET payload = ? WHERE id = 1').run(JSON.stringify(corrupt)); db.close();
+  const damaged = readFileSync(checkpoint);
+  assert.throws(() => exportResults({ checkpoint, format: 'v2' }));
+  assert.deepEqual(readFileSync(checkpoint), damaged);
+}));

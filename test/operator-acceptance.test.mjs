@@ -101,6 +101,15 @@ test('separate public CLI processes resume durable seed work, preserve provenanc
     assert.equal(exported.verifiedPlaces.some(place => place.observations.some(item => item.id === 'place-a' && item.sourceCell === '0,0')), true);
     assert.equal(exported.verifiedPlaces.some(place => place.observations.some(item => item.id === 'neighbor-only' && item.sourceCell === '0,1')), true);
     assertNoCoverageClaim(exported.status);
+    const v2 = commandJson(run(['export', '--checkpoint', files.checkpoint, '--format', 'v2']));
+    assert.equal(v2.version, 2);
+    assert.deepEqual(v2.status, status);
+    const v2shared = v2.verifiedPlaces.find(place => place.canonicalKey === 'verified-shared');
+    assert.deepEqual(v2shared.observations.map(item => item.candidateId), ['place-a', 'place-a-duplicate']);
+    assert.deepEqual(v2shared.observations.map(item => [item.sourceCell, item.workId, item.attemptId, item.occurrence]), afterResume.candidates.slice(0, 2).map(item => [item.sourceCell, 'work:0,0', item.attemptId, item.occurrence]));
+    const all = [...v2.verifiedPlaces.flatMap(place => place.observations), ...v2.unverifiedObservations];
+    assert.equal(all.length, afterResume.candidates.length);
+    assert.ok(all.every(item => item.name === null && item.fieldStatus.name === 'not_present' && item.detailState === 'not_attempted'));
     assert.ok(status.frontier.blocked.length > 0);
   } finally { rmSync(files.directory, { recursive: true, force: true }); }
 });

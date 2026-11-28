@@ -5,6 +5,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { DurableState } from '../dist/durable-state.js';
+import { status, exportResults } from '../dist/operator.js';
+import { runSyntheticOperator } from '../dist/synthetic-bright-data-operator.js';
 import { createTraversal } from '../dist/traversal.js';
 import { submitDurableBrightData, observeDurableBrightData } from '../dist/durable-bright-data-submission.js';
 
@@ -39,5 +41,20 @@ for (const [label, records] of [
       assert.equal(c.observationId, `${s.attempts[0].id}:observation:${index + 1}`);
       assert.ok(s.detailWork.some(w => w.status === 'pending' && w.observationIds.includes(c.observationId)));
     }
+    state.close(); state = undefined;
+    const inspected = status({ checkpoint: path });
+    assert.ok(inspected.discoveryGaps.some(gap => gap.cause === 'partial'));
+    const v2 = exportResults({ checkpoint: path, format: 'v2' });
+    assert.deepEqual(v2.status, inspected);
+    assert.deepEqual(v2.unverifiedObservations.map(item => [item.candidateId, item.name, item.sourceCell, item.attemptId, item.observationId, item.occurrence, item.detailState]), s.candidates.map(item => [item.id, item.name, item.sourceCell, item.attemptId, item.observationId, item.occurrence, 'not_attempted']));
+    let calls = 0;
+    const noReplay = async () => { calls++; throw new Error('unexpected provider request'); };
+    await runSyntheticOperator('resume', { checkpoint: path, geometry: s.geometry, binding, limits: { cells: 6, submissions: 6 }, bounds: { ...bounds(), maxObservations: 1, observationDeadline: Date.now() + 5000 } }, { submit: noReplay, observe: noReplay, retrieve: noReplay });
+    assert.equal(calls, 0);
+    const after = exportResults({ checkpoint: path, format: 'v2' });
+    assert.deepEqual(after.unverifiedObservations, v2.unverifiedObservations);
+    assert.deepEqual(after.status.discoveryGaps, v2.status.discoveryGaps);
+    state = DurableState.openBound(path, binding);
+    assert.equal(state.readTraversal().cells['0,0'].outcome, 'partial');
   } finally { state?.close(); rmSync(dir, { recursive: true, force: true }); }
 });
