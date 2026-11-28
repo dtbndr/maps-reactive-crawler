@@ -1,13 +1,23 @@
 import { createCachedLocationResolver } from './location-cache.js';
+import { locationHttpTransport } from './location-http-transport.js';
 import type { LocationResolver } from './location-input.js';
 import { createNominatimResolver } from './nominatim-search.js';
 import { coordinateTransportAttempt } from './transport-attempt.js';
 
-type SingleAttemptTransport = (url: string, options: { headers: Record<string, string>; redirect: 'error'; signal: AbortSignal }) => Promise<{ ok: boolean; status: number; json(): Promise<unknown> }>;
+type BufferedTransport = typeof locationHttpTransport;
+type Config = { directory: string; endpoint: string; identification: string };
 const timeoutMs = 30_000;
 
-// The transport must make one request, honor redirects and settle only after its body is fully received or terminated.
-export function createGuardedLocationResolver(config: { directory: string; endpoint: string; identification: string; transport: SingleAttemptTransport }): LocationResolver {
+export function createGuardedLocationResolver(config: Config): LocationResolver {
+  return assemble(config, locationHttpTransport);
+}
+
+// Synthetic-only seam: the test transport must settle only after local termination.
+export function createGuardedLocationResolverForTest(config: Config & { transport: BufferedTransport }): LocationResolver {
+  return assemble(config, config.transport);
+}
+
+function assemble(config: Config, transport: BufferedTransport): LocationResolver {
   const resolver = createNominatimResolver({
     endpoint: config.endpoint,
     identification: config.identification,
@@ -16,8 +26,7 @@ export function createGuardedLocationResolver(config: { directory: string; endpo
       let timer: ReturnType<typeof setTimeout> | undefined;
       const operation = coordinateTransportAttempt(config.directory, async () => {
         if (controller.signal.aborted) throw new Error('Search attempt timed out');
-        const response = await config.transport(url, { ...options, redirect: 'error', signal: controller.signal });
-        // Successful response parsing remains inside the attempt lock.
+        const response = await transport(url, { ...options, signal: controller.signal });
         const body = response.ok ? await response.json() : undefined;
         return { ok: response.ok, status: response.status, json: async () => body };
       });

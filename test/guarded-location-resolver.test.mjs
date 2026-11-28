@@ -5,15 +5,15 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawn } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
-import { createGuardedLocationResolver } from '../dist/guarded-location-resolver.js';
+import { createGuardedLocationResolverForTest as createGuardedLocationResolver } from '../dist/guarded-location-resolver.js';
 
 const endpoint = 'https://example.invalid/search';
 async function directory(t) { const dir = await mkdtemp(join(tmpdir(), 'guarded-')); t.after(() => rm(dir, { recursive: true, force: true })); return dir; }
 const response = { ok: true, status: 200, json: async () => [] };
 
-test('guarded resolver caches validated results and disables redirects', async t => {
+test('guarded resolver caches validated synthetic results', async t => {
   const dir = await directory(t); let calls = 0;
-  const resolver = createGuardedLocationResolver({ directory: dir, endpoint, identification: 'synthetic', transport: async (_url, options) => { calls++; assert.equal(options.redirect, 'error'); return response; } });
+  const resolver = createGuardedLocationResolver({ directory: dir, endpoint, identification: 'synthetic', transport: async (_url, options) => { calls++; assert.ok(options.signal instanceof AbortSignal); return response; } });
   assert.equal((await resolver('x', 'FR')).attribution, '© OpenStreetMap contributors');
   await resolver('x', 'FR'); assert.equal(calls, 1);
 });
@@ -26,7 +26,7 @@ test('operator retry is a separate spaced attempt and failure is not cached', as
 });
 
 const moduleUrl = pathToFileURL(join(process.cwd(), 'dist/guarded-location-resolver.js')).href;
-const script = `import { appendFile } from 'node:fs/promises'; import { createGuardedLocationResolver } from ${JSON.stringify(moduleUrl)};
+const script = `import { appendFile } from 'node:fs/promises'; import { createGuardedLocationResolverForTest as createGuardedLocationResolver } from ${JSON.stringify(moduleUrl)};
 const [directory, log, query] = process.argv.slice(1);
 const resolver = createGuardedLocationResolver({ directory, endpoint: ${JSON.stringify(endpoint)}, identification: 'synthetic', transport: async () => { await appendFile(log, Date.now() + '\\n'); await new Promise(r => setTimeout(r, 200)); return { ok: true, status: 200, json: async () => [] }; } });
 await resolver(query, 'FR');`;
@@ -66,7 +66,7 @@ test('timeout leaves attempt locked until unabortable transport settles', async 
 
 test('crashed process leaves stale attempt lock and requires manual recovery', async t => {
   const dir = await directory(t), log = join(dir, 'requests');
-  const crashScript = `import { createGuardedLocationResolver } from ${JSON.stringify(moduleUrl)}; const r = createGuardedLocationResolver({ directory: process.argv[1], endpoint: ${JSON.stringify(endpoint)}, identification: 'synthetic', transport: async () => { process.stdout.write('started\\n'); return new Promise(() => {}); } }); await r('crash', 'FR');`;
+  const crashScript = `import { createGuardedLocationResolverForTest as createGuardedLocationResolver } from ${JSON.stringify(moduleUrl)}; const r = createGuardedLocationResolver({ directory: process.argv[1], endpoint: ${JSON.stringify(endpoint)}, identification: 'synthetic', transport: async () => { process.stdout.write('started\\n'); return new Promise(() => {}); } }); await r('crash', 'FR');`;
   const child = spawn(process.execPath, ['--input-type=module', '-e', crashScript, dir], { stdio: ['ignore', 'pipe', 'pipe'] });
   await new Promise((resolve, reject) => { child.stdout.once('data', resolve); child.once('error', reject); child.once('exit', code => reject(Error(`early exit ${code}`))); });
   child.kill('SIGKILL'); await new Promise(resolve => child.once('exit', resolve));

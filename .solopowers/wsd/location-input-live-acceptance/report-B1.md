@@ -126,3 +126,27 @@ Added an internal-only cache/Nominatim/attempt-coordinator assembly. The transpo
 RED command (after adding a compiling stub and five initial synthetic/process tests, before assembly implementation): `mise exec -- npm run build && mise exec -- node --test test/guarded-location-resolver.test.mjs`. Actual excerpt: `tests 5`, `fail 5`, `Error: Not implemented`. This establishes missing assembly only; it does **not** independently establish behavioral RED per contract because all cases failed at the stub. The timeout, actual crash, and fresh-process clock tests were added after implementation, so no pre-edit RED was captured for those. This is a residual TDD evidence gap, not a claim of per-contract RED.
 
 Focused command: `mise exec -- npm run build && mise exec -- node --test test/guarded-location-resolver.test.mjs`. Actual excerpt before the final fresh-process clock test: `tests 7`, `pass 7`, `fail 0`. Full command: `mise exec -- npm run check`. Actual excerpt after all tests: `tests 530`, `pass 530`, `fail 0`; build passed. All transports were synthetic; no credentials, live requests, paid activity, publication or external changes.
+
+## Interim B1 P1 — local HTTP lifecycle enforcement
+
+Pre-edit behavioral RED at `0d018be`: added a synthetic 503 response whose body remained active, then attempted a distinct-key request. Command: `mise exec -- npm run build && mise exec -- node --test test/guarded-lifecycle.test.mjs`. Exact diagnostic excerpt:
+
+```text
+✖ error headers do not release ownership while the response body remains active (2613.455542ms)
+ℹ tests 1
+ℹ suites 0
+ℹ pass 0
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 2679.782917
+
+  AssertionError [ERR_ASSERTION]: competing transport started before error body terminated
+
+  true !== false
+```
+
+The final regression uses real separate processes against an authorized loopback-only synthetic HTTP server, rather than relying on the old arbitrary injected transport. The production assembly now binds Node HTTP(S), with no redirect or retry, a 1 MiB response bound, and local socket closure awaited on success, error, abort and oversized responses. The separate explicitly synthetic-only injection seam supports ignored-abort and late-settlement controls. The timed-out result is not published. Local socket close does not establish remote processing has stopped; manual recovery remains conservative. No CLI, live-provider request, paid activity, credential or account change was involved. Interim P2 findings remain out of scope.
+
+GREEN command: `mise exec -- node --test test/guarded-lifecycle.test.mjs test/guarded-location-resolver.test.mjs`. Exact summary: `ℹ tests 13`, `ℹ pass 13`, `ℹ fail 0`, `ℹ duration_ms 51813.823541`. The full check after the final test: `mise exec -- npm run check`. Exact summary: `ℹ tests 535`, `ℹ pass 535`, `ℹ fail 0`, `ℹ duration_ms 52871.809208`; TypeScript build passed. `git diff --check` passed. Independent review is still required.
