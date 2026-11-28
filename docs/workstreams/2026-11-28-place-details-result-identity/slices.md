@@ -3,58 +3,63 @@
 Agent-facing. The operator does not need to read this file.
 
 ## Objective
-Deliver useful, versioned synthetic place output that preserves discovery evidence and makes identity, geography, field availability, outstanding discovery gaps and detail attempt state independently legible, without executing detail requests.
+Deliver useful, versioned synthetic place output that preserves discovery evidence and makes identity, geography, field availability, discovery gaps and detail-work state independently legible, without executing detail requests.
 
 ## Scope
-**Supported scenario:** bounded first-release operator-run discovery; one local checkpoint inspected via the existing read-only status/export path. Automated acceptance is synthetic and offline.
+**Supported scenario:** bounded first-release operator-run discovery; one local checkpoint inspected through the existing read-only status/export path. Automated acceptance is synthetic and offline.
 
 **In scope**
-- Characterize mapped candidate observations, duplicates, provenance, partial/mixed-invalid/capped results, durable reopen and current export behavior.
-- Carry currently available mapped candidate name and `place_id` (as candidate ID), optional coordinate and occurrence provenance without changing mapper acceptance.
-- Add explicit v2 export selection and record fields/gap status while retaining exact v1 compatibility/default and old-checkpoint inspection.
+- Characterize existing mapped observations, duplicate occurrences, provenance, partial/mixed-invalid/capped results, durable reopen/resume, current v1 output, and the injected direct-provider path.
+- Preserve mapped candidate name, `place_id` as an unverified candidate ID, optional coordinate and occurrence provenance without changing mapper acceptance or checkpoint version.
+- Add an internal v2 projection, then separately expose it through explicit library/CLI selection while retaining exact v1 compatibility/default and old-checkpoint inspection.
 - Connected synthetic acceptance for recovery, partial outcomes, deterministic export, grouping and read-only reopen; update operator documentation.
 
 **Out of scope**
 - Provider detail collection, request admission, URL locator synthesis, identity promotion, live demonstration, live identity/completeness/schema assumptions, calls, secrets, account changes or publication.
 - Speculative fields such as phone/address, name/coordinate fuzzy matching, boundary filtering changes, schema changes solely to hold richer mapped values, or changes to provider mapper acceptance.
-- Treating discovery absence, partial response, pending detail or unavailable fields as interchangeable states.
+- Treating discovery absence, partial response, pending detail or unavailable stored fields as interchangeable states.
 
 ## Key files
-- `src/bright-data-mapping.ts`: currently maps `name`, `place_id` and optional coordinate as discovery candidate; retains valid candidates on partial/mixed-invalid or capped results while setting gap/expansion outcome.
+- `src/bright-data-mapping.ts`: maps `name`, `place_id` and optional coordinate; partial/mixed-invalid or capped responses retain valid candidates while setting gap/expansion outcome.
+- `src/durable-bright-data-submission.ts`: inline and retrieved direct-provider branches pass mapped name into traversal.
 - `src/traversal.ts`: `CandidateObservation` stores ID/name/coordinate/classification/source and stable observation/attempt/occurrence IDs; `applyDiscoveryResult` controls per-occurrence persistence, verified fixture grouping and pending detail work.
-- `src/durable-state.ts`: checkpoint validation and legacy compatibility, including snapshots with absent `detailWork` and old observations without `name`.
-- `src/operator.ts`: v1 export currently includes ID/coordinate/classification/provenance, groups verified keys only, and separately outputs unverified observations; status has discovery/detail gaps and pending details.
+- `src/durable-state.ts`: checkpoint validation and legacy compatibility, including snapshots with absent `detailWork` and observations without optional `name`.
+- `src/operator.ts`: v1 export omits name, groups verified keys only, and separately outputs unverified observations; status projects discovery/detail gaps and pending details.
 - `src/cli.ts`: strict current `export --checkpoint PATH` parser and CLI serialization.
-- `test/bright-data-mapping.test.mjs`, `test/traversal.test.mjs`, `test/durable-identity.test.mjs`, `test/durable-discovery.test.mjs`, `test/operator-inspection.test.mjs`, `test/operator-acceptance.test.mjs`: mapper, identity, recovery and connected operator acceptance.
+- `test/synthetic-bright-data-operator.test.mjs`: injected-transport direct-provider/operator acceptance, including inline and retrieved results.
+- `test/durable-bright-data-partial.test.mjs`: durable direct-provider partial/reopen/resume behavior.
+- `test/bright-data-mapping.test.mjs`, `test/traversal.test.mjs`, `test/durable-identity.test.mjs`, `test/durable-discovery.test.mjs`, `test/operator-inspection.test.mjs`, `test/operator-acceptance.test.mjs`, `test/operator-cli.test.mjs`: mapper, identity, recovery, export and connected CLI acceptance.
 - `README.md`, `docs/happy-path.md`, `docs/milestones/03-provider-integrations.md`: operator contract and workstream boundary.
 - `docs/research/bright-data-mcp.md`, `docs/research/bounded-crawl-recovery.md`: provider evidence limits and synthetic recovery/gap rules.
 
 ## Architecture invariant
-The first release's bounded discovery path remains the only execution path. Do not change acceptance of mapped results to rescue missing fields. Preserve raw occurrence multiplicity and its source cell, attempt, observation, occurrence ordinal, optional coordinate and classification. Candidate `place_id` is not verified identity; only explicit fixture-verified identity may group occurrences. Keep discovery gaps, field absence, geographic classification, and detail attempt/not-attempt status distinct. A pending detail record is not proof of failure or missing data; details cannot repair a discovery gap or coverage. Inspection stays read-only. Existing v1 document shape remains byte-for-byte/field-shape compatible and default-selected; v2 requires an explicit CLI/library choice. Do not silently migrate or reshape checkpoints.
+The first release's bounded discovery path remains the only execution path. Do not change acceptance of mapped results to rescue missing fields. Preserve raw occurrence multiplicity and its source cell, attempt, observation, occurrence ordinal, optional coordinate and classification. Candidate `place_id` is not verified identity; only explicit fixture-verified identity may group occurrences. Keep stored field availability, geographic classification, discovery/detail gaps and detail-work state legible as separate concepts. Preserve the existing `OperatorStatus` projection without claiming its gap arrays are disjoint: `discoveryGaps` includes all traversal gaps, including `detail-origin:*` blockers that can also be represented in `detailGaps`. A pending detail work item is not proof of failure or missing provider data; details cannot repair a discovery gap or coverage. Inspection stays read-only. Existing v1 document and CLI JSON bytes remain exact and default-selected; v2 requires explicit selection only after its complete internal projection contract is implemented. Do not silently migrate or reshape checkpoints.
 
 ## Assumptions and design decisions
-- Discovery-first minimum useful observation is mapped name, candidate provider `place_id`, optional coordinate and source occurrence provenance. `src/bright-data-mapping.ts` currently retains the mapped name in its candidate, but normalization through durable traversal and export does not yet preserve/name it consistently. Test the actual seam before changing it.
-- `id` in `CandidateObservation` / export is the observed candidate identifier. For provider-backed mappings it may be a provider `place_id`, but it is not thereby verified canonical identity. A nonempty candidate ID and an explicit `verifiedCanonicalKey` are separate concepts.
-- Geography classification (`inside`, `outside`, `unverified`) is the existing per-observation result of coordinate reliability and configured area. Missing coordinates alone do not fail a crawl; do not apply new output filtering. A discovery gap reflects incomplete/failed/uncertain discovery, not geography or missing coordinates.
-- Exact v2 projection: top level is `{version: 2, status: <unchanged OperatorStatus v1>, verifiedPlaces: [{canonicalKey, observations: [occurrence]}], unverifiedObservations: [occurrence]}`. Each occurrence has `candidateId`, `name` (string or null), `coordinate` (coordinate object or null), `classification`, `fieldStatus: {name, coordinate}` where each is `present` or `not_present` in the persisted observation, `detailState`, and the unchanged provenance fields `sourceCell`, `workId`, `attemptId`, `observationId`, `occurrence`. Field status describes stored observation only, not provider-side absence. `detailState` is one of `not_attempted` (pending detail work), `reserved`, `dispatched`, `uncertain`, `completed`, `skipped`, or `unknown` (legacy record has no associated detail metadata). Verified grouping retains all occurrence entries; unverified records are never grouped. Existing status v1 carries discovery-gap and detail-gap status separately and stays unchanged in v2.
-- Export selection is `export --checkpoint PATH` → v1, unchanged; `export --checkpoint PATH --format v2` → v2. Library `exportResults({checkpoint})` remains v1 and `exportResults({checkpoint, format:'v2'})` selects v2. Reject unknown/repeated format flags. Do not add an implicit environment/configuration default.
-- Existing durable checkpoint schema is version 1 and currently tolerates optional candidate name and optional/absent `detailWork`; export must be read-only and must not rewrite old checkpoints just to expose v2. V2 `fieldStatus` describes only whether the field was stored on that occurrence (`not_present` is not a claim that provider data is missing); absent detail metadata maps to `unknown`, while known pending detail work maps to `not_attempted`. Do not fabricate completion or failure. New status inference must not treat pending details as failure. Unsupported/corrupt checkpoints remain fail-closed as before.
-- Preserve mapper behavior: currently invalid entries create incomplete/gap status; a capped response creates a gap and prevents expansion while retaining valid candidates. Do not make mapper accept records with absent `name` or `place_id` as a side effect of carrying candidate fields. Do not infer a URL locator from candidate ID or synthesize one to enable details.
+- Discovery-first minimum useful observation is mapped name, candidate provider `place_id`, optional coordinate and source occurrence provenance. Current direct-provider paths pass names into traversal and durable observations; v1 export intentionally omits name. Do not presume a persistence defect. Slice A is characterization-only unless evidence demonstrates a loss, and any correction requires a failing test before the fix.
+- `CandidateObservation.id` is the observed candidate identifier. For provider-backed mappings it may be a provider `place_id`, but it is not thereby verified canonical identity. A nonempty candidate ID and an explicit `verifiedCanonicalKey` are separate concepts.
+- Geography classification (`inside`, `outside`, `unverified`) is the existing per-observation result of coordinate reliability and configured area. A null/missing coordinate is `not_present` in v2 field status and remains retained/unverified by existing rules; missing coordinates alone do not fail a crawl. A discovery gap reflects incomplete/failed/uncertain discovery, not geography or missing coordinates.
+- Exact v2 output: `{version: 2, status: <unchanged OperatorStatus v1>, verifiedPlaces: [{canonicalKey, observations: [occurrence]}], unverifiedObservations: [occurrence]}`. Each `occurrence` has exactly these fields: `candidateId` (the persisted candidate ID), `name` (string or null), `coordinate` (coordinate object or null), `classification`, `fieldStatus: {name, coordinate}` (each value is exactly `present` or `not_present` based on persisted observation value; null is `not_present`), `detailState`, and provenance `sourceCell`, `workId`, `attemptId`, `observationId`, `occurrence`. Field status describes stored observation only, not provider-side absence. Do not add optional speculative fields or vary these names.
+- Detail association is by each occurrence's `observationId` membership in exactly one persisted `DetailWork.observationIds` list. Never join by candidate ID, canonical key, gaps, `pendingDetails`, or latest attempt. Project that associated persisted work's status: `pending` → `not_attempted`; `reserved`, `dispatched`, `uncertain`, `completed`, and `skipped` pass through unchanged. If the legacy checkpoint has no `detailWork` property, project `unknown`. If `detailWork` is present but association is missing or duplicated, treat the checkpoint as corrupt and fail closed through existing validation; do not downgrade it to `unknown`. A shared verified work item can cover multiple occurrences: `completed` is the shared work's status, not proof a detail request was made for every occurrence individually. Duplicate unverified candidate IDs remain separate observations and get state only through their distinct observation IDs.
+- V2 ordering is fixed to v1's existing ordering: `verifiedPlaces` sorted lexically by `canonicalKey`; each group's `observations` sorted lexically by `observationId`; `unverifiedObservations` sorted lexically by `observationId`. No alternate deterministic ordering is acceptable.
+- Preserve exact existing `OperatorStatus` in v2. `discoveryGaps` maps all traversal gaps, including `detail-origin:*` blockers; such a blocker can overlap a related detail gap. Preserve and test that inherited behavior rather than filtering or claiming disjoint gap lists.
+- Export selection after Slice C is `export --checkpoint PATH` → exact v1; `export --checkpoint PATH --format v2` → exact v2. Library `exportResults({checkpoint})` remains exact v1 and `exportResults({checkpoint, format:'v2'})` selects v2. Reject unknown/repeated format flags. No implicit environment/configuration default. The v2 internal projection in Slice B is not exposed through the package public API or CLI; no partial public v2 contract before Slice C.
+- Existing durable checkpoint schema is version 1 and tolerates optional candidate name and optional/absent `detailWork`; export must be read-only and must not rewrite old checkpoints just to expose v2. Old observations without name project `name:null` and `fieldStatus.name:'not_present'`, which describes stored shape only. Legacy absent detail metadata maps to `unknown`; known pending work maps to `not_attempted`. Do not fabricate completion or failure. Unsupported/corrupt checkpoints remain fail-closed as before.
+- Preserve mapper behavior: currently invalid entries create incomplete/gap status; response at its per-input cap creates a gap and suppresses expansion while retaining valid candidates. Distinguish that provider response cap from a local work-limit stop; do not change either behavior, imply a local stop is a provider cap, or imply raising a limit reopens a partial cell. Resume must not replay completed work. Do not make mapper accept records with absent `name` or `place_id` as a side effect of carrying candidate fields.
 - Defer details entirely: public catalog research describes URL-input `collect_by_url` and declared fields, but current URL-input catalog evidence and persisted records do not prove a runnable request contract/locator, runtime schema, identity mapping, response attribution, rights or completeness. Do not make detail requests or promote IDs. If later evidence supports details, request admission/recovery and response attribution/export are separate later-workstream contracts.
 - Do not include speculative phone/address fields. Source research does not guarantee them; adding guesses or unsupported field promises creates needless contract surface.
-- Keep P0/P1 priority evidence tied to safe and useful bounded first-release operator discovery. The output distinction addresses directly useful record/provenance and honest gaps without turning lower-priority enrichment into implementation. P-grade is impact, not authorization or an acceptance waiver.
-- Two sequential slices are sufficient: A is characterization and preservation of existing discovery evidence; B is one cohesive output contract (versioned schema, selection, connected recovery/partial acceptance and docs) built on A. They share one identity/provenance/export contract and can be tested together. Split only if evidence shows independently unmanageable contracts; seek operator approval before changing scope/sizing.
+- Keep P0/P1 priority evidence tied to safe and useful bounded first-release operator discovery. The output distinction addresses directly useful record/provenance and honest status without turning lower-priority enrichment into implementation. P-grade is impact, not authorization or an acceptance waiver.
+- Three sequential slices are warranted: A establishes direct-discovery and recovery evidence; B defines and tests one internal projection independent of exposure; C separately wires CLI/library selection, v1 compatibility, connected acceptance and docs. B and C have independent test boundaries: schema/association/legacy/order projection can be tested from checkpoints, while API selection/parser/rejection/default and connected entry-point behavior can be tested separately. C does not publicly expose an incomplete B contract. This is the smallest split that addresses distinct failure modes; no scope is added.
 - Before any future live demonstration, reassess GitHub issues #4 and #5 and applicable provider, rights and pricing evidence. No live demonstration is included here. A future paid call needs separate explicit approval after presenting an uncertain cost estimate, proposed work and stop limits; this brief does not authorize calls. Terms, account rights and pricing remain separate gates.
 
 ### Implementation discretion
 Intentionally left to workstream-driven-development:
-- Internal helper names, local types, SQL/JSON projection mechanics and test fixture values.
-- Stable field names within the specified v2 distinctions only; ensure the v2 contract is captured in tests and documentation before implementation is considered complete.
-- How to represent absent legacy metadata, so long as unknown versus observed absence, pending/not-attempted, and gaps remain distinguishable and v1 remains unchanged.
-- Focused file organization and exact assertion decomposition; do not alter public behavior outside explicit v2 selection.
+- Internal helper/module naming and SQL/JSON projection mechanics, provided B's projection remains internal and C is the first public exposure.
+- Synthetic fixture values and focused assertion decomposition, without changing the exact field names, values, associations, status semantics or ordering specified above.
+- Focused file organization; do not alter public behavior outside explicit v2 selection in Slice C.
 
 ### Unresolved design blockers
-None for the planned synthetic-only work. The brief itself still requires operator approval before execution. Provider detail contract, live schema/identity/completeness, account rights/pricing and any demonstration are not resolved here and are not blockers for this no-detail workstream; they remain separate future gates.
+None for the planned synthetic-only work. The brief itself still requires operator approval before implementation. Provider detail contract, live schema/identity/completeness, account rights/pricing and any demonstration are not resolved here and are not blockers for this no-detail workstream; they remain separate future gates.
 
 ## Final verification
 Run applicable project checks at workstream end and record exact command/results in the execution log. Do not make provider calls.
@@ -66,19 +71,19 @@ Run applicable project checks at workstream end and record exact command/results
 
 ## Slices
 
-### Slice A: Discovery observation characterization
+### Slice A: Direct discovery and durable partial characterization
 
-**Goal**: Establish evidence-backed baseline and targeted synthetic coverage of the existing mapped discovery observation, partial outcomes, repeated occurrences, provenance and reopen behavior without changing public/export shape or checkpoint format.
+**Goal**: Establish evidence-backed baseline for mapped direct-provider observations, partial outcomes, repeated occurrences, provenance and reopen/resume without changing output shape, checkpoint format or runtime behavior.
 
 #### Tasks
 
-**`src/bright-data-mapping.ts`, `src/traversal.ts`, `src/durable-state.ts`, `src/operator.ts`; focused tests in `test/`**
-- [ ] Inspect existing behavior and tests; add characterization assertions where needed for mapped name/place_id/optional coordinate, acceptable invalid/capped partial outcomes, duplicate raw occurrences, distinct source provenance, fixture-verified versus unverified identities, detail pending status, and reopening/inspecting preexisting v1 checkpoints. Run them before any behavior edit; capture exact baseline.
-- [ ] Trace the name from mapping into `CandidateObservation`, SQLite checkpoint and v1 projection. Identify the narrowest point where richer mapped data is dropped; preserve the name only if the existing data path permits without altering checkpoint version or mapper acceptance. Do not add schema/version scaffolding speculatively.
-- [ ] Exercise mixed valid/invalid and response-at-limit cases: retain accepted candidates and their occurrences, keep discovery gaps visible, preserve existing expansion decisions, and distinguish those gaps from pending detail. Exercise duplicate candidate IDs as distinct occurrences and verify no grouping absent explicit canonical identity.
-- [ ] Use on-disk SQLite and fresh-process/reopen acceptance where current test harness supports it. Compare exact occurrence/provenance sets and gap/detail state before and after read-only reopen; assert no export/status mutation. Include legacy snapshots/checkpoints missing optional name or detailWork if constructible through current supported compatibility paths.
-- [ ] Make only the minimum targeted discovery-observation change needed to meet the approved minimum useful observation. No output schema selection or v1 shape change in this slice. Do not change mapping acceptance, provider behavior, checkpoint version, details execution or identity rules.
-- [ ] Run focused tests, build and `mise exec -- npm run check`; record exact commands and results. Fix regressions; commit only slice changes after verification.
+**`src/bright-data-mapping.ts`, `src/durable-bright-data-submission.ts`, `src/traversal.ts`, `src/durable-state.ts`, `src/operator.ts`; `test/synthetic-bright-data-operator.test.mjs`, `test/durable-bright-data-partial.test.mjs`, focused tests in `test/`**
+- [ ] Inspect existing behavior and tests. Explicitly exercise injected-transport `test/synthetic-bright-data-operator.test.mjs` and `test/durable-bright-data-partial.test.mjs`; characterize both inline and retrieved direct-provider results passing name into traversal and durable observations. Record that current v1 projection omits name without assuming it was dropped from persistence.
+- [ ] Before edits, capture a passing pre-change v1 baseline for the same stable checkpoint: exact library `exportResults` document including return type and exact CLI JSON bytes. Keep the baseline fixture/assertion for comparison through C. Record pre-existing failing tests separately; never use v1 regression expectations as a RED test.
+- [ ] Characterize candidate name/place_id/optional coordinate, valid mixed with invalid candidates, duplicate raw occurrences, distinct source provenance, verified versus unverified identities, pending detail work, and preexisting checkpoints with optional name or absent `detailWork`. A remains characterization-only unless a test demonstrates actual data loss; any proposed correction requires a failing test first and must not alter mapper acceptance or checkpoint version.
+- [ ] In the injected direct-provider tests, distinguish a response at its per-input cap (retained valid results, gap and expansion suppressed) from a local work-limit stop. Assert existing behavior without treating a cap and local stop as equivalent or implying a raised limit reopens a partial cell.
+- [ ] Use on-disk SQLite and fresh-process/reopen/resume acceptance where current harness supports it. Assert accepted occurrences, names, provenance and gaps survive read-only reopen and supported resume without replaying completed work; do not export/status-mutate or reopen a partial cell merely because a limit is raised.
+- [ ] Run focused tests, build and `mise exec -- npm run check`; record exact commands/results. Make no behavior edits absent a demonstrated loss and approved scope. Commit only slice changes after verification.
 
 #### Watch out
 - A provider `place_id` is an unverified candidate ID. Do not elevate it to canonical identity because repeated values match.
@@ -87,39 +92,70 @@ Run applicable project checks at workstream end and record exact command/results
 
 #### Verification
 - `mise exec -- npm run build`
-- `mise exec -- node --test test/bright-data-mapping.test.mjs test/traversal.test.mjs test/durable-identity.test.mjs test/durable-discovery.test.mjs test/operator-inspection.test.mjs test/operator-acceptance.test.mjs`
+- `mise exec -- node --test test/synthetic-bright-data-operator.test.mjs test/durable-bright-data-partial.test.mjs test/bright-data-mapping.test.mjs test/traversal.test.mjs test/durable-identity.test.mjs test/durable-discovery.test.mjs test/operator-inspection.test.mjs test/operator-acceptance.test.mjs`
 - `mise exec -- npm run check`
-- Assert exact occurrence count and provenance, verified-only grouping, failure/partial/capped gap distinction, unchanged mapper acceptance and unchanged v1 output shape. Include fresh-process or existing equivalent checkpoint reopen evidence; no live demonstration.
+- Assert passing exact v1 library document/return type and CLI JSON bytes as the pre-change baseline; direct name persistence; exact occurrence/provenance; verified-only grouping; invalid/partial/capped gap distinction; cap versus local stop; reopen/resume without replay; unchanged mapper acceptance and no live demonstration.
 
 #### Carry-forward
-A characterized, minimally complete persisted discovery observation and repeatable synthetic recovery/partial baseline. V1 export contract remains unchanged; v2 projection and explicit selection are Slice B.
+A passing exact v1 baseline and characterized direct-discovery evidence across partial outcomes and durable reopen/resume. No output/API/checkpoint behavior changes. B can project v2 internally from this persisted state.
 
-### Slice B: Explicit v2 export and connected synthetic acceptance
+### Slice B: Internal v2 projection contract
 
-**Goal**: Add additive v2 export with an explicit opt-in while retaining exact v1 default/compatibility, and prove deterministic connected records/gaps across synthetic recovery, partial outcomes and read-only reopen.
+**Goal**: Implement and independently verify the complete v2 projection against checkpoints without exposing it through the library public API or CLI.
 
 #### Tasks
 
-**`src/operator.ts`, `src/cli.ts`, `test/operator-inspection.test.mjs`, `test/operator-acceptance.test.mjs`, related focused export tests, `README.md`, `docs/happy-path.md`**
-- [ ] Establish meaningful RED for explicit v2 format selection, v2 projection distinctions, old checkpoint projection and invariance of the v1 default before implementation. Test CLI parsing rejects unsupported/duplicate format selections without checkpoint mutation.
-- [ ] Define and test the v2 shape from the settled decisions: one entry per raw occurrence; available name and candidate `place_id`/ID; optional coordinate and geographical classification; verified identity grouping only when fixture identity is explicitly verified; provenance; separately visible discovery gaps, missing stored fields and detail attempted/not-attempted state. Null/missing data and pending detail must not be converted into provider failure, field-missing claims, completion or verified identity.
-- [ ] Add `--format v2` as the only CLI opt-in; no option and library call without format continue to emit exact v1. Keep v1 top-level and nested field shape unchanged. Reject invalid or repeated format selections. No checkpoint format/version bump for output-only projection; ensure old supported v1 checkpoints remain read-only exportable and absence of optional legacy fields is represented honestly in v2.
-- [ ] Test deterministic ordering and exact results across a fresh-process start, a cap-limited partial state, recovery/reopen and resume. Include repeated occurrences from distinct source cells, duplicate unverified candidate IDs, explicitly verified synthetic duplicate identity, valid observation mixed with invalid/capped partial outcome, missing coordinate and pending detail not attempted. Verify source provenance survives grouping and each occurrence remains present.
-- [ ] Assert v2 separates discovery gap from classification and field status; pending detail neither produces a failure nor marks all fields missing. Assert missing coordinates alone do not fail traversal and detail never repairs discovery/coverage gaps. Preserve current expansion decisions and mapper acceptance.
-- [ ] Assert status/export remain read-only on legacy/current checkpoints and that neither format mutates or migrates checkpoint state. Verify unsupported/corrupt checkpoints still fail closed. Compare exact v1 document before/after implementation for identical fixture state.
-- [ ] Update `README.md` and `docs/happy-path.md` with exact default/opt-in usage, v1 compatibility, v2 available-field/gap semantics, unverified candidate IDs, explicit identity grouping limits, detail-not-attempted meaning and non-exhaustive coverage. Do not imply details run or add phone/address promises.
-- [ ] Reassess `docs/milestones/03-provider-integrations.md` Workstream 2 framing so this plan's synthetic output work is not described as detail execution. Keep future detail request admission/recovery separate from response attribution/export; document no live demonstration in acceptance. Before any later live demonstration reassess GitHub #4 and #5 and applicable contract, rights and pricing evidence.
-- [ ] Run focused checks and full `mise exec -- npm run check`, `git diff --check`, and final documentation consistency review; record actual results. Commit only slice changes after required checks pass. No live/provider actions.
+**`src/operator.ts` or a focused internal projection module; focused internal projection tests in `test/`**
+- [ ] Add a private-to-package projection seam that accepts/uses the already validated read-only checkpoint snapshot and returns the exact v2 document. It may be imported by focused source-level tests, but must not be exported through the package public entry point, `exportResults`, or CLI in this slice. Keep v1 path untouched.
+- [ ] First add meaningful RED tests for the new internal projection only. Establish field names, null/present semantics, classification, provenance, identity placement, work association, legacy handling, gap behavior and exact ordering from the contract above. Do not claim RED for unchanged v1 compatibility; use Slice A's passing exact baseline.
+- [ ] Test name and candidate ID from direct synthetic observations, optional/null coordinate (`fieldStatus.coordinate:'not_present'`), name null (`fieldStatus.name:'not_present'`), and available values marked `present`. Field status describes checkpoint content, never provider-side absence.
+- [ ] For every occurrence, associate `detailState` through its `observationId` in the unique `DetailWork.observationIds` membership and project that work's status only. Test all six persisted work statuses; assert `pending` → `not_attempted`, and pass `reserved`, `dispatched`, `uncertain`, `completed`, `skipped` unchanged. Prohibit joins by candidate ID/canonical key/gaps/pendingDetails/attempt.
+- [ ] Test a verified group sharing one work item, including an observation appended to existing work: each member projects the shared persisted status, but `completed` must not claim each occurrence individually received a detail request. Test duplicate unverified candidate IDs remain separate and get status by their distinct observation IDs.
+- [ ] Test legacy checkpoint with `detailWork` absent → `unknown`; when `detailWork` is present, missing or duplicate observation membership must fail closed through existing validator rather than become `unknown`. Do not weaken validator or synthesize association. Verify read-only projection and corrupt/unsupported checkpoint rejection.
+- [ ] Preserve exact `OperatorStatus`, including all traversal gaps in `discoveryGaps` and possible overlap between a `detail-origin:*` blocker there and its related `detailGaps` entry. Test inherited overlap; do not promise disjoint arrays or filter blockers.
+- [ ] Test exact v2 ordering: verified groups lexically by canonical key; group occurrences lexically by observation ID; unverified occurrences lexically by observation ID. Test repeated calls produce the same full document.
+- [ ] Keep the projection internal; finish focused tests, `mise exec -- npm run check`, and `git diff --check`; record commands/results and commit only slice changes after verification. No API/CLI exposure or operator-doc claim for v2 yet.
 
 #### Watch out
-- V2 is additive output schema, not a provider contract or a persisted checkpoint schema migration.
-- Old checkpoints may lack stored names or explicit detail-work fields. Do not fabricate values or backfill/mutate during read-only export. Distinguish unknown legacy detail metadata from known detail attempt state.
+- No public or CLI v2 switch until Slice C; a partial projection is not an accepted user-facing feature.
+- Old checkpoints without `detailWork` yield `unknown`, but present invalid membership is corruption and must fail closed.
+- Shared verified detail work status is work-level, not per-occurrence evidence of requests.
+
+#### Verification
+- Focused internal v2 projection tests (run by the repository test runner)
+- `mise exec -- npm run check`
+- `git diff --check`
+- Assert the exact v2 fields/statuses/joins/order/gap overlap, old absent metadata, fail-closed malformed membership, read-only behavior, and that the projection is absent from public exports/CLI while v1 baseline remains untouched.
+
+#### Carry-forward
+A complete, tested internal projection with explicit schema, ordering and status association. No public v2 API, CLI, or operator-facing docs are available before C.
+
+### Slice C: Explicit v2 opt-in, compatibility and connected acceptance
+
+**Goal**: Expose the completed v2 projection only through explicit library/CLI opt-in, preserve exact v1 output by default, and verify connected synthetic results through durable partial recovery and read-only inspection.
+
+#### Tasks
+
+**`src/operator.ts`, `src/cli.ts`, `test/operator-inspection.test.mjs`, `test/operator-acceptance.test.mjs`, `test/operator-cli.test.mjs`, `test/synthetic-bright-data-operator.test.mjs`, `test/durable-bright-data-partial.test.mjs`, `README.md`, `docs/happy-path.md`, `docs/milestones/03-provider-integrations.md`**
+- [ ] Add the library option `exportResults({checkpoint, format:'v2'})` and CLI `export --checkpoint PATH --format v2`; keep no-option library/CLI exact v1. Unknown/repeated format flags fail without checkpoint mutation. This is the first public/CLI exposure of v2, only after B's projection is complete.
+- [ ] Assert passing exact v1 baseline from A: identical full library document including return type and identical CLI JSON bytes for the same stable checkpoint; v1 shape/default remains exact. RED is for new v2 selection, projection integration and connected behavior only. Capture baseline before edits and report preexisting failures separately.
+- [ ] Exercise fixture-backed fresh-process CLI status/export and format selection plus connected synthetic operator acceptance. Include injected synthetic Bright Data inline/retrieved results and durable partial behavior, then checkpoint close/reopen/resume. Assert accepted occurrences, names, provenance and gaps persist and completed work is not replayed; cap-limited cell remains partial as before and is not reopened just by raising limits.
+- [ ] Include response at per-input cap vs local work-limit stop, valid plus invalid/capped results, distinct source cells, duplicate unverified candidate IDs, explicit verified fixture identity group, missing coordinate, all detail states from B, and legacy checkpoint. Assert each occurrence remains, status is linked by observation ID, discovery/detail-origin gap overlap matches existing `OperatorStatus`, and no provider detail request occurs.
+- [ ] Assert both formats are read-only and do not migrate checkpoints. Compare v2 projection through public opt-in byte/structural result to B's internal contract; preserve old-checkpoint absent detail metadata as `unknown` and present malformed association as fail-closed.
+- [ ] Update `README.md` and `docs/happy-path.md` with exact default/opt-in usage, v1 compatibility, stored-field semantics, unverified candidate IDs, explicit identity grouping limits, detail-state mapping, legacy unknown state, inherited gap overlap and non-exhaustive coverage. Do not imply details run or add phone/address promises.
+- [ ] Reassess `docs/milestones/03-provider-integrations.md` Workstream 2 framing so this synthetic output work is not described as detail execution. Keep future detail request admission/recovery separate from response attribution/export; state no live demonstration in acceptance. Before any later live demonstration reassess GitHub #4 and #5 and applicable contract, rights and pricing evidence.
+- [ ] Run focused checks and full `mise exec -- npm run check`, `git diff --check`, and final docs consistency review; record actual results. Commit only slice changes after required checks pass. No live/provider actions.
+
+#### Watch out
+- V2 is additive output, not a provider contract or checkpoint schema migration.
+- `detailState` describes its associated persisted work item, not proof of per-occurrence request execution; legacy absence is `unknown`, not a fabricated state.
+- Existing `discoveryGaps` may include `detail-origin:*` blockers also represented in `detailGaps`; preserve this and do not promise disjoint gap lists.
 - The direct-provider catalog evidence found location discovery URL output and a separate URL-input detail method, but not a runnable collection contract for persisted records. Do not synthesize locators or promote candidate identity.
 - No live demonstration is acceptance. Terms, account rights and pricing are separate approval/evidence gates; calls, account changes and publication are prohibited here.
 
 #### Verification
 - `mise exec -- npm run build`
-- `mise exec -- node --test test/operator-inspection.test.mjs test/operator-acceptance.test.mjs test/operator-cli.test.mjs test/bright-data-mapping.test.mjs test/durable-identity.test.mjs`
+- `mise exec -- node --test test/operator-inspection.test.mjs test/operator-acceptance.test.mjs test/operator-cli.test.mjs test/synthetic-bright-data-operator.test.mjs test/durable-bright-data-partial.test.mjs test/bright-data-mapping.test.mjs test/durable-identity.test.mjs`
 - `mise exec -- npm run check`
 - `git diff --check`
-- Assert exact v1 compatibility/default, explicit v2 opt-in and parser rejection; deterministic fresh-process partial/recovery export; verified fixture grouping with complete provenance; repeated unverified occurrences not grouped; distinct discovery gaps, missing-field reporting, classification and detail status; read-only old-checkpoint reopen; no provider requests or live demonstration.
+- Assert exact v1 library/CLI baseline/default, explicit v2-only opt-in and parser rejection; deterministic fresh-process partial/recovery export; verified fixture grouping with complete provenance; repeated unverified occurrences not grouped; observationId detail association/status mapping; distinct stored-field status/classification with inherited gap overlap; read-only old-checkpoint reopen/resume without replay; no provider detail request or live demonstration.
