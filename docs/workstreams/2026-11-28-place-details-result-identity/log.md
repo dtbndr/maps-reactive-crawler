@@ -3,6 +3,8 @@
 Opt-ins: playback=on, external review=on
 Isolation: branch — branch ws/place-details-result-identity
 Pre-flight: clean
+Final verification (at 222a7e1): fresh `mise exec -- npm run build`, `mise exec -- npm run check` (490/490), and `git diff --check` passed. README and happy-path v1/v2, stored-field, identity, gap, detail-state and coverage language checked for consistency.
+Smoke: skipped (agent-verified)
 
 ## Slice C implementation evidence
 
