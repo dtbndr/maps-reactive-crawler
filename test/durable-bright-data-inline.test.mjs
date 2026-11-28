@@ -9,6 +9,7 @@ import { runSyntheticBrightData } from '../dist/durable-bright-data-submission.j
 
 for (const [label, body, outcome] of [
  ['complete', [{name:'One', place_id:'p1', lat:51, lon:-1}], 'nonempty'],
+ ['duplicate occurrences', [{name:'Repeated', place_id:'same'}, {name:'Repeated', place_id:'same'}], 'nonempty'],
  ['empty', [], 'empty'],
  ['capped', [{name:'One', place_id:'p1'}, {name:'Two', place_id:'p2'}], 'partial'],
  ['mixed', [{name:'One', place_id:'p1'}, {error:'synthetic'}], 'partial'],
@@ -29,7 +30,11 @@ for (const [label, body, outcome] of [
   if (outcome === 'nonempty') assert.ok(s.queue.length > 0);
   else { assert.deepEqual(s.queue,[]); if (outcome !== 'empty') assert.ok(s.gaps.some(g=>g.status==='unresolved')); }
   for (const c of s.candidates) { assert.equal(c.sourceCell,'0,0'); assert.equal(c.attemptId,s.attempts[0].id); assert.ok(s.detailWork.some(w=>w.observationIds.includes(c.observationId))); }
-  if (outcome !== 'parked' && outcome !== 'empty') assert.ok(s.candidates.some(c=>c.id==='p1'));
+  if (label === 'duplicate occurrences') {
+   assert.deepEqual(s.candidates.map(c => [c.id, c.name, c.occurrence]), [['same', 'Repeated', 1], ['same', 'Repeated', 2]]);
+   assert.notEqual(s.candidates[0].observationId, s.candidates[1].observationId);
+  }
+  if (outcome !== 'parked' && outcome !== 'empty' && label !== 'duplicate occurrences') assert.ok(s.candidates.some(c=>c.id==='p1'));
   if (outcome === 'parked') { await runSyntheticBrightData(state,transport,bounds()); assert.equal(sends,1); }
  } finally { state?.close(); rmSync(dir,{recursive:true,force:true}); }
 });

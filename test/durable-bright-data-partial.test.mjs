@@ -30,9 +30,14 @@ for (const [label, records] of [
     assert.deepEqual(s.queue, []); assert.equal(s.admitted.length, 1);
     assert.ok(s.gaps.some(g => g.cause === 'partial' && g.status === 'unresolved'));
     assert.deepEqual(s.candidates.map(c => [c.id, c.name]), records.filter(r => r.place_id).map(r => [r.place_id, r.name]));
-    for (const c of s.candidates) {
-      assert.equal(c.sourceCell, '0,0'); assert.equal(c.attemptId, s.attempts[0].id);
-      assert.ok(s.detailWork.some(w => w.observationIds.includes(c.observationId)));
+    assert.deepEqual(s.candidates.map(c => c.occurrence), records.filter(r => r.place_id).map((_, index) => index + 1));
+    for (const [index, c] of s.candidates.entries()) {
+      const record = records.filter(r => r.place_id)[index];
+      assert.deepEqual(c.coordinate, record.lat === undefined ? undefined : { latitude: record.lat, longitude: record.lon });
+      assert.equal(c.sourceCell, '0,0');
+      assert.equal(c.attemptId, s.attempts[0].id);
+      assert.equal(c.observationId, `${s.attempts[0].id}:observation:${index + 1}`);
+      assert.ok(s.detailWork.some(w => w.status === 'pending' && w.observationIds.includes(c.observationId)));
     }
   } finally { state?.close(); rmSync(dir, { recursive: true, force: true }); }
 });

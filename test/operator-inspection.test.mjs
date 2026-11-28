@@ -77,13 +77,20 @@ test('CLI emits successful status and export documents for an existing checkpoin
       discoveryGaps: [], detailGaps: [], pendingDetails: [],
       coverage: { cellCenterEligibility: true, returnedPlacesFiltered: false, exhaustive: false, detailComplete: false },
     };
+    const expectedExport = { version: 1, status: expectedStatus, verifiedPlaces: [], unverifiedObservations: [] };
+    const libraryExport = operator.exportResults({ checkpoint });
+    assert.deepEqual(libraryExport, expectedExport);
+    assert.equal(libraryExport.version, 1);
     for (const command of ['status', 'export']) {
       const result = spawnSync(process.execPath, [new URL(cli).pathname, command, '--checkpoint', checkpoint], { encoding: 'utf8' });
       assert.equal(result.status, 0, result.stderr);
       assert.equal(result.stderr, '');
       const document = JSON.parse(result.stdout);
       if (command === 'status') assert.deepEqual(document, expectedStatus);
-      else assert.deepEqual(document, { version: 1, status: expectedStatus, verifiedPlaces: [], unverifiedObservations: [] });
+      else {
+        assert.deepEqual(document, expectedExport);
+        assert.equal(result.stdout, `${JSON.stringify(expectedExport)}\n`);
+      }
     }
   } finally { rmSync(directory, { recursive: true, force: true }); }
 });

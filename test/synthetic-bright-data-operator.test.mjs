@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
 import { runSyntheticOperator } from '../dist/synthetic-bright-data-operator.js';
 import { status, exportResults } from '../dist/operator.js';
 
@@ -23,7 +24,14 @@ test('synthetic operator connects bounded expansion and local inspection, reject
   assert.equal(result.command, 'start'); assert.equal(requests.length, 2);
   assert.equal(requests[0].lat, 51); assert.notEqual(requests[1].lat, 51);
   assert.equal(status({ checkpoint }).counters.submissions, 2);
-  assert.equal(exportResults({ checkpoint }).unverifiedObservations[0].id, 'one');
+  const durable = new DatabaseSync(checkpoint, { readOnly: true });
+  try {
+   const persisted = JSON.parse(durable.prepare('SELECT payload FROM traversal WHERE id=1').get().payload);
+   assert.deepEqual(persisted.candidates.map(candidate => [candidate.id, candidate.name]), [['one', 'Synthetic']]);
+  } finally { durable.close(); }
+  const v1 = exportResults({ checkpoint });
+  assert.equal(v1.unverifiedObservations[0].id, 'one');
+  assert.equal('name' in v1.unverifiedObservations[0], false);
   const before = exportResults({ checkpoint });
   await assert.rejects(runSyntheticOperator('resume', { checkpoint, geometry, binding: { ...binding, keyword: 'other' }, bounds: bounds() }, transport));
   assert.equal(requests.length, 2); assert.deepEqual(exportResults({ checkpoint }), before);
