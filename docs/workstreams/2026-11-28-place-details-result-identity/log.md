@@ -5,6 +5,9 @@ Isolation: branch — branch ws/place-details-result-identity
 Pre-flight: clean
 Final verification (at 222a7e1): fresh `mise exec -- npm run build`, `mise exec -- npm run check` (490/490), and `git diff --check` passed. README and happy-path v1/v2, stored-field, identity, gap, detail-state and coverage language checked for consistency.
 Smoke: skipped (agent-verified)
+Final verification after documentation fixes (at 5bcadc5): fresh build, `mise exec -- npm run check` (490/490), and `git diff --check` passed; documentation consistency reviewed.
+P2/P3: four deferred findings — owner-liveness test coverage; optional-format forwarded return typing; operator/projection import cycle; milestone detail-contract dependency wording. GitHub issue creation awaits publication approval.
+Final review: clean (at 5bcadc5)
 
 ## Slice C implementation evidence
 

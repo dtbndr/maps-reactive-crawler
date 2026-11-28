@@ -1,7 +1,7 @@
 # Place Details and Result Identity Workstream Brief
 
 **Date**: 2026-11-28
-**Status**: Planned
+**Status**: Done
 
 ## Why
 The v1 export omits mapped names even though current direct-provider paths pass names through traversal into durable observations. Pending detail work is not executed. This work makes useful records and the limits of identity, coverage and detail state explicit without assuming a provider details contract.
