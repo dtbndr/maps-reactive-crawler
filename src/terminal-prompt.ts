@@ -8,7 +8,7 @@ import os, sys, termios
 try:
     if not os.isatty(0) or not os.isatty(1):
         sys.exit(1)
-    sys.stdout.write(sys.argv[1] + '\nConfirm? Only yes confirms.\n')
+    sys.stdout.write(sys.argv[1] + '\nConfirm the displayed seed and provider action.\nConfirm? Only yes confirms.\n')
     sys.stdout.flush()
     termios.tcflush(0, termios.TCIFLUSH)
     sys.stdout.write('READY: Type yes and press Enter: ')

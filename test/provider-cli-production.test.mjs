@@ -24,7 +24,9 @@ test('actual CLI affirmative start executes only downstream synthetic fetch', ()
   const args=['dist/cli.js','start','--provider','bright-data','--checkpoint',checkpoint,'--evidence',evidence,'--account','synthetic','--dataset',invocation.dataset,'--zoom','15','--limit-per-input','20','--keyword','pizza','--country','GB','--lat','1','--lon','2','--spacing-m','500','--radius-m','1000','--cells','4','--submissions','3','--active-ms','10000'];
   const env={...process.env,BRIGHT_DATA_API_KEY:'synthetic-key',SYNTHETIC_CALLS:calls,NODE_OPTIONS:'--import ./test/helpers/provider-fetch-preload.mjs'};
   const pty=spawnSync('/usr/bin/python3',['test/helpers/provider-cli-pty.py','yes-success',process.execPath,...args],{encoding:'utf8',timeout:15000,env});
-  assert.equal(pty.status,0,pty.stderr+pty.stdout); assert.ok(existsSync(checkpoint));
+  assert.equal(pty.status,0,pty.stderr+pty.stdout);
+  assert.match(pty.stdout, /Confirm the displayed seed and provider action/);
+  assert.ok(existsSync(checkpoint));
   const requests=readFileSync(calls,'utf8').trim().split('\n').map(JSON.parse);
   assert.equal(requests.length,1); assert.match(requests[0].url,/dataset_id=gd_m8ebnr0q2qlklc02fz/);
   assert.equal(requests[0].body.input[0].zoom_level,invocation.zoom); assert.equal(requests[0].body.limit_per_input,invocation.limitPerInput);
