@@ -53,3 +53,11 @@ test('identification is required', () => {
   assert.throws(() => createNominatimResolver({...config('https://example.invalid/search', harness().transport), identification: '  '}));
   assert.doesNotThrow(() => createNominatimResolver(config('https://example.invalid/search', harness().transport)));
 });
+test('unassigned country never reaches Search transport', async () => {
+  const h = harness([]);
+  const resolver = createNominatimResolver(config('https://example.invalid/search', h.transport));
+  await assert.rejects(resolver('Paris', 'ZZ'));
+  assert.equal(h.calls.length, 0);
+  assert.deepEqual((await resolver('Paris', 'FR')).candidates, []);
+  assert.equal(h.calls.length, 1);
+});

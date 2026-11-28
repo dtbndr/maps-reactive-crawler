@@ -1,3 +1,4 @@
+import { isAssignedIsoCountry } from './iso-country.js';
 import type { LocationCandidate, LocationResolver } from './location-input.js';
 
 type Transport = (url: string, options: { headers: Record<string, string> }) => Promise<{ ok: boolean; status: number; json(): Promise<unknown> }>;
@@ -7,7 +8,7 @@ export function createNominatimResolver(config: { endpoint: string; identificati
   if (!['http:', 'https:'].includes(endpoint.protocol) || endpoint.username || endpoint.password || endpoint.search || endpoint.hash) throw new Error('Invalid Search endpoint');
   if (!config.identification.trim()) throw new Error('Identification required');
   return async (query, country) => {
-    if (!query.trim() || !/^[A-Z]{2}$/.test(country)) throw new Error('Explicit query and country required');
+    if (!query.trim() || !isAssignedIsoCountry(country)) throw new Error('Explicit query and country required');
     const url = new URL(endpoint);
     url.searchParams.set('q', query);
     url.searchParams.set('countrycodes', country.toLowerCase());

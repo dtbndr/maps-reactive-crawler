@@ -35,3 +35,37 @@ No provider-backed CLI exposure; B1 cache, serialized 1.1-second spacing includi
 Slice B: RED gap: endpoint switching, request fields, attribution, structured country and error variants — rung 2 tried: detached 4ac62ca, restored implementation to compiling stub, mise exec -- node --test test/nominatim-search.test.mjs → grouped assertions masked later cases and country test TypeError — why it fails: cannot isolate entangled test assertions — worker-attested: grouped pre-edit RED, no individual failures — GREEN at 4ac62ca
 
 Reconstruction details: `evidence-B-reconstruction.md` in local workspace; reconstructed explicit invocation, malformed response and blank identification failures are fresh evidence, not historical RED. Coverage remains subject to review.
+
+## Fix round 1 — assigned ISO country validation
+
+P1 fixed at `ce8e93d`: both the location handoff and Search adapter now reject countries outside a shared set of the 249 assigned ISO 3166-1 alpha-2 codes before invoking their resolver or transport. Existing uppercase input and lower-to-upper candidate normalization remain unchanged. The input check also prevents an endpoint's `zz` country evidence from being accepted for requested `ZZ`. P2 non-decimal coordinate parsing is intentionally untouched.
+
+Ruling: a local, explicit assigned-code set avoids network access and runtime locale-specific treatment of reserved codes. Cost if wrong: outdated ISO assignments can cause false acceptance/rejection, so future ISO assignment changes require updating the set.
+
+Behavioral RED, before implementation edits, after adding both tests:
+
+```sh
+mise exec -- npm run build >/tmp/slice-b-fix-red-build.log 2>&1 && mise exec -- node --test test/location-input.test.mjs test/nominatim-search.test.mjs >/tmp/slice-b-fix-red.log 2>&1
+```
+
+Exit 1. Raw excerpts (both tests ran independently):
+
+```text
+✖ rejects unassigned country before invoking resolver
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  1 !== 0
+
+✖ unassigned country never reaches Search transport
+  AssertionError [ERR_ASSERTION]: Missing expected rejection.
+```
+
+The first negative test's resolver happened to reject downstream on candidate mismatch after being invoked; its separate count assertion caught the dispatch. Each test also includes an assigned `FR` positive control exercising the same resolver or transport. The RED failure stops before those positive controls, which execute in GREEN.
+
+GREEN:
+
+```sh
+mise exec -- npm run build >/tmp/slice-b-fix-green-build.log 2>&1 && mise exec -- node --test test/location-input.test.mjs test/nominatim-search.test.mjs >/tmp/slice-b-fix-green.log 2>&1
+mise exec -- npm run check >/tmp/slice-b-fix-check.log 2>&1
+```
+
+Both exit 0: focused 19 passed, 0 failed; full check 511 passed, 0 failed, plus typecheck and build. A local enumeration of the set returned 249 entries. No network or provider access was made in this fix round.

@@ -1,8 +1,10 @@
+import { isAssignedIsoCountry } from './iso-country.js';
+
 export type LocationCandidate = { label: string; country: string; latitude: number; longitude: number };
 export type LocationResolver = (query: string, country: string) => Promise<{ candidates: LocationCandidate[]; attribution: string }>;
 export type LocationSelection = (display: string, candidates: LocationCandidate[]) => Promise<number | null>;
 export async function resolveLocation(query: string, country: string, resolver: LocationResolver, select: LocationSelection): Promise<{country: string; latitude: number; longitude: number}> {
-  if (!country || !/^[A-Z]{2}$/.test(country)) throw new Error('Explicit two-letter uppercase country required');
+  if (!isAssignedIsoCountry(country)) throw new Error('Explicit assigned ISO two-letter uppercase country required');
   if (!query.trim()) throw new Error('Location text required');
   let result: Awaited<ReturnType<LocationResolver>>;
   try { result = await resolver(query, country); } catch { throw new Error('Location resolver failed'); }

@@ -42,3 +42,11 @@ test('real terminal identifies selected candidate before affirmative prompt', as
  const {mkdtempSync,writeFileSync,rmSync}=await import('node:fs'); const {tmpdir}=await import('node:os'); const {join}=await import('node:path'); const {spawnSync}=await import('node:child_process'); const dir=mkdtempSync(join(tmpdir(),'location-confirm-'));
  try {const fixture=join(dir,'fixture.json'); writeFileSync(fixture,JSON.stringify({candidates:[candidate],attribution:'Synthetic'})); const p=spawnSync('/usr/bin/python3',['test/helpers/location-cli-pty.py','single',process.execPath,'dist/cli.js','location','--text','place','--country','GB','--fixture',fixture],{encoding:'utf8',timeout:15000}); assert.equal(p.status,0,p.stdout); assert.match(p.stdout,/Selected candidate: Synthetic place \| GB \| 51\.12345678901234, -0\.123456789012345\r?\nConfirm/); } finally {rmSync(dir,{recursive:true,force:true})}
 });
+test('rejects unassigned country before invoking resolver', async () => {
+  let calls = 0;
+  const resolver = async () => { calls++; return { candidates: [{label: 'Paris', country: 'FR', latitude: 48.85, longitude: 2.35}], attribution: 'OSM' }; };
+  await assert.rejects(resolveLocation('Paris', 'ZZ', resolver, async () => 0));
+  assert.equal(calls, 0);
+  assert.deepEqual(await resolveLocation('Paris', 'FR', resolver, async () => 0), {country: 'FR', latitude: 48.85, longitude: 2.35});
+  assert.equal(calls, 1);
+});
