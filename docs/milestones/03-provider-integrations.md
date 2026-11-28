@@ -22,9 +22,11 @@ Use synthetic integration tests for submission, polling, bounded failure handlin
 
 ### Workstream 2 — Place details and result identity
 
+Status: complete for synthetic discovery attribution and export; live provider behavior and detail execution remain unvalidated. See the [workstream brief](../workstreams/2026-11-28-place-details-result-identity/brief.md).
+
 Connect synthetic discovery response attribution and export, preserving provenance and distinguishing verified identity, missing fields and unresolved detail gaps. This output work does not execute detail requests; detail request admission and recovery remain separate future work requiring a verified contract. Synthetic acceptance includes recovery and partial outcomes, not a live demonstration. Before any later live demonstration, reassess GitHub #4 and #5 and applicable contract, rights and pricing evidence.
 
-**Depends on:** Workstream 1 and verified discovery/detail contracts. **Outcome:** useful deduplicated place output with provenance in credential-free integration tests, or a documented blocker if neither verified route supports it. Candidate URLs alone are not place records. **Risk:** provider identifiers, coordinates and completeness remain unverified; do not claim strict returned-place filtering or exhaustive coverage.
+**Depends on:** Workstream 1 and synthetic discovery fixtures for the completed export. Future detail request admission and recovery require a verified detail contract and are separate from response attribution and export. **Outcome:** deduplicated fixture-verified place output with provenance in credential-free integration tests. Candidate URLs alone are not place records. **Risk:** live provider identifiers, coordinates and completeness remain unverified; do not claim strict returned-place filtering or exhaustive coverage.
 
 ### Workstream 3 — Location input and live acceptance
 
