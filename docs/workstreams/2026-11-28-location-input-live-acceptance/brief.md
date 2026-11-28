@@ -8,7 +8,7 @@ An operator needs to turn an intentional location into a bounded crawl without g
 
 ## Happy path and acceptance boundary
 - Require a country for text, show candidates and confirm the chosen result even if only one; explicitly confirm coordinates as an alternative. Resolve the seed before checkpoint or dispatch.
-- Connected synthetic acceptance proves the selected seed reaches the bounded crawler, fresh-process resume uses the stored seed without geocoding or resubmission, and stops and coverage limitations are visible.
+- Connected synthetic acceptance proves the selected seed reaches the bounded crawler, fresh-process resume uses the stored seed without geocoding or duplicate dispatch of previously submitted work, and stops and coverage limitations are visible.
 - Milestone outcome: a separately approved bounded live demo **or** documented blockers. Synthetic evidence does not establish live identity, details, completeness or coverage.
 - Boundary: this brief authorizes planning only; approval of it does not authorize implementation, secrets, live or paid calls, publication or account actions.
 
@@ -24,7 +24,7 @@ An operator needs to turn an intentional location into a bounded crawl without g
 - Before a live demo, do current #4/#5, provider contracts, data rights, pricing and bounded cost/work limits permit it? Otherwise document the blocker.
 
 ## Final smoke checks
-- Only after separate authorization, run a bounded live demo with an approved uncertain-cost statement and work/stop limits, or document why it is blocked; reassess #4/#5 and current contracts, rights and pricing first.
+- Only after separate authorization, run a bounded live demo after providing a pre-spend estimate (including inability to bound cost) and obtaining approval of uncertain cost and work/stop limits; record actual cost and limitations in the milestone, or document why it is blocked; reassess #4/#5 and current contracts, rights and pricing first.
 
 ## Pointers
 - Slices (agents only): [slices.md](slices.md)
