@@ -29,3 +29,9 @@ GREEN: `mise exec -- npm run build && mise exec -- node --test test/nominatim-se
 ## Remaining gates
 
 No provider-backed CLI exposure; B1 cache, serialized 1.1-second spacing including retries, cross-process coordination, operator policy and selected-service rights remain unverified. No live-provider behavior is established. RED evidence is grouped rather than isolated for every requirement.
+
+## Controller RED gap record
+
+Slice B: RED gap: endpoint switching, request fields, attribution, structured country and error variants — rung 2 tried: detached 4ac62ca, restored implementation to compiling stub, mise exec -- node --test test/nominatim-search.test.mjs → grouped assertions masked later cases and country test TypeError — why it fails: cannot isolate entangled test assertions — worker-attested: grouped pre-edit RED, no individual failures — GREEN at 4ac62ca
+
+Reconstruction details: `evidence-B-reconstruction.md` in local workspace; reconstructed explicit invocation, malformed response and blank identification failures are fresh evidence, not historical RED. Coverage remains subject to review.
