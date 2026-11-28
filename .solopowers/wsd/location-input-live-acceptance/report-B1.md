@@ -118,3 +118,11 @@ test at test/location-cache.test.mjs:52:1
 ```
 
 Post-edit `mise exec -- npm run build >/dev/null && node --test test/location-cache.test.mjs`: 4 tests passed, 0 failed (including the concurrent-process test). Full `mise exec -- npm run check`: typecheck, all 522 tests, and build passed. These results validate only the partial work described above, not full B1.
+
+## Guarded resolver assembly (base 20dffa9)
+
+Added an internal-only cache/Nominatim/attempt-coordinator assembly. The transport contract is exactly one request, redirects disabled, and response body fully received or terminated before transport settlement. Operator retries are separate guarded invocations; no retry policy or production transport is introduced. The 30-second caller timeout aborts where supported but keeps the attempt lock until the underlying operation settles. See `docs/guarded-location-resolver.md` for ordering, crash/clock recovery, and limitations. No CLI or live provider calls were added.
+
+RED command (after adding a compiling stub and five initial synthetic/process tests, before assembly implementation): `mise exec -- npm run build && mise exec -- node --test test/guarded-location-resolver.test.mjs`. Actual excerpt: `tests 5`, `fail 5`, `Error: Not implemented`. This establishes missing assembly only; it does **not** independently establish behavioral RED per contract because all cases failed at the stub. The timeout, actual crash, and fresh-process clock tests were added after implementation, so no pre-edit RED was captured for those. This is a residual TDD evidence gap, not a claim of per-contract RED.
+
+Focused command: `mise exec -- npm run build && mise exec -- node --test test/guarded-location-resolver.test.mjs`. Actual excerpt before the final fresh-process clock test: `tests 7`, `pass 7`, `fail 0`. Full command: `mise exec -- npm run check`. Actual excerpt after all tests: `tests 530`, `pass 530`, `fail 0`; build passed. All transports were synthetic; no credentials, live requests, paid activity, publication or external changes.
