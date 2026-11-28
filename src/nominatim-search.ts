@@ -3,6 +3,12 @@ import type { LocationCandidate, LocationResolver } from './location-input.js';
 
 type Transport = (url: string, options: { headers: Record<string, string> }) => Promise<{ ok: boolean; status: number; json(): Promise<unknown> }>;
 
+export class LocationSearchRefusal extends Error {
+  constructor(readonly status: 403 | 429) {
+    super(status === 429 ? 'Location search HTTP 429: throttled' : 'Location search HTTP 403: denied');
+  }
+}
+
 export function createNominatimResolver(config: { endpoint: string; identification: string; transport: Transport }): LocationResolver {
   const endpoint = new URL(config.endpoint);
   if (!['http:', 'https:'].includes(endpoint.protocol) || endpoint.username || endpoint.password || endpoint.search || endpoint.hash) throw new Error('Invalid Search endpoint');
@@ -10,12 +16,15 @@ export function createNominatimResolver(config: { endpoint: string; identificati
   return async (query, country) => {
     if (!query.trim() || !isAssignedIsoCountry(country)) throw new Error('Explicit query and country required');
     const url = new URL(endpoint);
-    url.searchParams.set('q', query);
+    url.searchParams.set('q', query.trim());
     url.searchParams.set('countrycodes', country.toLowerCase());
     url.searchParams.set('format', 'jsonv2');
     url.searchParams.set('addressdetails', '1');
     const response = await config.transport(url.toString(), { headers: { 'User-Agent': config.identification } });
-    if (!response.ok) throw new Error('Search request failed');
+    if (!response.ok) {
+      if (response.status === 403 || response.status === 429) throw new LocationSearchRefusal(response.status);
+      throw new Error('Search request failed');
+    }
     const body = await response.json();
     if (!Array.isArray(body)) throw new Error('Invalid Search response');
     const candidates: LocationCandidate[] = body.map((value: unknown) => {

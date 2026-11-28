@@ -163,3 +163,150 @@ GREEN command: `mise exec -- node --test test/guarded-lifecycle.test.mjs test/gu
 Slice B1: RED gap: individual guarded assembly timeout, crash, clock, lifecycle and CLI contract assertions — rung 2 tried: detached 61c2d60 restoring a1f14d4 implementation with compiling pass-through stubs; mise exec -- node --test --test-timeout=12000 per focused test file → masked assertions, errors and timeouts alongside some assertion failures — why it fails: cannot isolate entangled tests — worker-attested: generic Not implemented and post-implementation tests are not historical RED — GREEN at 61c2d60
 
 One retrospective reconstruction, detailed in local evidence-B1-reconstruction.md, is fresh evidence only; generic errors, masking and timeouts are not behavioral RED. Tests remain subject to review on their merits.
+
+## Round 1: refusal classification and query normalization
+
+All RED runs below are expected pre-implementation behavioral failures; the positive controls passed before the implementation edits. Historical controller records above remain unchanged. Tests use only synthetic loopback requests.
+
+### 429 RED
+
+`mise exec -- npm run build >/dev/null && mise exec -- node --test --test-name-pattern='CLI reports safe' test/location-cli-live.test.mjs > /tmp/b1-status-red.log 2>&1`
+
+```text
+✖ CLI reports safe 429 and 403 classifications without caching or retrying failures (1251.021458ms)
+ℹ tests 1
+ℹ suites 0
+ℹ pass 0
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 1325.0955
+
+✖ failing tests:
+
+test at test/location-cli-live.test.mjs:56:1
+✖ CLI reports safe 429 and 403 classifications without caching or retrying failures (1251.021458ms)
+  AssertionError [ERR_ASSERTION]: The input did not match the regular expression /429.*throttl/i. Input:
+  
+  'Location resolver failed\r\n'
+  
+      at TestContext.<anonymous> (file:///Users/dtbndr/Development/node-ws/maps-reactive-crawler/test/location-cli-live.test.mjs:66:16)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:387:3) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 'Location resolver failed\r\n',
+    expected: /429.*throttl/i,
+    operator: 'match',
+    diff: 'simple'
+  }
+```
+
+### 403 RED
+
+`mise exec -- node --test --test-name-pattern='CLI reports safe 403' test/location-cli-live.test.mjs > /tmp/b1-403-red.log 2>&1`
+
+```text
+✖ CLI reports safe 403 classification without caching or retrying failures (1241.379125ms)
+ℹ tests 1
+ℹ suites 0
+ℹ pass 0
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 1316.866833
+
+✖ failing tests:
+
+test at test/location-cli-live.test.mjs:56:121
+✖ CLI reports safe 403 classification without caching or retrying failures (1241.379125ms)
+  AssertionError [ERR_ASSERTION]: The input did not match the regular expression /403.*deni/i. Input:
+  
+  'Location resolver failed\r\n'
+  
+      at TestContext.<anonymous> (file:///Users/dtbndr/Development/node-ws/maps-reactive-crawler/test/location-cli-live.test.mjs:64:16)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:387:3) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 'Location resolver failed\r\n',
+    expected: /403.*deni/i,
+    operator: 'match',
+    diff: 'simple'
+  }
+```
+
+### Normalization RED
+
+`mise exec -- node --test --test-name-pattern='trimmed query' test/location-cli-live.test.mjs > /tmp/b1-trim-red.log 2>&1`
+
+```text
+✖ trimmed query reuses cache across processes while distinct inputs remain distinct (6652.696ms)
+ℹ tests 1
+ℹ suites 0
+ℹ pass 0
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 6728.2675
+
+✖ failing tests:
+
+test at test/location-cli-live.test.mjs:73:1
+✖ trimmed query reuses cache across processes while distinct inputs remain distinct (6652.696ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:
+  + actual - expected
+  
+    [
+      [
+        '/search',
+  +     '  synthetic place  ',
+  +     'gb'
+  +   ],
+  +   [
+  +     '/search',
+        'synthetic place',
+        'gb'
+      ],
+      [
+        '/search',
+  
+      at TestContext.<anonymous> (file:///Users/dtbndr/Development/node-ws/maps-reactive-crawler/test/location-cli-live.test.mjs:83:12)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:387:3) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: [ [ '/search', '  synthetic place  ', 'gb' ], [ '/search', 'synthetic place', 'gb' ], [ '/search', 'synthetic  place', 'gb' ], [ '/other', 'synthetic place', 'gb' ], [ '/search', 'synthetic place', 'us' ] ],
+    expected: [ [ '/search', 'synthetic place', 'gb' ], [ '/search', 'synthetic  place', 'gb' ], [ '/other', 'synthetic place', 'gb' ], [ '/search', 'synthetic place', 'us' ] ],
+    operator: 'deepStrictEqual',
+    diff: 'simple'
+  }
+```
+
+### Positive controls
+
+`mise exec -- node --test --test-name-pattern='CLI reports safe 500|configured standalone location' test/location-cli-live.test.mjs > /tmp/b1-controls.log 2>&1`
+
+```text
+✔ configured standalone location uses one loopback request then cache across processes (1547.746917ms)
+✔ CLI reports safe 500 classification without caching or retrying failures (2461.120084ms)
+ℹ tests 2
+ℹ suites 0
+ℹ pass 2
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 4092.1275
+```
+
+### GREEN
+
+- `mise exec -- npm run build >/dev/null && mise exec -- node --test test/location-cli-live.test.mjs test/location-input.test.mjs test/location-cache.test.mjs test/guarded-location-resolver.test.mjs test/nominatim-search.test.mjs > /tmp/b1-r1-green.log 2>&1` — 38 passed.
+- `mise exec -- npm run check > /tmp/b1-r1-check.log 2>&1` — typecheck, 542 tests, and build passed.
