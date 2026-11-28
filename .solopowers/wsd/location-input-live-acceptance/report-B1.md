@@ -75,3 +75,46 @@ The malformed timing assertion failed before the future-clock case was reached. 
 ### GREEN
 
 `mise exec -- node --test test/transport-attempt.test.mjs`: 7 passed, 0 failed. `mise exec -- npm run check`: typecheck succeeded, 521 tests passed, 0 failed, build succeeded. Synthetic attempts and local subprocesses only. Review remains required; this wrapper has not been integrated with the cache or resolver.
+
+## Continuation at 5269ca3: partial cache exclusion, B1 still blocked
+
+Added a synthetic independent-process same-key miss test. Before the source edit, `mise exec -- npm run build && node --test --test-name-pattern='concurrent processes reuse' test/location-cache.test.mjs` failed with `2 !== 1`: both child processes invoked the synthetic resolver. After adding per-key filesystem exclusion around lookup, resolver and cache write, `mise exec -- npm run build && node --test test/location-cache.test.mjs` passed 4/4 tests, including the independent-process test. `mise exec -- npm run check` passed 522/522 tests and build.
+
+This is not full B1: the transport coordinator is not integrated with the adapter or retries, provider-backed CLI is not exposed, and recovery/clock regression/restart/CLI integration acceptance tests and operator documentation remain outstanding. The added per-key lock is deliberately separate from the transport lock; lock ordering, crash recovery, and interaction under long requests need explicit verification before integration. No live calls were made. No completion commit was created for this partial work.
+
+### Exact continuation RED and GREEN evidence
+
+Pre-edit command: `mise exec -- npm run build >/dev/null && node --test --test-name-pattern='concurrent processes reuse' test/location-cache.test.mjs` (exit 1):
+
+```text
+✖ concurrent processes reuse a single same-key cache miss (358.258333ms)
+ℹ tests 1
+ℹ suites 0
+ℹ pass 0
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 423.589459
+
+✖ failing tests:
+
+test at test/location-cache.test.mjs:52:1
+✖ concurrent processes reuse a single same-key cache miss (358.258333ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+
+  2 !== 1
+
+      at TestContext.<anonymous> (file:///Users/dtbndr/Development/node-ws/maps-reactive-crawler/test/location-cache.test.mjs:75:10)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:387:3) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 2,
+    expected: 1,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+```
+
+Post-edit `mise exec -- npm run build >/dev/null && node --test test/location-cache.test.mjs`: 4 tests passed, 0 failed (including the concurrent-process test). Full `mise exec -- npm run check`: typecheck, all 522 tests, and build passed. These results validate only the partial work described above, not full B1.

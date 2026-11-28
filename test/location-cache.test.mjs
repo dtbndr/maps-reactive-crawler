@@ -48,3 +48,29 @@ test('cache persists only validated candidate fields and attribution', async (t)
   const serialized = await readFile(join(f.directory, files[0]), 'utf8');
   assert.doesNotMatch(serialized, /not retained/); assert.match(serialized, /Synthetic attribution/);
 });
+
+test('concurrent processes reuse a single same-key cache miss', async (t) => {
+  const f = await fixture(t);
+  const { spawn } = await import('node:child_process');
+  const { pathToFileURL } = await import('node:url');
+  const moduleUrl = pathToFileURL(join(process.cwd(), 'dist/location-cache.js')).href;
+  const script = `
+    import { appendFile } from 'node:fs/promises';
+    import { createCachedLocationResolver } from ${JSON.stringify(moduleUrl)};
+    const directory = process.argv[1];
+    const resolver = createCachedLocationResolver({ directory, endpoint: 'https://one.invalid/search', resolver: async () => {
+      await appendFile(process.argv[2], 'request\\n');
+      await new Promise(resolve => setTimeout(resolve, 300));
+      return { candidates: [], attribution: 'Synthetic attribution' };
+    }});
+    await resolver('same-key', 'FR');
+  `;
+  const requests = join(f.directory, 'requests.log');
+  const run = () => new Promise((resolve, reject) => {
+    const child = spawn(process.execPath, ['--input-type=module', '-e', script, f.directory, requests], { stdio: ['ignore', 'ignore', 'pipe'] });
+    let stderr = ''; child.stderr.on('data', (chunk) => { stderr += chunk; });
+    child.on('error', reject); child.on('exit', (code) => code === 0 ? resolve() : reject(new Error(stderr)));
+  });
+  await Promise.all([run(), run()]);
+  assert.equal((await readFile(requests, 'utf8')).trim().split('\n').length, 1);
+});

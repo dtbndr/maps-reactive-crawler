@@ -1,10 +1,12 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
+import { performance } from 'node:perf_hooks';
+import { setTimeout as sleep } from 'node:timers/promises';
 import { isAssignedIsoCountry } from './iso-country.js';
 import type { LocationCandidate, LocationResolver } from './location-input.js';
 
-// Internal persistence only: callers must add cross-process request coordination before use.
+// Internal persistence only: callers must coordinate each transport attempt separately.
 export function createCachedLocationResolver(config: { directory: string; endpoint: string; resolver: LocationResolver }): LocationResolver {
   const endpoint = new URL(config.endpoint);
   if (!['http:', 'https:'].includes(endpoint.protocol) || endpoint.username || endpoint.password || endpoint.search || endpoint.hash) throw new Error('Invalid Search endpoint');
@@ -12,19 +14,30 @@ export function createCachedLocationResolver(config: { directory: string; endpoi
     if (!query.trim() || !isAssignedIsoCountry(country)) throw new Error('Explicit query and country required');
     const key = createHash('sha256').update(JSON.stringify([endpoint.href, query, country])).digest('hex');
     const path = join(config.directory, `${key}.json`);
-    let text: string | undefined;
-    try { text = await readFile(path, 'utf8'); } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
-    }
-    if (text !== undefined) return validate(JSON.parse(text) as unknown, country);
-    const result = validate(await config.resolver(query, country), country);
     await mkdir(config.directory, { recursive: true, mode: 0o700 });
-    const temporary = join(config.directory, `.${key}.${randomUUID()}.tmp`);
+    const lock = join(config.directory, `${key}.lock`);
+    const deadline = performance.now() + 5000;
+    for (;;) {
+      try { await mkdir(lock, { mode: 0o700 }); break; } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
+        if (performance.now() >= deadline) throw new Error('Location cache lock is held; manual recovery may be required');
+        await sleep(25);
+      }
+    }
     try {
-      await writeFile(temporary, JSON.stringify(result), { mode: 0o600, flag: 'wx' });
-      await rename(temporary, path);
-    } finally { await rm(temporary, { force: true }); }
-    return result;
+      let text: string | undefined;
+      try { text = await readFile(path, 'utf8'); } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+      }
+      if (text !== undefined) return validate(JSON.parse(text) as unknown, country);
+      const result = validate(await config.resolver(query, country), country);
+      const temporary = join(config.directory, `.${key}.${randomUUID()}.tmp`);
+      try {
+        await writeFile(temporary, JSON.stringify(result), { mode: 0o600, flag: 'wx' });
+        await rename(temporary, path);
+      } finally { await rm(temporary, { force: true }); }
+      return result;
+    } finally { await rm(lock, { recursive: true }); }
   };
 }
 
