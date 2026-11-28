@@ -9,7 +9,13 @@ import { DurableState } from '../dist/durable-state.js';
 import { exportResults } from '../dist/operator.js';
 import { projectV2Checkpoint } from '../dist/operator-v2-projection-internal.js';
 
-function fixture(fn) {
+function fixture(fn, candidates = [
+  { id: 'same', name: 'First', coordinate: { latitude: 0, longitude: 0 }, verifiedCanonicalKey: 'place:a' },
+  { id: 'same', verifiedCanonicalKey: 'place:a' },
+  { id: 'same', name: 'Third', coordinate: null },
+  { id: 'same' },
+  { id: 'other', verifiedCanonicalKey: 'place:Z' },
+]) {
   const dir = mkdtempSync(join(tmpdir(), 'projection-'));
   const checkpoint = join(dir, 'state.db');
   try {
@@ -18,13 +24,7 @@ function fixture(fn) {
     state = reserveSubmission(admitNextCell(state), key);
     state = { ...state, attempts: state.attempts.map(a => ({ ...a, status: 'dispatched', knownId: 'synthetic' })) };
     state = observeKnownId(state, key, 'synthetic', 0);
-    state = applyDiscoveryResult(state, key, { status: 'success', candidates: [
-      { id: 'same', name: 'First', coordinate: { latitude: 0, longitude: 0 }, verifiedCanonicalKey: 'place:a' },
-      { id: 'same', verifiedCanonicalKey: 'place:a' },
-      { id: 'same', name: 'Third', coordinate: null },
-      { id: 'same' },
-      { id: 'other', verifiedCanonicalKey: 'place:Z' },
-    ] });
+    state = applyDiscoveryResult(state, key, { status: 'success', candidates });
     DurableState.createBound(checkpoint, 'a'.repeat(64), state);
     fn({ checkpoint, state });
   } finally { rmSync(dir, { recursive: true, force: true }); }
@@ -128,3 +128,30 @@ test('ordering follows code units independently of checkpoint order', () => fixt
   assert.deepEqual(result.unverifiedObservations.map(o => o.occurrence), [3, 4]);
   assert.deepEqual(projectV2Checkpoint({ checkpoint }), result);
 }));
+
+test('duplicate unverified candidate IDs use their own observation work status', () => fixture(({ checkpoint, state }) => {
+  const [first, second] = state.candidates.slice(2, 4);
+  assert.equal(first.id, second.id);
+  assert.notEqual(first.observationId, second.observationId);
+  const work = state.detailWork.find(item => item.observationIds.includes(second.observationId));
+  work.status = 'completed';
+  work.attempts = [{ id: `${work.id}:attempt:1`, status: 'completed', knownId: 'synthetic-detail' }];
+  state.submissions++; state.limits.submissions++;
+  const durable = DurableState.openBound(checkpoint, 'a'.repeat(64)); durable.writeTraversal(state); durable.close();
+  assert.deepEqual(projectV2Checkpoint({ checkpoint }).unverifiedObservations.map(({ observationId, detailState }) => ({ observationId, detailState })), [
+    { observationId: first.observationId, detailState: 'not_attempted' },
+    { observationId: second.observationId, detailState: 'completed' },
+  ]);
+}));
+
+test('both observation collections use lexical IDs rather than numeric ordinals', () => fixture(({ checkpoint, state }) => {
+  const result = projectV2Checkpoint({ checkpoint });
+  const verified = result.verifiedPlaces[0].observations;
+  const unverified = result.unverifiedObservations;
+  assert.deepEqual(verified.map(o => o.occurrence), [1, 11, 3, 5, 7, 9]);
+  assert.deepEqual(unverified.map(o => o.occurrence), [10, 12, 2, 4, 6, 8]);
+  assert.deepEqual(verified.map(o => o.observationId), [1, 11, 3, 5, 7, 9].map(n => state.candidates[n - 1].observationId));
+  assert.deepEqual(unverified.map(o => o.observationId), [10, 12, 2, 4, 6, 8].map(n => state.candidates[n - 1].observationId));
+}, Array.from({ length: 12 }, (_, index) => index % 2 === 0
+  ? { id: 'same', verifiedCanonicalKey: 'place:shared' }
+  : { id: 'same' })));
