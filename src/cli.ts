@@ -1,6 +1,7 @@
 import { pathToFileURL } from 'node:url';
 import { resolveLocation, type LocationResolver, type LocationSelection } from './location-input.js';
 import { selectLocationOnTerminal } from './location-terminal.js';
+import { createGuardedLocationResolver } from './guarded-location-resolver.js';
 import { readFileSync } from 'node:fs';
 import { previewProviderInvocation, previewProviderResume } from './provider-preview.js';
 import { terminalPrompt } from './terminal-prompt.js';
@@ -178,11 +179,18 @@ export async function runCli(args: string[], library: CliLibrary, io: CliIo, loc
       const values = new Map<string, string>();
       for (let i = 1; i < args.length; i += 2) {
         const flag = args[i]!; const value = args[i + 1];
-        if (!['--text', '--country', '--fixture'].includes(flag) || !value || value.startsWith('--') || values.has(flag)) throw new Error('Invalid location option');
+        if (!['--text', '--country', '--fixture', '--endpoint', '--cache', '--user-agent'].includes(flag) || !value || value.startsWith('--') || values.has(flag)) throw new Error('Invalid location option');
         values.set(flag, value);
       }
       if (!values.get('--country')) throw new Error('Missing required option --country');
       if (!values.get('--text')) throw new Error('Missing required option --text');
+      const liveFlags = ['--endpoint', '--cache', '--user-agent'];
+      const liveConfigured = liveFlags.some(flag => values.has(flag));
+      if (values.has('--fixture') && liveConfigured) throw new Error('Fixture and live configuration are exclusive');
+      if (liveConfigured && liveFlags.some(flag => !values.get(flag)?.trim())) throw new Error('Complete live configuration required: --endpoint, --cache and --user-agent');
+      if (!location && liveConfigured) {
+        location = { resolver: createGuardedLocationResolver({ endpoint: values.get('--endpoint')!, directory: values.get('--cache')!, identification: values.get('--user-agent')! }), select: selectLocationOnTerminal };
+      }
       if (!location && values.has('--fixture')) {
         const path = values.get('--fixture')!;
         location = { resolver: async () => JSON.parse(readFileSync(path, 'utf8')), select: selectLocationOnTerminal };

@@ -58,10 +58,9 @@ Contributions are welcome: see [CONTRIBUTING.md](CONTRIBUTING.md), [CODE_OF_COND
 
 The default `exportResults({ checkpoint })` and `export --checkpoint PATH` remain v1. Opt in with `exportResults({ checkpoint, format: 'v2' })` or `export --checkpoint PATH --format v2`. V2 projects stored fields, not new detail requests: missing names and coordinates are null with `not_present` field status. Candidate IDs themselves remain unverified, even when a separate explicitly fixture-verified canonical key was persisted to group occurrences; only verified keys are grouped. Each occurrence retains provenance. Its detail state reflects associated persisted work, with pending mapped to `not_attempted` and legacy absent metadata to `unknown`; it does not prove an occurrence was requested. Discovery gaps can include detail-origin blockers also in detail gaps. Coverage remains non-exhaustive and returned places are not strictly filtered to the requested area.
 
-### Synthetic standalone location selection
+### Standalone location selection
 
-Before a coordinate-start crawl, the standalone location command can exercise
-selection with a **local synthetic fixture**, not a live geocoder:
+Before a coordinate-start crawl, exercise selection with a **local synthetic fixture**:
 
 ```sh
 mise exec -- node dist/cli.js location --text 'Synthetic place' --country GB --fixture synthetic-locations.json
@@ -71,5 +70,14 @@ The JSON fixture has this shape: `{"attribution":"Synthetic source","candidates"
 The command displays the country, attribution and candidates on a terminal;
 select a numbered candidate and explicitly answer `yes` to confirm, or cancel.
 It outputs the confirmed country and coordinates as JSON for manual use in a
-separately attested coordinate-start crawl. Selection is not consent to a
-provider call. No live location resolver is provided by this command.
+separately attested coordinate-start crawl. Selection is not consent to a crawler provider call.
+
+For an operator-authorized Nominatim-compatible Search service, configure all three options explicitly; there is no default endpoint, cache directory, or identifying User-Agent:
+
+```sh
+mise exec -- node dist/cli.js location --text 'Example' --country GB --endpoint 'https://your-authorized-service.example/search' --cache ./location-cache --user-agent 'YourApplication/1.0 (operator contact)'
+```
+
+Do not combine these options with `--fixture`. The endpoint is the complete Search URL without query parameters or credentials. The operator must identify the application and contact in the User-Agent, ensure authorization, review and comply with the chosen service's current usage policy, rate limits, attribution and data obligations, and avoid sensitive queries. In particular, the public Nominatim service has its own limits and restrictions; this local cache and spacing cannot coordinate other applications or machines and do not establish policy compliance. No lookup is made until this command is run. Search results and attribution appear for both fresh and cached results; selection requires terminal confirmation. This command does not start a crawl or use crawler credentials or checkpoints.
+
+The cache directory contains location queries/results and coordination metadata; protect it as potentially sensitive. To delete cached data, stop all location commands using that directory and delete the directory. Locks are not automatically broken after a crash. For a held `<hash>.lock` cache lock or `attempt.lock`, first stop and verify termination of **all** processes using the shared directory and ensure no request remains in flight; only then remove the stale lock directory. Preserve `attempt-time.json` when recovering a lock so request spacing remains enforced. Never remove a lock while its owner may still run, and do not share a cache directory across hosts where process termination cannot be verified.
