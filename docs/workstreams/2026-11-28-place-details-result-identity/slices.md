@@ -83,16 +83,17 @@ Run applicable project checks at workstream end and record exact command/results
 - [ ] Characterize candidate name/place_id/optional coordinate, valid mixed with invalid candidates, duplicate raw occurrences, distinct source provenance, verified versus unverified identities, pending detail work, and preexisting checkpoints with optional name or absent `detailWork`. A remains characterization-only unless a test demonstrates actual data loss; any proposed correction requires a failing test first and must not alter mapper acceptance or checkpoint version.
 - [ ] In the injected direct-provider tests, distinguish a response at its per-input cap (retained valid results, gap and expansion suppressed) from a local work-limit stop. Assert existing behavior without treating a cap and local stop as equivalent or implying a raised limit reopens a partial cell.
 - [ ] Use on-disk SQLite and fresh-process/reopen/resume acceptance where current harness supports it. Assert accepted occurrences, names, provenance and gaps survive read-only reopen and supported resume without replaying completed work; do not export/status-mutate or reopen a partial cell merely because a limit is raised.
-- [ ] Run focused tests, build and `mise exec -- npm run check`; record exact commands/results. Make no behavior edits absent a demonstrated loss and approved scope. Commit only slice changes after verification.
+- [ ] Run `mise exec -- npm run build` before focused tests so dist-importing tests use fresh output; run the stated focused tests, then run `mise exec -- npm run build` immediately before `mise exec -- npm run check` because `check` runs tests before its build step. Record exact commands/results. Make no behavior edits absent a demonstrated loss and approved scope. Commit only slice changes after verification.
 
 #### Watch out
 - A provider `place_id` is an unverified candidate ID. Do not elevate it to canonical identity because repeated values match.
 - Missing coordinates remain retained/unverified by existing rules, not a failed crawl. Details do not fill coverage gaps.
 - Pending detail is not a detail failure nor proof fields are absent. Preserve every source occurrence.
 
-#### Verification
+#### Verification (run in this order)
 - `mise exec -- npm run build`
 - `mise exec -- node --test test/synthetic-bright-data-operator.test.mjs test/durable-bright-data-partial.test.mjs test/bright-data-mapping.test.mjs test/traversal.test.mjs test/durable-identity.test.mjs test/durable-discovery.test.mjs test/operator-inspection.test.mjs test/operator-acceptance.test.mjs`
+- `mise exec -- npm run build` (fresh dist immediately before full check; `check` runs tests before build)
 - `mise exec -- npm run check`
 - Assert passing exact v1 library document/return type and CLI JSON bytes as the pre-change baseline; direct name persistence; exact occurrence/provenance; verified-only grouping; invalid/partial/capped gap distinction; cap versus local stop; reopen/resume without replay; unchanged mapper acceptance and no live demonstration.
 
@@ -105,26 +106,27 @@ A passing exact v1 baseline and characterized direct-discovery evidence across p
 
 #### Tasks
 
-**`src/operator.ts` or a focused internal projection module; focused internal projection tests in `test/`**
-- [ ] Add a private-to-package projection seam that accepts/uses the already validated read-only checkpoint snapshot and returns the exact v2 document. It may be imported by focused source-level tests, but must not be exported through the package public entry point, `exportResults`, or CLI in this slice. Keep v1 path untouched.
-- [ ] First add meaningful RED tests for the new internal projection only. Establish field names, null/present semantics, classification, provenance, identity placement, work association, legacy handling, gap behavior and exact ordering from the contract above. Do not claim RED for unchanged v1 compatibility; use Slice A's passing exact baseline.
+**`src/operator-v2-projection-internal.ts`; `test/operator-v2-projection.test.mjs` importing `../dist/operator-v2-projection-internal.js`**
+- [ ] Create the internal source module and callable projection seam first, without exporting it from `src/index.ts`, `exportResults`, or CLI. Add the concrete test entry point `test/operator-v2-projection.test.mjs` importing the compiled internal module. This is a package-internal seam for focused tests only; keep the v1 path untouched.
+- [ ] Before the initial RED, run `mise exec -- npm run build` so the test imports a fresh `dist/operator-v2-projection-internal.js`. Then run `mise exec -- node --test test/operator-v2-projection.test.mjs`. Require the failures to be assertion failures for intended missing v2 projection behavior; missing module/import, test-loader, or stale-dist failures are setup errors, not RED evidence, and must be fixed before interpreting test results.
+- [ ] Establish meaningful RED assertions for new internal projection behavior only: field names, null/present semantics, classification, provenance, identity placement, work association, legacy handling, gap behavior and exact ordering from the contract above. Do not claim RED for unchanged v1 compatibility; use Slice A's passing exact baseline.
 - [ ] Test name and candidate ID from direct synthetic observations, optional/null coordinate (`fieldStatus.coordinate:'not_present'`), name null (`fieldStatus.name:'not_present'`), and available values marked `present`. Field status describes checkpoint content, never provider-side absence.
 - [ ] For every occurrence, associate `detailState` through its `observationId` in the unique `DetailWork.observationIds` membership and project that work's status only. Test all six persisted work statuses; assert `pending` → `not_attempted`, and pass `reserved`, `dispatched`, `uncertain`, `completed`, `skipped` unchanged. Prohibit joins by candidate ID/canonical key/gaps/pendingDetails/attempt.
 - [ ] Test a verified group sharing one work item, including an observation appended to existing work: each member projects the shared persisted status, but `completed` must not claim each occurrence individually received a detail request. Test duplicate unverified candidate IDs remain separate and get status by their distinct observation IDs.
 - [ ] Test legacy checkpoint with `detailWork` absent → `unknown`; when `detailWork` is present, missing or duplicate observation membership must fail closed through existing validator rather than become `unknown`. Do not weaken validator or synthesize association. Verify read-only projection and corrupt/unsupported checkpoint rejection.
 - [ ] Preserve exact `OperatorStatus`, including all traversal gaps in `discoveryGaps` and possible overlap between a `detail-origin:*` blocker there and its related `detailGaps` entry. Test inherited overlap; do not promise disjoint arrays or filter blockers.
 - [ ] Test exact v2 ordering: verified groups lexically by canonical key; group occurrences lexically by observation ID; unverified occurrences lexically by observation ID. Test repeated calls produce the same full document.
-- [ ] Keep the projection internal; finish focused tests, `mise exec -- npm run check`, and `git diff --check`; record commands/results and commit only slice changes after verification. No API/CLI exposure or operator-doc claim for v2 yet.
+- [ ] Implement the complete projection until the focused assertions pass. Run a fresh `mise exec -- npm run build` after implementation and before the focused test command; then run `mise exec -- node --test test/operator-v2-projection.test.mjs`. Immediately before full validation, run `mise exec -- npm run build` again, then `mise exec -- npm run check` (its test phase precedes build) and `git diff --check`; record exact commands/results and commit only slice changes after verification. No API/CLI exposure or operator-doc claim for v2 yet.
 
 #### Watch out
 - No public or CLI v2 switch until Slice C; a partial projection is not an accepted user-facing feature.
 - Old checkpoints without `detailWork` yield `unknown`, but present invalid membership is corruption and must fail closed.
 - Shared verified detail work status is work-level, not per-occurrence evidence of requests.
 
-#### Verification
-- Focused internal v2 projection tests (run by the repository test runner)
-- `mise exec -- npm run check`
-- `git diff --check`
+#### Verification (run in this order)
+- `mise exec -- npm run build` before the initial RED; then `mise exec -- node --test test/operator-v2-projection.test.mjs`. Confirm RED consists of projection assertions, not a missing `dist` module or loader/setup error.
+- After implementation: `mise exec -- npm run build`, then `mise exec -- node --test test/operator-v2-projection.test.mjs`.
+- Fresh full validation: `mise exec -- npm run build`, `mise exec -- npm run check`, `git diff --check` (build first because `check` tests before rebuilding).
 - Assert the exact v2 fields/statuses/joins/order/gap overlap, old absent metadata, fail-closed malformed membership, read-only behavior, and that the projection is absent from public exports/CLI while v1 baseline remains untouched.
 
 #### Carry-forward
@@ -140,11 +142,11 @@ A complete, tested internal projection with explicit schema, ordering and status
 - [ ] Add the library option `exportResults({checkpoint, format:'v2'})` and CLI `export --checkpoint PATH --format v2`; keep no-option library/CLI exact v1. Unknown/repeated format flags fail without checkpoint mutation. This is the first public/CLI exposure of v2, only after B's projection is complete.
 - [ ] Assert passing exact v1 baseline from A: identical full library document including return type and identical CLI JSON bytes for the same stable checkpoint; v1 shape/default remains exact. RED is for new v2 selection, projection integration and connected behavior only. Capture baseline before edits and report preexisting failures separately.
 - [ ] Exercise fixture-backed fresh-process CLI status/export and format selection plus connected synthetic operator acceptance. Include injected synthetic Bright Data inline/retrieved results and durable partial behavior, then checkpoint close/reopen/resume. Assert accepted occurrences, names, provenance and gaps persist and completed work is not replayed; cap-limited cell remains partial as before and is not reopened just by raising limits.
-- [ ] Include response at per-input cap vs local work-limit stop, valid plus invalid/capped results, distinct source cells, duplicate unverified candidate IDs, explicit verified fixture identity group, missing coordinate, all detail states from B, and legacy checkpoint. Assert each occurrence remains, status is linked by observation ID, discovery/detail-origin gap overlap matches existing `OperatorStatus`, and no provider detail request occurs.
-- [ ] Assert both formats are read-only and do not migrate checkpoints. Compare v2 projection through public opt-in byte/structural result to B's internal contract; preserve old-checkpoint absent detail metadata as `unknown` and present malformed association as fail-closed.
+- [ ] Exercise representative public equivalence to B's internal contract, not its full projection matrix: one verified group and one unverified occurrence with representative persisted detail states, plus public legacy-absent-metadata (`unknown`) and present malformed-association fail-closed cases. B remains authoritative for all projection fields, statuses, ordering, membership and overlap tests; do not duplicate its full matrix in C.
+- [ ] Test CLI and library format selection/rejection, exact v1 compatibility, and connected recovery: response at per-input cap versus local work-limit stop, mixed valid/invalid partial results, durable close/reopen/resume without replaying completed work, no raised-limit reopening of a partial cell, read-only behavior, and no provider detail request. Verify representative public v2 output matches B's internal projection for the same checkpoint.
 - [ ] Update `README.md` and `docs/happy-path.md` with exact default/opt-in usage, v1 compatibility, stored-field semantics, unverified candidate IDs, explicit identity grouping limits, detail-state mapping, legacy unknown state, inherited gap overlap and non-exhaustive coverage. Do not imply details run or add phone/address promises.
 - [ ] Reassess `docs/milestones/03-provider-integrations.md` Workstream 2 framing so this synthetic output work is not described as detail execution. Keep future detail request admission/recovery separate from response attribution/export; state no live demonstration in acceptance. Before any later live demonstration reassess GitHub #4 and #5 and applicable contract, rights and pricing evidence.
-- [ ] Run focused checks and full `mise exec -- npm run check`, `git diff --check`, and final docs consistency review; record actual results. Commit only slice changes after required checks pass. No live/provider actions.
+- [ ] Run `mise exec -- npm run build` before dist-importing focused tests. Before full `mise exec -- npm run check`, run `mise exec -- npm run build` again because `check` runs tests before build; then run `git diff --check` and final docs consistency review. Record actual results. Commit only slice changes after required checks pass. No live/provider actions.
 
 #### Watch out
 - V2 is additive output, not a provider contract or checkpoint schema migration.
@@ -156,6 +158,7 @@ A complete, tested internal projection with explicit schema, ordering and status
 #### Verification
 - `mise exec -- npm run build`
 - `mise exec -- node --test test/operator-inspection.test.mjs test/operator-acceptance.test.mjs test/operator-cli.test.mjs test/synthetic-bright-data-operator.test.mjs test/durable-bright-data-partial.test.mjs test/bright-data-mapping.test.mjs test/durable-identity.test.mjs`
+- `mise exec -- npm run build` (fresh dist immediately before full check; `check` runs tests before build)
 - `mise exec -- npm run check`
 - `git diff --check`
 - Assert exact v1 library/CLI baseline/default, explicit v2-only opt-in and parser rejection; deterministic fresh-process partial/recovery export; verified fixture grouping with complete provenance; repeated unverified occurrences not grouped; observationId detail association/status mapping; distinct stored-field status/classification with inherited gap overlap; read-only old-checkpoint reopen/resume without replay; no provider detail request or live demonstration.
