@@ -72,3 +72,29 @@ test('actual CLI resumes a bounded known-ID stop without resubmitting', () => {
   assert.deepEqual(requests.map(r=>[r.method,new URL(r.url).pathname]),[['POST','/datasets/v3/scrape'],['GET','/datasets/v3/progress/synthetic-id'],['GET','/datasets/v3/progress/synthetic-id'],['GET','/datasets/v3/snapshot/synthetic-id']]);
  } finally {rmSync(dir,{recursive:true,force:true});}
 });
+
+test('provider confirmation gates credential reads, checkpoint and dispatch', () => {
+ const dir=mkdtempSync(join(tmpdir(),'provider-cli-gates-'));
+ try {
+  const checkpoint=join(dir,'checkpoint'), evidence=join(dir,'evidence'), calls=join(dir,'calls'), reads=join(dir,'reads');
+  const invocation={operation:'start',query:{keyword:'pizza',country:'GB'},geometry:{seed:{latitude:1,longitude:2},spacing:500,area:{type:'radius',radius:1000}},limits:{cells:4,submissions:3,activeTime:10000},account:'synthetic',dataset:'gd_m8ebnr0q2qlklc02fz',zoom:15,limitPerInput:20};
+  const doc={reference:'synthetic',date:'2020-01-01',validThrough:'2099-01-01',scope:'synthetic'};
+  const technical=method=>({...doc,attestation:{method,invocation}}), commercial=()=>({...doc,attestation:{invocation,collection:true,storage:true,export:true}});
+  writeFileSync(evidence,JSON.stringify({evidence:{submission:technical('submission'),observation:technical('observation'),retrieval:technical('retrieval'),pricing:commercial(),rights:commercial()},estimate:{currency:'USD',amount:5,assumptions:'synthetic',uncertainty:'synthetic',pricingReference:'synthetic'}}));
+  const args=['dist/cli.js','start','--provider','bright-data','--checkpoint',checkpoint,'--evidence',evidence,'--account','synthetic','--dataset',invocation.dataset,'--zoom','15','--limit-per-input','20','--keyword','pizza','--country','GB','--lat','1','--lon','2','--spacing-m','500','--radius-m','1000','--cells','4','--submissions','3','--active-ms','10000'];
+  const env={...process.env,BRIGHT_DATA_API_KEY:'synthetic-key',SYNTHETIC_CALLS:calls,SYNTHETIC_CREDENTIAL_READS:reads,NODE_OPTIONS:'--import ./test/helpers/provider-fetch-preload.mjs --import ./test/helpers/credential-read-preload.mjs'};
+  const declined=spawnSync('/usr/bin/python3',['test/helpers/provider-cli-pty.py','no',process.execPath,...args],{encoding:'utf8',timeout:15000,env});
+  assert.equal(declined.status,0,declined.stderr+declined.stdout);
+  const prompt=declined.stdout.indexOf('Confirm the displayed seed and provider action');
+  assert.ok(prompt>declined.stdout.indexOf('"country": "GB"'));
+  assert.ok(prompt>declined.stdout.indexOf('"latitude": 1'));
+  assert.match(declined.stdout,/declined or unavailable/);
+  assert.equal(existsSync(reads),false); assert.equal(existsSync(checkpoint),false); assert.equal(existsSync(calls),false);
+  const unavailable=spawnSync(process.execPath,args,{encoding:'utf8',timeout:15000,env,input:'yes\n'});
+  assert.equal(unavailable.status,1); assert.match(unavailable.stderr,/declined or unavailable/);
+  assert.equal(existsSync(reads),false); assert.equal(existsSync(checkpoint),false); assert.equal(existsSync(calls),false);
+  const accepted=spawnSync('/usr/bin/python3',['test/helpers/provider-cli-pty.py','yes-success',process.execPath,...args],{encoding:'utf8',timeout:15000,env});
+  assert.equal(accepted.status,0,accepted.stderr+accepted.stdout);
+  assert.equal(readFileSync(reads,'utf8'),'read\n'); assert.ok(existsSync(checkpoint)); assert.ok(existsSync(calls));
+ } finally {rmSync(dir,{recursive:true,force:true});}
+});
